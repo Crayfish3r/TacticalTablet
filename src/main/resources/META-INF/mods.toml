@@ -1,0 +1,24 @@
+modLoader="javafml"
+loaderVersion="[47,)"
+license="All rights reserved"
+
+[[mods]]
+modId="tacticaltablet"
+version="0.1"
+displayName="Тактический планшет"
+authors="makar"
+description="Добавляет тактический планшет, через который игроки выбирают наборы в интерфейсе."
+
+[[dependencies.tacticaltablet]]
+    modId="forge"
+    mandatory=true
+    versionRange="[47,)"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.tacticaltablet]]
+    modId="minecraft"
+    mandatory=true
+    versionRange="[1.20.1,1.21)"
+    ordering="NONE"
+    side="BOTH"

@@ -1,0 +1,184 @@
+{
+  "sets": [
+    {
+      "name": "zemlekop",
+      "weight": 5,
+      "items": [
+        {
+          "slot": 0,
+          "item": "superbwarfare:edd",
+          "count": 4
+        },
+        {
+          "slot": 1,
+          "item": "superbwarfare:thermal_imaging_goggles",
+          "count": 1
+        },
+        {
+          "slot": 2,
+          "item": "superbwarfare:military_shovel",
+          "nbt": "{Damage:0}",
+          "count": 1
+        },
+        {
+          "slot": 3,
+          "item": "fracturepoint:kevlar_plate_level_iiia",
+          "nbt": "{Damage:0}",
+          "count": 2
+        },
+        {
+          "slot": 4,
+          "item": "minecraft:iron_pickaxe",
+          "nbt": "{Damage:0}",
+          "count": 1
+        },
+        {
+          "slot": 5,
+          "item": "superbwarfare:detonator",
+          "count": 1
+        },
+        {
+          "slot": 6,
+          "item": "superbwarfare:c4_bomb",
+          "nbt": "{Control:1b}",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "name": "thermal",
+      "weight": 5,
+      "items": [
+        {
+          "slot": 0,
+          "item": "thermal_vision:thermal_goggles",
+          "nbt": "{Damage:0}",
+          "count": 1
+        },
+        {
+          "slot": 1,
+          "item": "thermal_vision:thermal_battery",
+          "count": 2
+        },
+        {
+          "slot": 2,
+          "item": "superbwarfare:medical_kit",
+          "count": 4
+        },
+        {
+          "slot": 3,
+          "item": "fracturepoint:kevlar_plate_level_iiia",
+          "nbt": "{Damage:0}",
+          "count": 2
+        }
+      ]
+    },
+    {
+      "name": "logist",
+      "weight": 5,
+      "items": [
+        {
+          "slot": 0,
+          "item": "superbwarfare:medical_kit",
+          "count": 8
+        },
+        {
+          "slot": 1,
+          "item": "superbwarfare:lunge_mine",
+          "count": 1
+        },
+        {
+          "slot": 2,
+          "item": "minecraft:scaffolding",
+          "count": 32
+        },
+        {
+          "slot": 3,
+          "item": "minecraft:golden_carrot",
+          "count": 16
+        },
+        {
+          "slot": 4,
+          "item": "minecraft:leather_boots",
+          "nbt": "{Damage:0,Enchantments:[{id:\"minecraft:feather_falling\",lvl:4s}],RepairCost:1,display:{color:3159839}}",
+          "count": 1
+        },
+        {
+          "slot": 5,
+          "item": "superbwarfare:parachute",
+          "nbt": "{Damage:0}",
+          "count": 1
+        },
+        {
+          "slot": 6,
+          "item": "superbwarfare:jump_pad",
+          "count": 3
+        }
+      ]
+    },
+    {
+      "name": "rambo",
+      "weight": 5,
+      "items": [
+        {
+          "slot": 0,
+          "item": "tacz:modern_kinetic_gun",
+          "nbt": "{AttachmentGRIP:{Count:1b,id:\"tacz:attachment\",tag:{AttachmentId:\"tacz:grip_se_5\"}},AttachmentMUZZLE:{Count:1b,id:\"tacz:attachment\",tag:{AttachmentId:\"tacz:muzzle_brake_trex\"}},AttachmentSCOPE:{Count:1b,id:\"tacz:attachment\",tag:{AttachmentId:\"tacz:scope_elcan_4x\"}},AttachmentSTOCK:{Count:1b,id:\"tacz:attachment\",tag:{AttachmentId:\"tacz:stock_tactical_ar\"}},GunCurrentAmmoCount:75,GunFireMode:\"AUTO\",GunId:\"tacz:fn_evolys\",HasBulletInBarrel:1b}",
+          "count": 1
+        },
+        {
+          "slot": 1,
+          "item": "tacz:ammo",
+          "nbt": "{AmmoId:\"tacz:308\"}",
+          "count": 48
+        },
+        {
+          "slot": 2,
+          "item": "tacz:ammo",
+          "nbt": "{AmmoId:\"tacz:308\"}",
+          "count": 48
+        },
+        {
+          "slot": 3,
+          "item": "tacz:ammo",
+          "nbt": "{AmmoId:\"tacz:308\"}",
+          "count": 48
+        },
+        {
+          "slot": 4,
+          "item": "tacz:ammo",
+          "nbt": "{AmmoId:\"tacz:308\"}",
+          "count": 48
+        },
+        {
+          "slot": 5,
+          "item": "superbwarfare:medical_kit",
+          "count": 4
+        }
+      ]
+    },
+    {
+      "name": "voroshilov_marksman",
+      "weight": 5,
+      "items": [
+        {
+          "slot": 0,
+          "item": "tacz:modern_kinetic_gun",
+          "nbt": "{AttachmentEXTENDED_MAG:{Count:1b,id:\"tacz:attachment\",tag:{AttachmentId:\"tacz:ammo_mod_he\"}},AttachmentMUZZLE:{Count:1b,id:\"tacz:attachment\",tag:{AttachmentId:\"tacz:muzzle_silencer_vulture\"}},AttachmentSCOPE:{Count:1b,id:\"tacz:attachment\",tag:{AttachmentId:\"tacz:scope_standard_8x\",ZoomNumber:1}},GunCurrentAmmoCount:5,GunFireMode:\"SEMI\",GunId:\"tacz:m95\",HasBulletInBarrel:1b}",
+          "count": 1
+        },
+        {
+          "slot": 1,
+          "item": "tacz:ammo",
+          "nbt": "{AmmoId:\"tacz:50bmg\"}",
+          "count": 30
+        },
+        {
+          "slot": 2,
+          "item": "superbwarfare:medical_kit",
+          "count": 8
+        }
+      ]
+    }
+  ]
+}

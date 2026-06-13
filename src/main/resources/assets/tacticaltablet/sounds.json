@@ -1,0 +1,28 @@
+{
+  "click": {
+    "sounds": [
+      {
+        "name": "tacticaltablet:click",
+        "stream": false
+      }
+    ]
+  },
+
+  "hover": {
+    "sounds": [
+      {
+        "name": "tacticaltablet:hover",
+        "stream": false
+      }
+    ]
+  },
+
+  "teleport": {
+    "sounds": [
+      {
+        "name": "tacticaltablet:teleport",
+        "stream": false
+      }
+    ]
+  }
+}
