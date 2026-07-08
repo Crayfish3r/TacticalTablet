@@ -28,6 +28,7 @@ public final class DiscordConfig {
     private static Path configPath;
 
     private String webhookUrl = "";
+    private String clanWarWebhookUrl = "";
     private String serverName = "DeluxeWarfare";
     private String playersDirectory = "";
     private int dailyHour = 20;
@@ -90,6 +91,10 @@ public final class DiscordConfig {
         return webhookUrl == null ? "" : webhookUrl.trim();
     }
 
+    public String getClanWarWebhookUrl() {
+        return clanWarWebhookUrl == null ? "" : clanWarWebhookUrl.trim();
+    }
+
     public String getServerName() {
         String value = serverName == null ? "" : serverName.trim();
         return value.isBlank() ? "DeluxeWarfare" : value;
@@ -121,11 +126,20 @@ public final class DiscordConfig {
         return !getWebhookUrl().isBlank();
     }
 
+    public boolean hasClanWarWebhook() {
+        return !getClanWarWebhookUrl().isBlank();
+    }
+
     private boolean normalize(Path serverRoot) {
         boolean changed = false;
 
         if (webhookUrl == null) {
             webhookUrl = "";
+            changed = true;
+        }
+
+        if (clanWarWebhookUrl == null) {
+            clanWarWebhookUrl = "";
             changed = true;
         }
 

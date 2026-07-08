@@ -1,0 +1,9 @@
+{
+  "item.tacticaltablet.tactical_tablet": "Тактический планшет",
+  "item.tacticaltablet.contract_tracker": "Контрактный трекер",
+  "block.tacticaltablet.airdrop_crate": "Ящик снабжения",
+  "container.tacticaltablet.airdrop_crate": "Ящик снабжения",
+  "key.categories.tacticaltablet": "Tactical Tablet",
+  "key.tacticaltablet.spectator_next": "Следующий наблюдаемый игрок",
+  "key.tacticaltablet.spectator_previous": "Предыдущий наблюдаемый игрок"
+}

@@ -1,4 +1,9 @@
 {
-  "item.tacticaltablet.tactical_tablet": "Тактический планшет",
-  "item.tacticaltablet.contract_tracker": "Контрактный трекер"
+  "item.tacticaltablet.tactical_tablet": "Tactical Tablet",
+  "item.tacticaltablet.contract_tracker": "Contract Tracker",
+  "block.tacticaltablet.airdrop_crate": "AirDrop Crate",
+  "container.tacticaltablet.airdrop_crate": "AirDrop Crate",
+  "key.categories.tacticaltablet": "Tactical Tablet",
+  "key.tacticaltablet.spectator_next": "Next spectated player",
+  "key.tacticaltablet.spectator_previous": "Previous spectated player"
 }

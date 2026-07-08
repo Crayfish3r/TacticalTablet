@@ -43,7 +43,7 @@ public class TeamSelectScreen extends Screen {
         int startX = x0 + 18;
         int startY = y0 + 48;
 
-        TeamId[] teams = TeamId.values();
+        TeamId[] teams = TeamId.standardValues();
         for (int i = 0; i < teams.length; i++) {
             int x = startX + (i % 2) * (TEAM_CARD_W + TEAM_CARD_GAP_X);
             int y = startY + (i / 2) * (TEAM_CARD_H + TEAM_CARD_GAP_Y);

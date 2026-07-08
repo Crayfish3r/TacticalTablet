@@ -1,0 +1,13 @@
+{
+  "loader": "forge:obj",
+  "model": "tacticaltablet:models/block/airdrop_crate_open.obj",
+  "flip_v": true,
+  "automatic_culling": false,
+  "shade_quads": true,
+  "transform": {
+    "translation": [0.5, 0.0, 0.5]
+  },
+  "textures": {
+    "particle": "tacticaltablet:block/airdrop_crate"
+  }
+}

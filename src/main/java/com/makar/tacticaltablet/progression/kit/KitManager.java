@@ -24,6 +24,10 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class KitManager {
 
+    private static final String KIT_DIRECTORY = "kits";
+    private static final String ALT_KIT_DIRECTORY = "kits_alt";
+    private static final String ALT_SUFFIX = "_alt";
+
     private static final Set<String> LEVEL_KITS = Set.of(
             "stormtrooper",
             "sniper",
@@ -42,11 +46,33 @@ public class KitManager {
         if (player == null || kitName == null || kitName.isBlank()) return false;
 
         String finalKitName = getLeveledKitName(player, kitName);
-        List<ItemStack> items = loadKit(finalKitName);
+        String loadedKitName = finalKitName;
+        String loadedDirectory = KIT_DIRECTORY;
+        List<ItemStack> items = List.of();
+
+        if (KitRotationManager.isAltKitsActive()) {
+            String altKitName = finalKitName + ALT_SUFFIX;
+            if (kitFileExists(ALT_KIT_DIRECTORY, altKitName)) {
+                items = loadKit(ALT_KIT_DIRECTORY, altKitName, true);
+                if (!items.isEmpty()) {
+                    loadedKitName = altKitName;
+                    loadedDirectory = ALT_KIT_DIRECTORY;
+                } else {
+                    System.out.println("[TacticalTablet] Alt kit not found or empty: " + altKitName
+                            + ", fallback to regular: " + finalKitName);
+                }
+            }
+        }
+
+        if (items.isEmpty()) {
+            items = loadKit(finalKitName);
+        }
 
         if (items.isEmpty() && !finalKitName.equals(kitName)) {
             System.out.println("[TacticalTablet] Leveled kit not found or empty: " + finalKitName + ", fallback to: " + kitName);
             finalKitName = kitName;
+            loadedKitName = kitName;
+            loadedDirectory = KIT_DIRECTORY;
             items = loadKit(kitName);
         }
 
@@ -58,7 +84,7 @@ public class KitManager {
         System.out.println("[TacticalTablet] Giving kit: player=" + player.getScoreboardName()
                 + ", class=" + kitName
                 + ", level=" + ClassXPManager.getLevel(player, kitName)
-                + ", file=" + finalKitName + ".json");
+                + ", file=" + loadedDirectory + "/" + loadedKitName + ".json");
 
         for (ItemStack stack : items) {
             player.getInventory().add(stack.copy());
@@ -88,34 +114,48 @@ public class KitManager {
     }
 
     private static List<ItemStack> loadKit(String name) {
+        return loadKit(KIT_DIRECTORY, name, true);
+    }
+
+    private static List<ItemStack> loadKit(String directory, String name, boolean logMissing) {
         try {
             Path configPath = FMLPaths.GAMEDIR.get()
-                    .resolve("config/tacticaltablet/kits/" + name + ".json");
+                    .resolve("config/tacticaltablet/" + directory + "/" + name + ".json");
 
             File file = configPath.toFile();
+            String cacheKey = directory + "/" + name;
 
             if (!file.exists()) {
-                CACHE.remove(name);
-                System.out.println("[TacticalTablet] Kit file not found: " + file.getAbsolutePath());
+                CACHE.remove(cacheKey);
+                if (logMissing) {
+                    System.out.println("[TacticalTablet] Kit file not found: " + file.getAbsolutePath());
+                }
                 return List.of();
             }
 
             long lastModified = file.lastModified();
             long length = file.length();
-            CachedKit cached = CACHE.get(name);
+            CachedKit cached = CACHE.get(cacheKey);
 
             if (cached != null && cached.lastModified == lastModified && cached.length == length) {
                 return cached.items;
             }
 
             List<ItemStack> parsed = parseKitFile(file);
-            CACHE.put(name, new CachedKit(lastModified, length, parsed));
+            CACHE.put(cacheKey, new CachedKit(lastModified, length, parsed));
             return parsed;
         } catch (Exception e) {
-            System.out.println("[TacticalTablet] Failed to load kit: " + name);
+            System.out.println("[TacticalTablet] Failed to load kit: " + directory + "/" + name);
             e.printStackTrace();
             return List.of();
         }
+    }
+
+    private static boolean kitFileExists(String directory, String name) {
+        Path configPath = FMLPaths.GAMEDIR.get()
+                .resolve("config/tacticaltablet/" + directory + "/" + name + ".json");
+
+        return configPath.toFile().exists();
     }
 
     private static List<ItemStack> parseKitFile(File file) throws Exception {

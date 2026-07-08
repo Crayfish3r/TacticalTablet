@@ -22,9 +22,9 @@ public class DebugXPCommand {
                                     String clazz = StringArgumentType.getString(ctx, "class");
                                     int amount = IntegerArgumentType.getInteger(ctx, "amount");
 
-                                    ClassXPManager.addXP(player, clazz, amount);
+                                    int awarded = ClassXPManager.addXP(player, clazz, amount);
                                     ctx.getSource().sendSuccess(
-                                            () -> Component.literal("Добавлено " + amount + " опыта классу " + clazz),
+                                            () -> Component.literal("Добавлено " + awarded + " опыта классу " + clazz),
                                             false
                                     );
                                     return 1;

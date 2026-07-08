@@ -2,7 +2,9 @@ package com.makar.tacticaltablet.tablet.client;
 
 import com.makar.tacticaltablet.tablet.net.ContractSelectTargetPacket;
 import com.makar.tacticaltablet.tablet.net.ContractSelectionStatePacket;
+import com.makar.tacticaltablet.tablet.net.ContractTrackerStatePacket;
 import com.makar.tacticaltablet.tablet.net.PacketHandler;
+import com.makar.tacticaltablet.tablet.net.TrackerWatchPacket;
 import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -24,6 +26,7 @@ public class ContractTrackerScreen extends Screen {
 
     private int lastTargetCount = -1;
     private boolean lastSelectionMode;
+    private boolean watching;
 
     public ContractTrackerScreen() {
         super(Component.literal("Контрактный трекер"));
@@ -31,7 +34,14 @@ public class ContractTrackerScreen extends Screen {
 
     @Override
     protected void init() {
+        startWatching();
         rebuildSelectionButtons();
+    }
+
+    @Override
+    public void removed() {
+        stopWatching();
+        super.removed();
     }
 
     @Override
@@ -78,6 +88,26 @@ public class ContractTrackerScreen extends Screen {
                 && !ContractClientState.hasActiveContract();
     }
 
+    private void startWatching() {
+        if (watching) return;
+        watching = true;
+        if (canSendWatchPacket()) {
+            PacketHandler.sendToServer(new TrackerWatchPacket(true));
+        }
+    }
+
+    private void stopWatching() {
+        if (!watching) return;
+        watching = false;
+        if (canSendWatchPacket()) {
+            PacketHandler.sendToServer(new TrackerWatchPacket(false));
+        }
+    }
+
+    private boolean canSendWatchPacket() {
+        return Minecraft.getInstance().getConnection() != null;
+    }
+
     private void rebuildSelectionButtons() {
         this.clearWidgets();
         lastSelectionMode = isSelectionMode();
@@ -119,10 +149,16 @@ public class ContractTrackerScreen extends Screen {
         g.drawCenteredString(font, "Осталось: " + ContractClientState.getSelectionSecondsLeft() + "с",
                 x + UI_WIDTH / 2, y + 44, 0xFFAAAAAA);
 
+        long cooldown = ContractClientState.getCooldownLeftMs();
+        if (cooldown > 0L) {
+            g.drawCenteredString(font, "Трекер: " + formatTime(cooldown),
+                    x + UI_WIDTH / 2, y + 56, 0xFFFFD966);
+        }
+
         if (ContractClientState.getTargets().isEmpty()) {
             g.drawCenteredString(font, "Нет доступных целей.", x + UI_WIDTH / 2, y + 132, 0xFFAAAAAA);
         } else {
-            g.drawCenteredString(font, "Выбери одну цель", x + UI_WIDTH / 2, y + 60, 0xFFCCCCCC);
+            g.drawCenteredString(font, "Выбери одну цель", x + UI_WIDTH / 2, cooldown > 0L ? y + 68 : y + 60, 0xFFCCCCCC);
         }
     }
 
@@ -130,16 +166,25 @@ public class ContractTrackerScreen extends Screen {
         var font = Minecraft.getInstance().font;
         int left = x + 34;
         int top = y + 35;
-        int color = ContractClientState.difficultyColor(ContractClientState.getDifficulty());
+        List<ContractTrackerStatePacket.TargetEntry> targets = ContractClientState.getTrackerTargets();
 
-        g.drawCenteredString(font, "КОНТРАКТ", x + UI_WIDTH / 2, y + 18, 0xFF9FC36A);
-        g.drawString(font, "Цель: " + ContractClientState.getTargetName(), left, top, 0xFFE6E6E6, false);
-        g.drawString(font, "Класс: " + ContractClientState.getTargetClass(), left, top + 12, 0xFFAAAAAA, false);
-        g.drawString(font, "Карьера: " + ContractClientState.getTargetCareerPercent() + "%", left, top + 24, color, false);
-        g.drawString(font, "K/D: " + ContractClientState.getTargetKills() + "/" + ContractClientState.getTargetWins(),
-                left, top + 36, 0xFFAAAAAA, false);
-        g.drawString(font, "Награда: " + ContractClientState.getReward() + " монет", left, top + 48, 0xFFFFD966, false);
-        g.drawString(font, "Сигнал: " + ContractClientState.getSignalSecondsLeft() + "с", left, top + 60, 0xFF9FC36A, false);
+        g.drawCenteredString(font, "КОНТРАКТЫ КОМАНДЫ", x + UI_WIDTH / 2, y + 18, 0xFF9FC36A);
+
+        int visible = Math.min(4, targets.size());
+        for (int i = 0; i < visible; i++) {
+            ContractTrackerStatePacket.TargetEntry target = targets.get(i);
+            int color = ContractClientState.difficultyColor(target.difficulty());
+            String line = (i + 1) + ". " + target.name() + " | " + target.selectedClass()
+                    + " | " + target.reward();
+            g.drawString(font, font.plainSubstrByWidth(line, 152), left, top + i * 13, color, false);
+        }
+
+        if (targets.size() > visible) {
+            g.drawString(font, "+" + (targets.size() - visible) + " целей", left, top + visible * 13,
+                    0xFFAAAAAA, false);
+        }
+        g.drawString(font, "Сигнал: " + ContractClientState.getSignalSecondsLeft() + "с",
+                left, top + 60, 0xFF9FC36A, false);
     }
 
     private void drawContractMap(GuiGraphics g, int mapX, int mapY, int size) {
@@ -162,12 +207,18 @@ public class ContractTrackerScreen extends Screen {
         g.drawString(font, "W", mapX - 10, mapY + size / 2 - 4, 0xFFAAAAAA, false);
         g.drawString(font, "E", mapX + size + 4, mapY + size / 2 - 4, 0xFFAAAAAA, false);
 
-        int targetX = toMapX(mapX, size, ContractClientState.getTargetAreaX());
-        int targetY = toMapY(mapY, size, ContractClientState.getTargetAreaZ());
-        int targetRadius = Math.max(5, Math.min(18,
-                Math.round(ContractClientState.getTargetAreaRadius() / (ContractClientState.getZoneRadius() * 2.0F) * size)));
-        drawFilledCircle(g, targetX, targetY, targetRadius, 0x66FF2222);
-        drawCircleOutline(g, targetX, targetY, targetRadius, 0xAAFF5555);
+        int targetIndex = 0;
+        for (ContractTrackerStatePacket.TargetEntry target : ContractClientState.getTrackerTargets()) {
+            int targetX = toMapX(mapX, size, target.areaX());
+            int targetY = toMapY(mapY, size, target.areaZ());
+            int targetRadius = Math.max(5, Math.min(18,
+                    Math.round(target.areaRadius() / (ContractClientState.getZoneRadius() * 2.0F) * size)));
+            int fillColor = targetIndex % 2 == 0 ? 0x66FF2222 : 0x66FFD21F;
+            int outlineColor = targetIndex % 2 == 0 ? 0xAAFF5555 : 0xAAFFFF55;
+            drawFilledCircle(g, targetX, targetY, targetRadius, fillColor);
+            drawCircleOutline(g, targetX, targetY, targetRadius, outlineColor);
+            targetIndex++;
+        }
 
         int playerX = toMapX(mapX, size, ContractClientState.getPlayerX());
         int playerY = toMapY(mapY, size, ContractClientState.getPlayerZ());
@@ -211,6 +262,13 @@ public class ContractTrackerScreen extends Screen {
             int y = cy + (int) Math.round(Math.sin(rad) * r);
             g.fill(x, y, x + 1, y + 1, color);
         }
+    }
+
+    private String formatTime(long ms) {
+        long totalSec = Math.max(0L, (ms + 999L) / 1000L);
+        long m = totalSec / 60L;
+        long s = totalSec % 60L;
+        return String.format("%02d:%02d", m, s);
     }
 
     private static class TrackerTargetButton extends Button {

@@ -1,7 +1,9 @@
 package com.makar.tacticaltablet.progression;
 
+import com.makar.tacticaltablet.clan.ClanManager;
 import com.makar.tacticaltablet.game.GameStateManager;
 import com.makar.tacticaltablet.game.MatchMode;
+import com.makar.tacticaltablet.game.MapSetManager;
 import com.makar.tacticaltablet.game.contract.ContractManager;
 import com.makar.tacticaltablet.game.lives.LivesManager;
 import com.makar.tacticaltablet.game.respawn.RtpTimerManager;
@@ -38,7 +40,8 @@ public class ClassXPManager {
             "blackops",
             "cowboy",
             "solider",
-            "rebel"
+            "rebel",
+            "saboteur"
     };
 
     private static final String[] ALL_CLASSES = new String[]{
@@ -55,7 +58,8 @@ public class ClassXPManager {
             "blackops",
             "cowboy",
             "solider",
-            "rebel"
+            "rebel",
+            "saboteur"
     };
 
     public static String[] getClasses() {
@@ -91,22 +95,37 @@ public class ClassXPManager {
         return PlayerProgressManager.getLevel(player, clazz);
     }
 
-    public static void addXP(ServerPlayer player, String clazz, int amount) {
-        if (player == null || clazz == null || clazz.isBlank() || amount <= 0) return;
-        if (PlayerProgressManager.isShopClass(clazz)) return;
+    public static int addXP(ServerPlayer player, String clazz, int amount) {
+        if (player == null || clazz == null || clazz.isBlank() || amount <= 0) return 0;
+        if (PlayerProgressManager.isShopClass(clazz)) return 0;
 
-        PlayerProgressManager.addXP(player, clazz, amount);
+        int awarded = PlayerProgressManager.addXP(player, clazz, applyBoost(player, amount));
         sync(player);
+        return awarded;
     }
 
     public static void addXPToAllClasses(ServerPlayer player, int amount) {
         if (player == null || amount <= 0) return;
 
         for (String clazz : STANDARD_CLASSES) {
-            PlayerProgressManager.addXP(player, clazz, amount);
+            PlayerProgressManager.addXP(player, clazz, applyBoost(player, amount));
         }
 
         sync(player);
+    }
+
+    public static boolean isXpBoostEnabled(ServerPlayer player) {
+        return PlayerProgressManager.isXpBoostEnabled(player);
+    }
+
+    public static void setXpBoostEnabled(ServerPlayer player, boolean enabled) {
+        PlayerProgressManager.setXpBoostEnabled(player, enabled);
+        PlayerProgressManager.savePlayer(player);
+    }
+
+    private static int applyBoost(ServerPlayer player, int amount) {
+        if (!isXpBoostEnabled(player)) return amount;
+        return amount > Integer.MAX_VALUE / 2 ? Integer.MAX_VALUE : amount * 2;
     }
 
     public static void sync(ServerPlayer player) {
@@ -114,6 +133,7 @@ public class ClassXPManager {
 
         InventoryManager.updateTabletModels(player);
         PacketHandler.sendToPlayer(player, createStatePacket(player));
+        ClanManager.sync(player);
         ContractManager.syncSelection(player);
     }
 
@@ -169,7 +189,9 @@ public class ClassXPManager {
                 TeamMatchManager.getSecondsLeft(),
                 teamSnapshot.maxSlots(),
                 teamSnapshot.selectedTeam(),
-                teamSnapshot.slots()
+                teamSnapshot.slots(),
+                MapSetManager.isCompetitiveSet(),
+                MapSetManager.isClanWarSet()
         );
     }
 
@@ -211,4 +233,3 @@ public class ClassXPManager {
         };
     }
 }
-

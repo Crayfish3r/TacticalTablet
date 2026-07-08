@@ -30,6 +30,7 @@ public class SafeTeleport {
     private static final int FALLBACK_ATTEMPTS_PER_CALL = 96;
     private static final int POOL_CHUNK_LOADS_PER_TICK = 4;
     private static final int FALLBACK_CHUNK_LOADS_PER_CALL = 8;
+    private static final int TEAM_CLUSTER_CHUNK_LOADS_PER_CALL = 4;
     private static final int TEST_CHUNK_LOADS_PER_CALL = 16;
     private static final int[][] TEAM_OFFSETS = new int[][]{
             {0, 0},
@@ -245,8 +246,21 @@ public class SafeTeleport {
         }
         if (anchor == null) return false;
 
-        List<BlockPos> positions = findTeamCluster(overworld, anchor, players.size());
+        List<BlockPos> positions;
+        chunkLoadBudget = TEAM_CLUSTER_CHUNK_LOADS_PER_CALL;
+        try {
+            positions = findTeamCluster(overworld, anchor, players.size());
+        } finally {
+            chunkLoadBudget = 0;
+        }
         if (positions.size() < players.size()) {
+            TacticalTabletMod.LOGGER.warn(
+                    "Safe team RTP cluster not found. requested={}, found={}, anchor={}, preparedPool={}",
+                    players.size(),
+                    positions.size(),
+                    anchor,
+                    getPreparedCount()
+            );
             return false;
         }
 

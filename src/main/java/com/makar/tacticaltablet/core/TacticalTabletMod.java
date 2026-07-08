@@ -5,6 +5,8 @@ import com.makar.tacticaltablet.airdrop.AirdropEvents;
 import com.makar.tacticaltablet.command.CoinCommand;
 import com.makar.tacticaltablet.command.CorpseTestCommand;
 import com.makar.tacticaltablet.command.DebugXPCommand;
+import com.makar.tacticaltablet.command.ExtractionPointCommand;
+import com.makar.tacticaltablet.command.GiveClassCommand;
 import com.makar.tacticaltablet.command.IntegrationCheckCommand;
 import com.makar.tacticaltablet.command.KillsDiscordCommand;
 import com.makar.tacticaltablet.command.MapRotationCommand;
@@ -12,8 +14,11 @@ import com.makar.tacticaltablet.command.OnlineWebhookCommand;
 import com.makar.tacticaltablet.command.ResetCommand;
 import com.makar.tacticaltablet.command.RespawnControlCommand;
 import com.makar.tacticaltablet.command.RtpCommand;
+import com.makar.tacticaltablet.command.SadTromboneCommand;
 import com.makar.tacticaltablet.command.TestModeCommand;
+import com.makar.tacticaltablet.command.XpBoostCommand;
 import com.makar.tacticaltablet.game.ServerEvents;
+import com.makar.tacticaltablet.prefix.PrefixCommand;
 import com.makar.tacticaltablet.tablet.net.PacketHandler;
 
 import com.mojang.logging.LogUtils;
@@ -37,7 +42,11 @@ public class TacticalTabletMod {
         IEventBus modEventBus = FMLJavaModLoadingContext.get().getModEventBus();
 
         ModItems.ITEMS.register(modEventBus);
+        ModBlocks.BLOCKS.register(modEventBus);
+        ModBlockEntities.BLOCK_ENTITIES.register(modEventBus);
         ModEntities.ENTITIES.register(modEventBus);
+        ModSounds.SOUND_EVENTS.register(modEventBus);
+        ModParticles.PARTICLES.register(modEventBus);
 
         modEventBus.addListener(this::setup);
         modEventBus.addListener(this::addCreative);
@@ -70,8 +79,12 @@ public class TacticalTabletMod {
         KillsDiscordCommand.register(event.getDispatcher());
         OnlineWebhookCommand.register(event.getDispatcher());
         AirdropCommands.register(event.getDispatcher());
+        ExtractionPointCommand.register(event.getDispatcher());
         CorpseTestCommand.register(event.getDispatcher());
         IntegrationCheckCommand.register(event.getDispatcher());
+        GiveClassCommand.register(event.getDispatcher());
+        XpBoostCommand.register(event.getDispatcher());
+        SadTromboneCommand.register(event.getDispatcher());
+        PrefixCommand.register(event.getDispatcher());
     }
 }
-

@@ -1,5 +1,7 @@
 package com.makar.tacticaltablet.progression;
 
+import com.makar.tacticaltablet.tablet.PlayerTabletState;
+
 import net.minecraft.server.level.ServerPlayer;
 
 import java.util.HashMap;
@@ -26,7 +28,16 @@ public class ClassCooldownManager {
             minutes(15),
             minutes(15),
             minutes(5),
-            minutes(15)
+            minutes(15),
+            minutes(10),
+            minutes(10),
+            minutes(20),
+            minutes(10),
+            minutes(10),
+            minutes(10),
+            minutes(10),
+            minutes(10),
+            minutes(10)
     };
 
     private static final Map<UUID, Map<Integer, Long>> data = new HashMap<>();
@@ -60,6 +71,45 @@ public class ClassCooldownManager {
         return minutes * 60L * 1000L;
     }
 
+    public static void setCooldownForSelectedClass(ServerPlayer player) {
+        if (player == null || !PlayerTabletState.isKitUsed(player)) return;
+
+        int classId = classIdForClass(PlayerTabletState.getSelectedClass(player));
+        if (classId < 0) return;
+
+        setCooldown(player, classId);
+    }
+
+    private static int classIdForClass(String clazz) {
+        if (clazz == null || clazz.isBlank()) return -1;
+
+        return switch (clazz) {
+            case "stormtrooper" -> 0;
+            case "sniper" -> 1;
+            case "scout" -> 2;
+            case "droneoperator" -> 3;
+            case "boomguy" -> 4;
+            case "mortarman" -> 5;
+            case "dream" -> 6;
+            case "machinegunner" -> 8;
+            case "rpgtrooper" -> 9;
+            case "tagilla" -> 10;
+            case "blackops" -> 11;
+            case "cowboy" -> 12;
+            case "solider" -> 13;
+            case "rebel" -> 14;
+            case "saboteur" -> 15;
+            case "killer" -> 16;
+            case "miniboss" -> 17;
+            case "shahed" -> 18;
+            case "krot" -> 19;
+            case "marine" -> 20;
+            case "medic" -> 21;
+            case "microwave" -> 22;
+            case "railgunner" -> 23;
+            default -> -1;
+        };
+    }
     public static void setCooldown(ServerPlayer player, int classId) {
         if (player == null || classId < 0 || classId >= COOLDOWNS.length) return;
 

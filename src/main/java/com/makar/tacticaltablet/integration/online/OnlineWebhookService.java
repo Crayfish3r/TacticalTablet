@@ -3,6 +3,7 @@ package com.makar.tacticaltablet.integration.online;
 import com.makar.tacticaltablet.core.TacticalTabletMod;
 import com.makar.tacticaltablet.integration.discord.DiscordWebhookClient;
 import com.makar.tacticaltablet.integration.discord.DiscordWebhookClient.DiscordEmbed;
+import com.makar.tacticaltablet.game.MapSetManager;
 import com.makar.tacticaltablet.map.MapRotationManager;
 
 import net.minecraft.server.MinecraftServer;
@@ -135,7 +136,12 @@ public final class OnlineWebhookService {
         description.append("**Онлайн:** `").append(online).append('/').append(max).append("`\n");
         description.append("**Карта:** `").append(mapInfo.currentMap()).append("`\n");
         description.append("**Следующая карта:** `").append(mapInfo.nextMap()).append("`\n");
-        description.append("**До рестарта:** `").append(formatRestartCountdown(config)).append("`\n");
+        description.append("**Игра сета:** `")
+                .append(MapSetManager.getCurrentGameNumber())
+                .append('/')
+                .append(MapSetManager.GAMES_PER_MAP)
+                .append("`\n");
+        description.append("**Режим:** `").append(currentSetMode()).append("`\n");
 
         if (mapInfo.armed()) {
             description.append("\nРотация подготовлена к следующему выключению.\n");
@@ -164,7 +170,12 @@ public final class OnlineWebhookService {
         builder.append("**Онлайн:** ").append(online).append('/').append(max).append('\n');
         builder.append("**Карта:** ").append(mapInfo.currentMap()).append('\n');
         builder.append("**Следующая карта:** ").append(mapInfo.nextMap()).append('\n');
-        builder.append("**До рестарта:** ").append(formatRestartCountdown(config)).append('\n');
+        builder.append("**Игра сета:** ")
+                .append(MapSetManager.getCurrentGameNumber())
+                .append('/')
+                .append(MapSetManager.GAMES_PER_MAP)
+                .append('\n');
+        builder.append("**Режим:** ").append(currentSetMode()).append('\n');
 
         if (mapInfo.armed()) {
             builder.append("**Ротация:** подготовлена к следующему выключению").append('\n');
@@ -208,6 +219,16 @@ public final class OnlineWebhookService {
         if (shown < names.size()) {
             builder.append("• … ещё ").append(names.size() - shown).append('\n');
         }
+    }
+
+    private static String currentSetMode() {
+        if (MapSetManager.isClanWarSet()) {
+            return "Война кланов";
+        }
+        if (MapSetManager.isCompetitiveSet()) {
+            return "Турнир";
+        }
+        return "Казуал";
     }
 
     private static String formatRestartCountdown(OnlineWebhookConfig config) {

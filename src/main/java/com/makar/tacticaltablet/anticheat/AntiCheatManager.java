@@ -4,19 +4,19 @@ import com.makar.tacticaltablet.core.TacticalTabletMod;
 import com.makar.tacticaltablet.game.GameStateManager;
 import com.makar.tacticaltablet.game.lives.LivesManager;
 
-import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 
-import java.util.EnumMap;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 public final class AntiCheatManager {
 
     private static final long ALERT_THROTTLE_MS = 5_000L;
-    private static final Map<UUID, EnumMap<ViolationType, Integer>> violations = new HashMap<>();
-    private static final Map<String, Long> lastAlertTimes = new HashMap<>();
+    private static final String TAG_IN_LOBBY = "in_lobby";
+    private static final String TAG_WAR_PLAYING = "war.playing";
+    private static final Map<UUID, Map<ViolationType, Integer>> violations = new ConcurrentHashMap<>();
+    private static final Map<UUID, Map<ViolationType, Long>> lastAlertTimes = new ConcurrentHashMap<>();
 
     private AntiCheatManager() {
     }
@@ -25,7 +25,7 @@ public final class AntiCheatManager {
         if (player == null || type == null || severity == null) return;
 
         UUID uuid = player.getUUID();
-        int count = violations.computeIfAbsent(uuid, key -> new EnumMap<>(ViolationType.class))
+        int count = violations.computeIfAbsent(uuid, key -> new ConcurrentHashMap<>())
                 .merge(type, 1, Integer::sum);
 
         String phase = getPhase(player);
@@ -48,13 +48,12 @@ public final class AntiCheatManager {
         if (!shouldNotify(uuid, type)) return;
 
         TacticalTabletMod.LOGGER.warn(logLine);
-        alertAdmins(player, type, severity, phase, safeDetails);
     }
 
     public static int getViolationCount(ServerPlayer player, ViolationType type) {
         if (player == null || type == null) return 0;
 
-        EnumMap<ViolationType, Integer> playerViolations = violations.get(player.getUUID());
+        Map<ViolationType, Integer> playerViolations = violations.get(player.getUUID());
         if (playerViolations == null) return 0;
 
         return playerViolations.getOrDefault(type, 0);
@@ -65,9 +64,10 @@ public final class AntiCheatManager {
 
         UUID uuid = player.getUUID();
         violations.remove(uuid);
-        lastAlertTimes.keySet().removeIf(key -> key.startsWith(uuid.toString() + ":"));
+        lastAlertTimes.remove(uuid);
     }
 
+    // Clears all anti-cheat runtime counters. Intended for server shutdown/reset paths only.
     public static void resetAll() {
         violations.clear();
         lastAlertTimes.clear();
@@ -80,11 +80,11 @@ public final class AntiCheatManager {
             return "выбыл";
         }
 
-        if (GameStateManager.isInLobby(player) || player.getTags().contains("in_lobby")) {
+        if (GameStateManager.isInLobby(player) || player.getTags().contains(TAG_IN_LOBBY)) {
             return "лобби";
         }
 
-        if (player.getTags().contains("war.playing")) {
+        if (player.getTags().contains(TAG_WAR_PLAYING)) {
             return "бой";
         }
 
@@ -98,44 +98,26 @@ public final class AntiCheatManager {
     private static boolean shouldAlert(ViolationType type, Severity severity, int count) {
         return switch (type) {
             case ILLEGAL_PICKUP, ILLEGAL_CONTAINER -> false;
-            case INVALID_RTP -> severity.ordinal() >= Severity.HIGH.ordinal();
-            case ILLEGAL_INVENTORY -> severity.ordinal() >= Severity.MEDIUM.ordinal() || count >= 3;
+            case INVALID_RTP -> severity == Severity.HIGH || severity == Severity.CRITICAL;
+            case ILLEGAL_INVENTORY -> severity == Severity.MEDIUM
+                    || severity == Severity.HIGH
+                    || severity == Severity.CRITICAL
+                    || count >= 3;
             case INVALID_TABLET_PACKET, PACKET_SPAM, MOVEMENT_ANOMALY, COMBAT_REACH -> true;
         };
     }
 
     private static boolean shouldNotify(UUID uuid, ViolationType type) {
         long now = System.currentTimeMillis();
-        String key = uuid + ":" + type;
-        long last = lastAlertTimes.getOrDefault(key, 0L);
+        Map<ViolationType, Long> playerAlerts = lastAlertTimes.computeIfAbsent(uuid, key -> new ConcurrentHashMap<>());
+        long last = playerAlerts.getOrDefault(type, 0L);
 
         if (now - last < ALERT_THROTTLE_MS) {
             return false;
         }
 
-        lastAlertTimes.put(key, now);
+        playerAlerts.put(type, now);
         return true;
-    }
-
-    private static void alertAdmins(
-            ServerPlayer player,
-            ViolationType type,
-            Severity severity,
-            String phase,
-            String details
-    ) {
-        Component message = Component.literal("[AC] "
-                + player.getGameProfile().getName()
-                + ": нарушение=" + type
-                + " серьёзность=" + severity
-                + " фаза=" + phase
-                + " - " + details);
-
-        for (ServerPlayer admin : player.server.getPlayerList().getPlayers()) {
-            if (admin.hasPermissions(2)) {
-                admin.sendSystemMessage(message);
-            }
-        }
     }
 
     private static String sanitize(String details) {
@@ -143,6 +125,17 @@ public final class AntiCheatManager {
             return "нет";
         }
 
-        return details.replace('\n', ' ').replace('\r', ' ');
+        StringBuilder safe = new StringBuilder(details.length());
+        for (int index = 0; index < details.length(); index++) {
+            char character = details.charAt(index);
+            if (character == ',') {
+                safe.append(';');
+            } else if (Character.isISOControl(character)) {
+                safe.append("\\u").append(String.format(java.util.Locale.ROOT, "%04x", (int) character));
+            } else {
+                safe.append(character);
+            }
+        }
+        return safe.toString();
     }
 }

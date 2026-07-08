@@ -7,6 +7,10 @@ import com.makar.tacticaltablet.anticheat.Severity;
 import com.makar.tacticaltablet.anticheat.ViolationType;
 import com.makar.tacticaltablet.core.ModItems;
 import com.makar.tacticaltablet.game.GameStateManager;
+import com.makar.tacticaltablet.game.MapSetManager;
+import com.makar.tacticaltablet.game.clanwar.ClanWarManager;
+import com.makar.tacticaltablet.game.extraction.ExtractionCompassHelper;
+import com.makar.tacticaltablet.game.extraction.ExtractionPointManager;
 import com.makar.tacticaltablet.game.lives.LivesManager;
 import com.makar.tacticaltablet.tablet.PlayerTabletState;
 
@@ -44,9 +48,15 @@ public class InventoryGuard {
         boolean tabletLobbyStage = GameStateManager.isTabletAvailableInLobby(player.server);
         boolean kitUsed = PlayerTabletState.isKitUsed(player);
         boolean rtpUsed = PlayerTabletState.isRtpUsed(player);
+        boolean clanWarSpectatorApplicant = isClanWarSpectatorApplicant(player, gameRunning);
 
-        boolean relevant = inLobby || playing || eliminated;
+        boolean relevant = inLobby || playing || eliminated || clanWarSpectatorApplicant;
         if (!relevant) return;
+
+        if (clanWarSpectatorApplicant) {
+            keepOnlyTabletAndSync(player);
+            return;
+        }
 
         if (eliminated) {
             if (!isInventoryEmpty(player)) {
@@ -93,6 +103,39 @@ public class InventoryGuard {
         }
     }
 
+    private static boolean isClanWarSpectatorApplicant(ServerPlayer player, boolean gameRunning) {
+        return player != null
+                && gameRunning
+                && MapSetManager.isClanWarSet()
+                && player.isSpectator()
+                && !ClanWarManager.hasClan(player);
+    }
+
+    private static void keepOnlyTabletAndSync(ServerPlayer player) {
+        InventoryCleanup cleanup = keepOnlyTablet(player);
+        boolean changed = cleanup.removed() > 0;
+
+        if (!InventoryManager.hasTablet(player)) {
+            InventoryManager.giveTabletIfMissing(player);
+            changed = true;
+        }
+
+        if (changed) {
+            InventoryManager.syncInventory(player);
+        }
+
+        if (cleanup.removed() > 0) {
+            recordInventory(
+                    player,
+                    cleanup.removed(),
+                    cleanup.extraTablets() > 0 ? Severity.HIGH : severityForRemoved(cleanup.removed()),
+                    cleanup.extraTablets() > 0
+                            ? "removed spectator items and duplicate tablets"
+                            : "removed spectator items"
+            );
+        }
+    }
+
     private static void keepOnlyTabletCompassAndSync(ServerPlayer player) {
         InventoryCleanup cleanup = keepOnlyTabletAndAirdropCompass(player);
         boolean changed = cleanup.removed() > 0;
@@ -102,6 +145,7 @@ public class InventoryGuard {
         }
 
         AirdropManager.giveCompassToJoiningPlayer(player);
+        ExtractionPointManager.giveCompassToActiveParticipant(player);
 
         if (changed) {
             InventoryManager.syncInventory(player);
@@ -125,6 +169,7 @@ public class InventoryGuard {
         int extraTablets = 0;
         boolean tabletAlreadyKept = false;
         boolean compassAlreadyKept = false;
+        boolean extractionCompassAlreadyKept = false;
         boolean trackerAlreadyKept = false;
 
         for (int i = 0; i < player.getInventory().getContainerSize(); i++) {
@@ -155,6 +200,17 @@ public class InventoryGuard {
                 continue;
             }
 
+            if (ExtractionCompassHelper.isExtractionCompass(stack) && ExtractionPointManager.isActive()) {
+                if (!extractionCompassAlreadyKept) {
+                    extractionCompassAlreadyKept = true;
+                    continue;
+                }
+
+                player.getInventory().setItem(i, ItemStack.EMPTY);
+                removed++;
+                continue;
+            }
+
             if (stack.getItem() == ModItems.CONTRACT_TRACKER.get()) {
                 if (!trackerAlreadyKept) {
                     trackerAlreadyKept = true;
@@ -164,6 +220,36 @@ public class InventoryGuard {
                 player.getInventory().setItem(i, ItemStack.EMPTY);
                 removed++;
                 continue;
+            }
+
+            player.getInventory().setItem(i, ItemStack.EMPTY);
+            removed++;
+        }
+
+        if (removed > 0) {
+            player.getInventory().setChanged();
+        }
+
+        return new InventoryCleanup(removed, extraTablets);
+    }
+
+    private static InventoryCleanup keepOnlyTablet(ServerPlayer player) {
+        int removed = 0;
+        int extraTablets = 0;
+        boolean tabletAlreadyKept = false;
+
+        for (int i = 0; i < player.getInventory().getContainerSize(); i++) {
+            ItemStack stack = player.getInventory().getItem(i);
+
+            if (stack.isEmpty()) continue;
+
+            if (stack.getItem() == ModItems.TACTICAL_TABLET.get()) {
+                if (!tabletAlreadyKept) {
+                    tabletAlreadyKept = true;
+                    continue;
+                }
+
+                extraTablets++;
             }
 
             player.getInventory().setItem(i, ItemStack.EMPTY);

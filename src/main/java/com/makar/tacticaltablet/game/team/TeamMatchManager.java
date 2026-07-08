@@ -1,6 +1,10 @@
 package com.makar.tacticaltablet.game.team;
 
+import com.makar.tacticaltablet.clan.ClanManager;
 import com.makar.tacticaltablet.game.MatchMode;
+import com.makar.tacticaltablet.game.SpectatorCameraManager;
+import com.makar.tacticaltablet.game.lives.LivesManager;
+import com.makar.tacticaltablet.voice.VoiceChatTeamManager;
 
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
@@ -25,6 +29,7 @@ public final class TeamMatchManager {
     private static final Map<TeamId, LinkedHashSet<UUID>> teams = new EnumMap<>(TeamId.class);
     private static final Map<UUID, TeamId> playerTeams = new HashMap<>();
     private static final Map<UUID, String> playerNames = new HashMap<>();
+    private static final Map<String, TeamId> clanTeams = new HashMap<>();
     private static final Map<UUID, String> originalScoreboardTeams = new HashMap<>();
     private static int secondsLeft = 0;
     private static boolean activeSelection = false;
@@ -34,7 +39,7 @@ public final class TeamMatchManager {
 
     public static void startSelection(MatchMode mode) {
         clearAssignments();
-        for (TeamId team : TeamId.values()) {
+        for (TeamId team : TeamId.standardValues()) {
             teams.put(team, new LinkedHashSet<>());
         }
         secondsLeft = TEAM_SELECT_SECONDS;
@@ -67,6 +72,7 @@ public final class TeamMatchManager {
 
     public static boolean joinTeam(ServerPlayer player, TeamId team, MatchMode mode) {
         if (player == null || team == null || mode == null || !activeSelection || !mode.isTeamMode()) return false;
+        if (!isStandardTeam(team)) return false;
 
         LinkedHashSet<UUID> target = teams.computeIfAbsent(team, ignored -> new LinkedHashSet<>());
         UUID uuid = player.getUUID();
@@ -85,6 +91,8 @@ public final class TeamMatchManager {
         target.add(uuid);
         playerTeams.put(uuid, team);
         rememberName(player);
+        VoiceChatTeamManager.onPlayerTeamChanged(player);
+        SpectatorCameraManager.onPlayerTeamChanged(player);
         return true;
     }
 
@@ -116,14 +124,26 @@ public final class TeamMatchManager {
 
     public static boolean areTeammates(ServerPlayer first, ServerPlayer second) {
         if (first == null || second == null) return false;
-        TeamId firstTeam = playerTeams.get(first.getUUID());
-        return firstTeam != null && firstTeam == playerTeams.get(second.getUUID());
+        return areTeammates(first.getUUID(), second.getUUID());
+    }
+
+    public static boolean areTeammates(UUID first, UUID second) {
+        if (first == null || second == null || first.equals(second)) return false;
+        TeamId firstTeam = playerTeams.get(first);
+        return firstTeam != null && firstTeam == playerTeams.get(second);
+    }
+
+    public static List<ServerPlayer> getOnlineTeamMembers(MinecraftServer server, UUID playerUuid) {
+        if (server == null || playerUuid == null) return List.of();
+        TeamId teamId = playerTeams.get(playerUuid);
+        if (teamId == null) return List.of();
+        return getOnlineTeamMembers(server, teamId);
     }
 
     public static void autoBalance(MinecraftServer server, MatchMode mode) {
         if (server == null || mode == null || !mode.isTeamMode()) return;
 
-        for (TeamId team : TeamId.values()) {
+        for (TeamId team : TeamId.standardValues()) {
             teams.computeIfAbsent(team, ignored -> new LinkedHashSet<>());
         }
 
@@ -146,6 +166,98 @@ public final class TeamMatchManager {
 
         activeSelection = false;
         secondsLeft = 0;
+    }
+
+    public static void assignClanWarTeams(MinecraftServer server) {
+        clearAssignments();
+        if (server == null) return;
+
+        for (TeamId team : TeamId.clanWarValues()) {
+            teams.put(team, new LinkedHashSet<>());
+        }
+
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            assignClanWarPlayer(server, player);
+        }
+
+        activeSelection = false;
+        secondsLeft = 0;
+    }
+
+    public static TeamId assignClanWarPlayer(MinecraftServer server, ServerPlayer player) {
+        if (server == null || player == null) return null;
+
+        rememberName(player);
+        String clanId = ClanManager.getClanIdForPlayer(player);
+        if (clanId.isBlank()) {
+            removeAssignment(player.getUUID());
+            return null;
+        }
+
+        TeamId target = clanTeams.get(clanId);
+        if (target == null) {
+            target = findClanWarTeamForClan(server, clanId);
+            if (target == null) {
+                player.sendSystemMessage(net.minecraft.network.chat.Component.literal(
+                        "[WAR] Clan-war team slots are full (" + TeamId.clanWarValues().length + ")."
+                ));
+                removeAssignment(player.getUUID());
+                return null;
+            }
+            clanTeams.put(clanId, target);
+        }
+
+        removeAssignment(player.getUUID());
+        teams.computeIfAbsent(target, ignored -> new LinkedHashSet<>()).add(player.getUUID());
+        playerTeams.put(player.getUUID(), target);
+        VoiceChatTeamManager.onPlayerTeamChanged(player);
+        SpectatorCameraManager.onPlayerTeamChanged(player);
+        return target;
+    }
+
+    public static TeamId assignLateJoiner(MinecraftServer server, ServerPlayer player, MatchMode mode) {
+        if (server == null || player == null || mode == null || !mode.isTeamMode()) return null;
+
+        rememberName(player);
+        TeamId currentTeam = playerTeams.get(player.getUUID());
+        if (currentTeam != null) {
+            VoiceChatTeamManager.onPlayerTeamChanged(player);
+            SpectatorCameraManager.onPlayerTeamChanged(player);
+            return currentTeam;
+        }
+
+        int fewestAlive = Integer.MAX_VALUE;
+        List<TeamId> participatingTeams = new ArrayList<>();
+        List<TeamId> depletedTeams = new ArrayList<>();
+        for (TeamId teamId : TeamId.standardValues()) {
+            LinkedHashSet<UUID> members = teams.computeIfAbsent(teamId, ignored -> new LinkedHashSet<>());
+            if (members.isEmpty()) continue;
+
+            participatingTeams.add(teamId);
+            int alive = getAliveOnlineMemberCount(server, teamId);
+            if (alive >= mode.teamSize()) continue;
+
+            if (alive < fewestAlive) {
+                fewestAlive = alive;
+                depletedTeams.clear();
+                depletedTeams.add(teamId);
+            } else if (alive == fewestAlive) {
+                depletedTeams.add(teamId);
+            }
+        }
+
+        List<TeamId> candidates = depletedTeams.isEmpty() ? participatingTeams : depletedTeams;
+        if (candidates.isEmpty()) {
+            candidates = List.of(TeamId.standardValues());
+        }
+        if (candidates.isEmpty()) return null;
+
+        TeamId target = candidates.get(RANDOM.nextInt(candidates.size()));
+        teams.get(target).add(player.getUUID());
+        playerTeams.put(player.getUUID(), target);
+        VoiceChatTeamManager.onPlayerTeamChanged(player);
+        SpectatorCameraManager.onPlayerTeamChanged(player);
+        return target;
     }
 
     public static void applyScoreboardTeams(MinecraftServer server) {
@@ -213,7 +325,7 @@ public final class TeamMatchManager {
         if (server == null) return 0;
 
         int aliveTeams = 0;
-        for (TeamId teamId : TeamId.values()) {
+        for (TeamId teamId : TeamId.standardValues()) {
             if (hasAliveOnlineMember(server, teamId)) {
                 aliveTeams++;
             }
@@ -225,7 +337,7 @@ public final class TeamMatchManager {
         if (server == null) return null;
 
         TeamId winner = null;
-        for (TeamId teamId : TeamId.values()) {
+        for (TeamId teamId : TeamId.standardValues()) {
             if (!hasAliveOnlineMember(server, teamId)) continue;
             if (winner != null) return null;
             winner = teamId;
@@ -246,6 +358,23 @@ public final class TeamMatchManager {
         return null;
     }
 
+
+    public static List<ServerPlayer> getTeamPlayers(MinecraftServer server, TeamId teamId) {
+        if (server == null || teamId == null) return List.of();
+
+        List<ServerPlayer> result = new ArrayList<>();
+        for (UUID uuid : teams.getOrDefault(teamId, new LinkedHashSet<>())) {
+            ServerPlayer player = server.getPlayerList().getPlayer(uuid);
+            if (player != null) {
+                result.add(player);
+            }
+        }
+        return result;
+    }
+
+    public static List<ServerPlayer> findWinningPlayers(MinecraftServer server) {
+        return getTeamPlayers(server, findWinningTeam(server));
+    }
     public static Snapshot snapshot(MinecraftServer server, ServerPlayer viewer, MatchMode mode) {
         int selectedTeam = -1;
         if (viewer != null && playerTeams.containsKey(viewer.getUUID())) {
@@ -254,7 +383,7 @@ public final class TeamMatchManager {
 
         Map<String, String> slots = new HashMap<>();
         int maxSlots = mode == null ? 1 : mode.teamSize();
-        for (TeamId teamId : TeamId.values()) {
+        for (TeamId teamId : TeamId.standardValues()) {
             List<UUID> members = new ArrayList<>(teams.getOrDefault(teamId, new LinkedHashSet<>()));
             for (int slot = 0; slot < Math.max(maxSlots, members.size()); slot++) {
                 String key = teamId.ordinal() + ":" + slot;
@@ -282,25 +411,36 @@ public final class TeamMatchManager {
     }
 
     private static boolean hasAliveOnlineMember(MinecraftServer server, TeamId teamId) {
-        Set<UUID> members = teams.get(teamId);
-        if (members == null || members.isEmpty()) return false;
+        return getAliveOnlineMemberCount(server, teamId) > 0;
+    }
 
+    private static int getAliveOnlineMemberCount(MinecraftServer server, TeamId teamId) {
+        Set<UUID> members = teams.get(teamId);
+        if (members == null || members.isEmpty()) return 0;
+
+        int alive = 0;
         for (UUID uuid : members) {
             ServerPlayer player = server.getPlayerList().getPlayer(uuid);
-            if (player != null && com.makar.tacticaltablet.game.lives.LivesManager.isAliveParticipant(player)) {
-                return true;
+            if (player != null && LivesManager.isAliveParticipant(player)) {
+                alive++;
             }
         }
-        return false;
+        return alive;
     }
 
     private static TeamId findSmallestAvailableTeam(MatchMode mode) {
         int bestSize = Integer.MAX_VALUE;
         List<TeamId> candidates = new ArrayList<>();
+        List<TeamId> emptyCandidates = new ArrayList<>();
 
-        for (TeamId teamId : TeamId.values()) {
+        for (TeamId teamId : TeamId.standardValues()) {
             int size = teams.computeIfAbsent(teamId, ignored -> new LinkedHashSet<>()).size();
             if (size >= mode.teamSize()) continue;
+
+            if (size == 0) {
+                emptyCandidates.add(teamId);
+                continue;
+            }
 
             if (size < bestSize) {
                 bestSize = size;
@@ -311,14 +451,17 @@ public final class TeamMatchManager {
             }
         }
 
-        return candidates.isEmpty() ? null : candidates.get(RANDOM.nextInt(candidates.size()));
+        if (!candidates.isEmpty()) {
+            return candidates.get(RANDOM.nextInt(candidates.size()));
+        }
+        return emptyCandidates.isEmpty() ? null : emptyCandidates.get(RANDOM.nextInt(emptyCandidates.size()));
     }
 
     private static TeamId findSmallestTeam() {
         int bestSize = Integer.MAX_VALUE;
         List<TeamId> candidates = new ArrayList<>();
 
-        for (TeamId teamId : TeamId.values()) {
+        for (TeamId teamId : TeamId.standardValues()) {
             int size = teams.computeIfAbsent(teamId, ignored -> new LinkedHashSet<>()).size();
             if (size < bestSize) {
                 bestSize = size;
@@ -330,6 +473,23 @@ public final class TeamMatchManager {
         }
 
         return candidates.isEmpty() ? null : candidates.get(RANDOM.nextInt(candidates.size()));
+    }
+
+    private static TeamId findFreeClanWarTeam() {
+        for (TeamId teamId : TeamId.clanWarValues()) {
+            if (!clanTeams.containsValue(teamId)) {
+                return teamId;
+            }
+        }
+        return null;
+    }
+
+    private static TeamId findClanWarTeamForClan(MinecraftServer server, String clanId) {
+        TeamId preferred = TeamId.byTextColor(ClanManager.getClanColorById(server, clanId));
+        if (preferred != null && !clanTeams.containsValue(preferred)) {
+            return preferred;
+        }
+        return findFreeClanWarTeam();
     }
 
     private static void removeAssignment(UUID uuid) {
@@ -346,6 +506,7 @@ public final class TeamMatchManager {
         teams.clear();
         playerTeams.clear();
         playerNames.clear();
+        clanTeams.clear();
     }
 
     private static void configureTeam(TeamId teamId, PlayerTeam team) {
@@ -371,11 +532,27 @@ public final class TeamMatchManager {
         if (originalScoreboardTeams.containsKey(player.getUUID())) return;
 
         PlayerTeam current = scoreboard.getPlayersTeam(player.getScoreboardName());
-        if (current != null && !isManagedTeam(current)) {
+        if (current != null && !isManagedTeam(current) && !isTransientNameTagTeam(current)) {
             originalScoreboardTeams.put(player.getUUID(), current.getName());
         } else {
             originalScoreboardTeams.put(player.getUUID(), "");
         }
+    }
+
+    private static boolean isTransientNameTagTeam(PlayerTeam team) {
+        if (team == null) return false;
+        String name = team.getName();
+        return "war_hidden_names".equals(name) || name.startsWith("ttn_");
+    }
+
+    private static boolean isStandardTeam(TeamId team) {
+        if (team == null) return false;
+        for (TeamId standardTeam : TeamId.standardValues()) {
+            if (standardTeam == team) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static void rememberName(ServerPlayer player) {

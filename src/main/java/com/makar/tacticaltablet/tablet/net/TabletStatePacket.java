@@ -53,6 +53,8 @@ public class TabletStatePacket {
     private final int teamSlotSize;
     private final int selectedTeam;
     private final Map<String, String> teamSlots;
+    private final boolean competitiveSet;
+    private final boolean clanWarSet;
 
     public TabletStatePacket(
             Map<Integer, Long> cooldowns,
@@ -109,7 +111,9 @@ public class TabletStatePacket {
                 0,
                 1,
                 -1,
-                new HashMap<>()
+                new HashMap<>(),
+                false,
+                false
         );
     }
 
@@ -146,7 +150,9 @@ public class TabletStatePacket {
             int teamSelectTimeLeft,
             int teamSlotSize,
             int selectedTeam,
-            Map<String, String> teamSlots
+            Map<String, String> teamSlots,
+            boolean competitiveSet,
+            boolean clanWarSet
     ) {
         this.cooldowns = copyIntLongMap(cooldowns, MAX_COOLDOWNS);
         this.kitUsed = kitUsed;
@@ -181,6 +187,8 @@ public class TabletStatePacket {
         this.teamSlotSize = Math.max(1, teamSlotSize);
         this.selectedTeam = Math.max(-1, selectedTeam);
         this.teamSlots = copyStringStringMap(teamSlots, MAX_TEAM_SLOT_ENTRIES);
+        this.competitiveSet = competitiveSet;
+        this.clanWarSet = clanWarSet;
     }
 
     public TabletStatePacket(
@@ -291,6 +299,8 @@ public class TabletStatePacket {
                     buf.readUtf(MAX_PLAYER_NAME_LENGTH)
             );
         }
+        this.competitiveSet = buf.readBoolean();
+        this.clanWarSet = buf.readBoolean();
     }
 
     public void encode(FriendlyByteBuf buf) {
@@ -363,10 +373,15 @@ public class TabletStatePacket {
             buf.writeUtf(entry.getKey(), MAX_TEAM_SLOT_KEY_LENGTH);
             buf.writeUtf(entry.getValue(), MAX_PLAYER_NAME_LENGTH);
         }
+        buf.writeBoolean(competitiveSet);
+        buf.writeBoolean(clanWarSet);
     }
 
     public void handle(Supplier<NetworkEvent.Context> ctx) {
         ctx.get().enqueueWork(() -> {
+            boolean hadKitUsed = TabletClientState.isKitUsed();
+            boolean hadRtpUsed = TabletClientState.isRtpUsed();
+
             TabletClientState.update(cooldowns, kitUsed, rtpUsed, rtpEndTime);
             TabletClientState.updateLevels(classLevels);
             TabletClientState.updateXP(classXP);
@@ -393,8 +408,10 @@ public class TabletStatePacket {
                     selectedTeam,
                     teamSlots
             );
+            TabletClientState.updateCompetitiveSet(competitiveSet);
+            TabletClientState.updateClanWarSet(clanWarSet);
 
-            if (kitUsed && rtpUsed) {
+            if (kitUsed && rtpUsed && hadKitUsed && !hadRtpUsed) {
                 TabletClientState.requestClose();
             }
         });

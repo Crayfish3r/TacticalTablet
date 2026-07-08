@@ -9,6 +9,8 @@ public enum MatchMode {
     TRIO("Трио", 3, 1, 5),
     SQUADS("Отряды", 5, 1, 13);
 
+    public static final int MAX_DUO_PLAYERS = 8;
+
     private final String displayName;
     private final int teamSize;
     private final int livesPerPlayer;
@@ -42,6 +44,7 @@ public enum MatchMode {
     }
 
     public boolean isSelectableFor(int onlinePlayers, boolean includeDebugModes) {
+        if (this == DUO && onlinePlayers > MAX_DUO_PLAYERS) return false;
         if (includeDebugModes) return true;
         if (this == SOLO) return true;
 
@@ -50,7 +53,7 @@ public enum MatchMode {
         }
 
         if (onlinePlayers >= TRIO.minPlayers()) {
-            return this == DUO || this == TRIO;
+            return this == TRIO || (this == DUO && onlinePlayers <= MAX_DUO_PLAYERS);
         }
 
         if (onlinePlayers >= DUO.minPlayers()) {
@@ -81,7 +84,7 @@ public enum MatchMode {
     public static MatchMode sanitizeForOnlineCount(int onlinePlayers, MatchMode selected, boolean includeDebugModes) {
         if (selected == null) return SOLO;
         if (selected.isSelectableFor(onlinePlayers, includeDebugModes)) return selected;
-        if (includeDebugModes) return selected;
+        if (includeDebugModes && !(selected == DUO && onlinePlayers > MAX_DUO_PLAYERS)) return selected;
 
         if (selected.isTeamMode()) {
             if (onlinePlayers >= SQUADS.minPlayers()) return SQUADS;

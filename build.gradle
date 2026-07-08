@@ -15,6 +15,10 @@ java {
     toolchain.languageVersion = JavaLanguageVersion.of(17)
 }
 
+repositories {
+    maven { url = 'https://maven.maxhenkel.de/repository/public' }
+}
+
 minecraft {
     // Standard mappings for 1.20.1
     mappings channel: 'official', version: '1.20.1'
@@ -46,6 +50,7 @@ minecraft {
 dependencies {
     // Using a stable Forge version for 1.20.1
     minecraft 'net.minecraftforge:forge:1.20.1-47.2.0'
+    implementation "de.maxhenkel.voicechat:voicechat-api:${voicechat_api_version}"
 }
 
 

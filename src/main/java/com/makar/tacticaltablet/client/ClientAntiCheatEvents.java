@@ -2,6 +2,7 @@ package com.makar.tacticaltablet.client;
 
 import com.makar.tacticaltablet.core.TacticalTabletMod;
 
+import net.minecraft.client.CameraType;
 import net.minecraft.client.Minecraft;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.event.TickEvent;
@@ -22,6 +23,16 @@ public class ClientAntiCheatEvents {
 
         if (mc.getEntityRenderDispatcher().shouldRenderHitBoxes()) {
             mc.getEntityRenderDispatcher().setRenderHitBoxes(false);
+        }
+
+        if (mc.options.renderDebug || mc.options.renderDebugCharts || mc.options.renderFpsChart) {
+            mc.options.renderDebug = false;
+            mc.options.renderDebugCharts = false;
+            mc.options.renderFpsChart = false;
+        }
+
+        if (mc.options.getCameraType() != CameraType.FIRST_PERSON) {
+            mc.options.setCameraType(CameraType.FIRST_PERSON);
         }
     }
 }

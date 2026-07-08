@@ -2,14 +2,19 @@ package com.makar.tacticaltablet.game.respawn;
 
 import com.makar.tacticaltablet.admin.TestModeManager;
 import com.makar.tacticaltablet.airdrop.AirdropManager;
+import com.makar.tacticaltablet.clan.ClanManager;
 import com.makar.tacticaltablet.game.GameStateManager;
+import com.makar.tacticaltablet.game.MapSetManager;
+import com.makar.tacticaltablet.game.clanwar.ClanWarManager;
 import com.makar.tacticaltablet.game.lives.LivesManager;
 import com.makar.tacticaltablet.game.lobby.LobbyManager;
+import com.makar.tacticaltablet.game.extraction.ExtractionPointManager;
 import com.makar.tacticaltablet.game.teleport.SafeTeleport;
 import com.makar.tacticaltablet.game.team.TeamId;
 import com.makar.tacticaltablet.game.team.TeamMatchManager;
 import com.makar.tacticaltablet.inventory.InventoryManager;
 import com.makar.tacticaltablet.tablet.PlayerTabletState;
+import com.makar.tacticaltablet.voice.VoiceChatTeamManager;
 
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
@@ -43,7 +48,6 @@ public class RtpTimerManager {
         if (!GameStateManager.isRunning(player.server)) return;
         if (PlayerTabletState.isRtpUsed(player)) return;
         if (!LivesManager.canContinueMatch(player)) return;
-
         UUID uuid = player.getUUID();
 
         timers.put(uuid, RTP_DELAY);
@@ -96,6 +100,14 @@ public class RtpTimerManager {
         if (PlayerTabletState.isRtpUsed(player)) {
             if (notify) player.sendSystemMessage(Component.literal("[WAR] RTP уже использован."));
             return false;
+        }
+
+        if (MapSetManager.isClanWarSet()) {
+            String clanId = ClanManager.getClanIdForPlayer(player);
+            if (!clanId.isBlank() && ClanWarManager.isClanEliminated(clanId)) {
+                if (notify) player.sendSystemMessage(Component.literal("[WAR] Клан выбыл из войны кланов."));
+                return false;
+            }
         }
 
         int requiredPlayers = TestModeManager.getRequiredPlayers(2);
@@ -229,6 +241,7 @@ public class RtpTimerManager {
 
         player.removeTag("in_lobby");
         player.addTag("war.playing");
+        VoiceChatTeamManager.assignPlayerToVoiceGroup(player);
         player.removeEffect(MobEffects.DAMAGE_RESISTANCE);
         player.addEffect(new MobEffectInstance(
                 MobEffects.DAMAGE_RESISTANCE,
@@ -239,6 +252,7 @@ public class RtpTimerManager {
                 true
         ));
         AirdropManager.giveCompassToJoiningPlayer(player);
+        ExtractionPointManager.giveCompassToActiveParticipant(player);
 
         if (PlayerTabletState.isKitUsed(player)) {
             InventoryManager.clearTablets(player);

@@ -7,6 +7,7 @@ import com.makar.tacticaltablet.airdrop.AirdropManager;
 import com.makar.tacticaltablet.core.TacticalTabletMod;
 import com.makar.tacticaltablet.game.GameStateManager;
 import com.makar.tacticaltablet.game.lives.LivesManager;
+import com.makar.tacticaltablet.game.team.TeamMatchManager;
 import com.makar.tacticaltablet.tablet.PlayerTabletState;
 
 import net.minecraft.network.chat.Component;
@@ -105,7 +106,7 @@ public class InventoryLockEvents {
         if (!isLobbyOrBattle(player)) return;
 
         ItemEntity item = event.getItem();
-        if (!canUseDroppedItems(player) || !isOwnRecentlyDroppedItem(item, player)) {
+        if (!canUseDroppedItems(player) || !canPickUpRecentlyDroppedItem(item, player)) {
             event.setCanceled(true);
         }
     }
@@ -120,7 +121,7 @@ public class InventoryLockEvents {
         );
     }
 
-    private static boolean isOwnRecentlyDroppedItem(ItemEntity item, ServerPlayer player) {
+    private static boolean canPickUpRecentlyDroppedItem(ItemEntity item, ServerPlayer player) {
         if (item == null || player == null) return false;
 
         purgeExpiredDroppedItems();
@@ -128,7 +129,9 @@ public class InventoryLockEvents {
         DroppedItemOwner owner = playerDroppedItems.get(item.getUUID());
         if (owner == null) return false;
 
-        return owner.owner().equals(player.getUUID()) && owner.expiresAtMillis() >= System.currentTimeMillis();
+        if (owner.expiresAtMillis() < System.currentTimeMillis()) return false;
+        return owner.owner().equals(player.getUUID())
+                || TeamMatchManager.areTeammates(owner.owner(), player.getUUID());
     }
 
     private static void purgeExpiredDroppedItems() {

@@ -1,10 +1,15 @@
 package com.makar.tacticaltablet.airdrop;
 
 import com.makar.tacticaltablet.airdrop.loot.AirdropLootGenerator;
+import com.makar.tacticaltablet.airdrop.net.AirdropSmokeStatePacket;
 import com.makar.tacticaltablet.core.TacticalTabletMod;
+import com.makar.tacticaltablet.core.ModBlocks;
+import com.makar.tacticaltablet.core.ModItems;
+import com.makar.tacticaltablet.core.ModSounds;
 import com.makar.tacticaltablet.game.GameStateManager;
 import com.makar.tacticaltablet.game.lives.LivesManager;
 import com.makar.tacticaltablet.integration.discord.DiscordLeaderboardService;
+import com.makar.tacticaltablet.tablet.net.PacketHandler;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -15,14 +20,13 @@ import net.minecraft.network.protocol.game.ClientboundSetTitleTextPacket;
 import net.minecraft.network.protocol.game.ClientboundSetTitlesAnimationPacket;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.sounds.SoundSource;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EquipmentSlot;
-import net.minecraft.world.entity.decoration.ArmorStand;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.border.WorldBorder;
 import net.minecraft.world.level.levelgen.Heightmap;
@@ -38,7 +42,6 @@ public final class AirdropManager {
     private static final int ANNOUNCE_DELAY_TICKS = 60 * 20;
     private static final int OPENED_DURATION_TICKS = 120 * 20;
     private static final int LANDED_EXPIRE_TICKS = 300 * 20;
-    private static final int PARTICLE_INTERVAL_TICKS = 8;
     private static final int FIND_ATTEMPTS = 50;
     private static final double FALL_START_HEIGHT = 100.0D;
     private static final double FALL_SPEED_PER_TICK = 0.15D;
@@ -47,7 +50,6 @@ public final class AirdropManager {
     private static final boolean REMOVE_CHEST_ON_EXPIRE = false;
 
     private static AirdropData activeAirdrop;
-    private static int particleTicker = 0;
     private static int autoSpawnTicker = 0;
     private static int nextAutoSpawnDelayTicks = FIRST_AUTO_SPAWN_DELAY_TICKS;
 
@@ -161,6 +163,16 @@ public final class AirdropManager {
                 && (activeAirdrop.state == AirdropState.LANDED || activeAirdrop.state == AirdropState.OPENED);
     }
 
+    public static boolean isOrphanedVisualEntity(Entity entity) {
+        if (!(entity instanceof net.minecraft.world.entity.decoration.ArmorStand stand)) return false;
+        if (!stand.getItemBySlot(EquipmentSlot.HEAD).is(ModItems.AIRDROP_CRATE_FLYING.get())) return false;
+
+        return activeAirdrop == null
+                || activeAirdrop.state != AirdropState.FALLING
+                || activeAirdrop.visualEntityId == null
+                || !activeAirdrop.visualEntityId.equals(stand.getUUID());
+    }
+
     public static void finish(ServerLevel level) {
         if (activeAirdrop == null) return;
 
@@ -168,6 +180,7 @@ public final class AirdropManager {
 
         ServerLevel activeLevel = resolveActiveLevel(level);
         if (activeLevel != null) {
+            sendSmokeState(activeLevel, false);
             removeVisualEntity(activeLevel);
 
             if (REMOVE_CHEST_ON_EXPIRE && activeAirdrop.chestPos != null) {
@@ -180,11 +193,16 @@ public final class AirdropManager {
 
         TacticalTabletMod.LOGGER.info("Tactical Tablet AirDrop finished.");
         activeAirdrop = null;
-        particleTicker = 0;
     }
 
     public static void giveCompassToJoiningPlayer(ServerPlayer player) {
         if (player == null || activeAirdrop == null) return;
+
+        if (activeAirdrop.chestPos != null
+                && (activeAirdrop.state == AirdropState.LANDED || activeAirdrop.state == AirdropState.OPENED)) {
+            PacketHandler.sendToPlayer(player, createSmokePacket(true));
+        }
+
         if (!isEligibleForCompass(player)) return;
 
         if (activeAirdrop.state == AirdropState.ANNOUNCED
@@ -203,12 +221,12 @@ public final class AirdropManager {
     public static void resetRuntime(ServerLevel level) {
         ServerLevel activeLevel = resolveActiveLevel(level);
         if (activeLevel != null) {
+            sendSmokeState(activeLevel, false);
             removeVisualEntity(activeLevel);
             removeAirdropCompasses(activeLevel);
         }
 
         activeAirdrop = null;
-        particleTicker = 0;
         autoSpawnTicker = 0;
         nextAutoSpawnDelayTicks = FIRST_AUTO_SPAWN_DELAY_TICKS;
     }
@@ -266,11 +284,6 @@ public final class AirdropManager {
             visual.teleportTo(x, y, z);
         }
 
-        tickParticles();
-        if (particleTicker == 0) {
-            AirdropVisualHelper.spawnFallingCrateParticles(level, x, y, z);
-        }
-
         if (activeAirdrop.currentCrateY <= activeAirdrop.realDropPos.getY() + 1.0D) {
             landAirdrop(level);
         }
@@ -278,11 +291,6 @@ public final class AirdropManager {
 
     private static void tickLanded(ServerLevel level) {
         activeAirdrop.ticksSinceLanded++;
-        tickParticles();
-
-        if (particleTicker == 0) {
-            spawnMarkerParticles(level);
-        }
 
         if (activeAirdrop.ticksSinceLanded >= LANDED_EXPIRE_TICKS) {
             finish(level);
@@ -291,19 +299,10 @@ public final class AirdropManager {
 
     private static void tickOpened(ServerLevel level) {
         activeAirdrop.ticksSinceOpened++;
-        tickParticles();
-
-        if (particleTicker == 0) {
-            spawnMarkerParticles(level);
-        }
 
         if (activeAirdrop.ticksSinceOpened >= OPENED_DURATION_TICKS) {
             finish(level);
         }
-    }
-
-    private static void tickParticles() {
-        particleTicker = (particleTicker + 1) % PARTICLE_INTERVAL_TICKS;
     }
 
     private static BlockPos findSafeDropPos(ServerLevel level) {
@@ -408,14 +407,19 @@ public final class AirdropManager {
         }
     }
 
-    private static void spawnMarkerParticles(ServerLevel level) {
-        AirdropVisualHelper.spawnMarkerParticles(level, activeAirdrop.chestPos, activeAirdrop.greenSmoke);
-    }
-
     private static void spawnFallingCrate(ServerLevel level) {
+        BlockPos visualPos = BlockPos.containing(
+                activeAirdrop.realDropPos.getX() + 0.5D,
+                activeAirdrop.currentCrateY,
+                activeAirdrop.realDropPos.getZ() + 0.5D
+        );
+        if (!level.isPositionEntityTicking(visualPos)) {
+            return;
+        }
+
         removeVisualEntity(level);
 
-        ArmorStand stand = new ArmorStand(
+        AirdropVisualArmorStand stand = new AirdropVisualArmorStand(
                 level,
                 activeAirdrop.realDropPos.getX() + 0.5D,
                 activeAirdrop.currentCrateY,
@@ -425,10 +429,12 @@ public final class AirdropManager {
         stand.setNoGravity(true);
         stand.setInvulnerable(true);
         stand.setSilent(true);
-        stand.setItemSlot(EquipmentSlot.HEAD, new ItemStack(Blocks.CHEST));
+        stand.setItemSlot(EquipmentSlot.HEAD, new ItemStack(ModItems.AIRDROP_CRATE_FLYING.get()));
 
-        level.addFreshEntity(stand);
         activeAirdrop.visualEntityId = stand.getUUID();
+        if (!level.addFreshEntity(stand)) {
+            activeAirdrop.visualEntityId = null;
+        }
     }
 
     private static void landAirdrop(ServerLevel level) {
@@ -441,14 +447,39 @@ public final class AirdropManager {
             return;
         }
 
-        level.setBlock(chestPos, Blocks.CHEST.defaultBlockState(), 3);
+        level.setBlock(chestPos, ModBlocks.AIRDROP_CRATE.get().defaultBlockState(), 3);
         activeAirdrop.chestPos = chestPos;
         activeAirdrop.state = AirdropState.LANDED;
         activeAirdrop.ticksSinceLanded = 0;
 
         AirdropLootGenerator.fillChest(level, chestPos);
+        sendSmokeState(level, true);
+        level.playSound(
+                null,
+                chestPos,
+                ModSounds.PARACHUTE_CLOSE.get(),
+                SoundSource.BLOCKS,
+                1.0F,
+                1.0F
+        );
         broadcast(level, "§c[СБРОС] §fГруз приземлился. Следуйте по дыму.");
         TacticalTabletMod.LOGGER.info("Tactical Tablet AirDrop landed at {}", formatPos(chestPos));
+    }
+
+    private static void sendSmokeState(ServerLevel level, boolean active) {
+        if (level == null || activeAirdrop == null || activeAirdrop.dimension == null) return;
+
+        AirdropSmokeStatePacket packet = createSmokePacket(active);
+        for (ServerPlayer player : level.getServer().getPlayerList().getPlayers()) {
+            PacketHandler.sendToPlayer(player, packet);
+        }
+    }
+
+    private static AirdropSmokeStatePacket createSmokePacket(boolean active) {
+        BlockPos smokePos = activeAirdrop.chestPos != null
+                ? activeAirdrop.chestPos
+                : activeAirdrop.realDropPos;
+        return new AirdropSmokeStatePacket(active, activeAirdrop.dimension.location(), smokePos);
     }
 
     private static BlockPos findChestPlacement(ServerLevel level, BlockPos origin) {

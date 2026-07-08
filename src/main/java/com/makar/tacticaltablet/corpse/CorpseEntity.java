@@ -68,6 +68,10 @@ public class CorpseEntity extends LivingEntity {
         setCustomNameVisible(false);
 
         loot.clearContent();
+        if (stacks == null) {
+            return;
+        }
+
         for (int i = 0; i < stacks.size() && i < loot.getContainerSize(); i++) {
             loot.setItem(i, stacks.get(i).copy());
         }
@@ -109,8 +113,12 @@ public class CorpseEntity extends LivingEntity {
             return InteractionResult.PASS;
         }
 
+        if (!serverPlayer.isAlive() || serverPlayer.isSpectator()) {
+            return InteractionResult.CONSUME;
+        }
+
         UUID ownerId = getOwnerId();
-        if (ownerId != null && ownerId.equals(serverPlayer.getUUID()) && !CorpseTestManager.canLootOwnCorpses()) {
+        if (ownerId != null && ownerId.equals(serverPlayer.getUUID()) && !CorpseTestManager.canLootOwnCorpses(serverPlayer)) {
             serverPlayer.displayClientMessage(Component.literal("Вы не можете лутать свой труп."), true);
             return InteractionResult.CONSUME;
         }

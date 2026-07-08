@@ -3,7 +3,10 @@ package com.makar.tacticaltablet.tablet.net;
 import com.makar.tacticaltablet.anticheat.AntiCheatManager;
 import com.makar.tacticaltablet.anticheat.Severity;
 import com.makar.tacticaltablet.anticheat.ViolationType;
+import com.makar.tacticaltablet.clan.ClanManager;
 import com.makar.tacticaltablet.game.GameStateManager;
+import com.makar.tacticaltablet.game.MapSetManager;
+import com.makar.tacticaltablet.game.clanwar.ClanWarManager;
 import com.makar.tacticaltablet.game.lives.LivesManager;
 import com.makar.tacticaltablet.game.lobby.LobbyManager;
 import com.makar.tacticaltablet.game.respawn.RtpTimerManager;
@@ -51,7 +54,16 @@ public class TabletPacket {
             Map.entry(11, "blackops"),
             Map.entry(12, "cowboy"),
             Map.entry(13, "solider"),
-            Map.entry(14, "rebel")
+            Map.entry(14, "rebel"),
+            Map.entry(15, "saboteur"),
+            Map.entry(16, "killer"),
+            Map.entry(17, "miniboss"),
+            Map.entry(18, "shahed"),
+            Map.entry(19, "krot"),
+            Map.entry(20, "marine"),
+            Map.entry(21, "medic"),
+            Map.entry(22, "microwave"),
+            Map.entry(23, "railgunner")
     );
 
     private final int actionId;
@@ -196,6 +208,11 @@ public class TabletPacket {
     }
 
     private void handleShopPurchase(ServerPlayer player, String kit) {
+        if (MapSetManager.isCompetitiveSet()) {
+            player.sendSystemMessage(Component.literal("[WAR] Магазинные классы недоступны в соревновательном режиме."));
+            LobbyManager.sync(player);
+            return;
+        }
         PlayerProgressManager.PurchaseResult result = PlayerProgressManager.purchaseClass(player, kit);
 
         switch (result) {
@@ -292,6 +309,14 @@ public class TabletPacket {
             return;
         }
 
+        if (MapSetManager.isClanWarSet()
+                && !ClanManager.getClanIdForPlayer(player).isBlank()
+                && !ClanManager.isClanOwner(player)) {
+            player.sendSystemMessage(Component.literal("[WAR] В войне кланов RTP вручную запускает только глава клана."));
+            LobbyManager.sync(player);
+            return;
+        }
+
         RtpTimerManager.forceRtp(player);
     }
 
@@ -330,8 +355,48 @@ public class TabletPacket {
     }
 
     private void handleKit(ServerPlayer player, String kit) {
+        if (MapSetManager.isCompetitiveSet() && PlayerProgressManager.isShopClass(kit)) {
+            player.sendSystemMessage(Component.literal("[WAR] Магазинные классы недоступны в соревновательном режиме."));
+            LobbyManager.sync(player);
+            return;
+        }
+        if (MapSetManager.isClanWarSet()
+                && !ClanWarManager.hasClan(player)
+                && PlayerProgressManager.isShopClass(kit)) {
+            player.sendSystemMessage(Component.literal("[WAR] В войне кланов одиночкам недоступны классы из магазина."));
+            LobbyManager.sync(player);
+            return;
+        }
         if (PlayerProgressManager.isShopClass(kit) && !PlayerProgressManager.isClassPurchased(player, kit)) {
             handleShopPurchase(player, kit);
+            return;
+        }
+
+        if (ClanManager.MARINE_CLASS.equals(kit)) {
+            if (!ClanManager.isClanClassUnlocked(player, kit)) {
+                ClanManager.Result result = ClanManager.purchaseClanClass(player, kit);
+                switch (result) {
+                    case SUCCESS -> player.sendSystemMessage(Component.literal("[WAR] Клан купил класс Морпех за 20KK."));
+                    case NOT_OWNER -> player.sendSystemMessage(Component.literal("[WAR] Морпеха может купить только глава клана."));
+                    case NOT_ENOUGH_COINS -> player.sendSystemMessage(Component.literal("[WAR] Недостаточно KK. Нужно 20KK."));
+                    case NOT_FOUND -> player.sendSystemMessage(Component.literal("[WAR] Для покупки Морпеха нужно состоять в клане."));
+                    default -> player.sendSystemMessage(Component.literal("[WAR] Морпех сейчас недоступен."));
+                }
+                LobbyManager.sync(player);
+                return;
+            }
+        }
+
+        if (PlayerProgressManager.isExclusiveClass(kit)
+                && !PlayerProgressManager.isExclusiveClassGranted(player, kit)) {
+            AntiCheatManager.record(
+                    player,
+                    ViolationType.INVALID_TABLET_PACKET,
+                    Severity.HIGH,
+                    "locked exclusive class actionId=" + actionId
+            );
+            player.sendSystemMessage(Component.literal("[WAR] Этот эксклюзивный класс тебе не выдан."));
+            LobbyManager.sync(player);
             return;
         }
 
@@ -380,7 +445,6 @@ public class TabletPacket {
         }
 
         PlayerTabletState.setSelectedClass(player, kit);
-        ClassCooldownManager.setCooldown(player, actionId);
         PlayerTabletState.setKitUsed(player);
 
         if (PlayerTabletState.isRtpUsed(player)) {
@@ -405,7 +469,15 @@ public class TabletPacket {
         if ("cowboy".equals(kit)) return "Ковбой";
         if ("solider".equals(kit)) return "Солдат";
         if ("rebel".equals(kit)) return "Повстанец";
+        if ("saboteur".equals(kit)) return "Диверсант";
+        if ("killer".equals(kit)) return "Киллер";
+        if ("miniboss".equals(kit)) return "Мини-Босс";
+        if ("shahed".equals(kit)) return "Шахед оп.";
+        if ("krot".equals(kit)) return "Крот";
+        if ("marine".equals(kit)) return "Морпех";
+        if ("medic".equals(kit)) return "Медик";
+        if ("microwave".equals(kit)) return "Микровэйв";
+        if ("railgunner".equals(kit)) return "Рэйл-ганнер";
         return kit;
     }
 }
-

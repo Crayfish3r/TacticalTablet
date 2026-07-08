@@ -1,5 +1,6 @@
 package com.makar.tacticaltablet.progression;
 
+import com.makar.tacticaltablet.game.MapSetManager;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
@@ -7,6 +8,7 @@ import net.minecraft.server.level.ServerPlayer;
 public class XpNotifier {
 
     public static void send(ServerPlayer player, int xp, String reason) {
+        if (player == null || xp <= 0 || reason == null || MapSetManager.isCompetitiveSet()) return;
         ChatFormatting reasonColor = ChatFormatting.YELLOW;
 
         if (reason.contains("mortar")) {

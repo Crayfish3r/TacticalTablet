@@ -5,6 +5,7 @@ import com.makar.tacticaltablet.game.GameStateManager;
 import com.makar.tacticaltablet.game.MatchMode;
 import com.makar.tacticaltablet.game.MatchPhase;
 import com.makar.tacticaltablet.game.lives.LivesManager;
+import com.makar.tacticaltablet.game.team.TeamMatchManager;
 import com.makar.tacticaltablet.inventory.InventoryManager;
 import com.makar.tacticaltablet.progression.ClassXPManager;
 import com.makar.tacticaltablet.progression.PlayerProgressManager;
@@ -31,22 +32,29 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 public final class ContractManager {
 
     public static final int SELECTION_SECONDS = 60;
     public static final int MIN_PLAYERS = 3;
-    public static final int SIGNAL_SECONDS = 30;
+    public static final int SIGNAL_SECONDS = 15;
     public static final int TARGET_AREA_RADIUS = 25;
     private static final int MAX_SELECTION_TARGETS = 16;
+    private static final int ZONE_GRID_SIZE = 50;
+    private static final int TARGET_AREA_OFFSET = 20;
+    private static final int TRACKER_COOLDOWN_SECONDS = 3;
+    private static final long TRACKER_COOLDOWN_MS = TRACKER_COOLDOWN_SECONDS * 1000L;
     private static final Random RANDOM = new Random();
     private static final Map<UUID, Contract> contractsByOwner = new HashMap<>();
+    private static final Map<UUID, Set<UUID>> targetToOwners = new HashMap<>();
     private static final Map<UUID, Long> pickCooldownUntil = new HashMap<>();
-    private static final Set<UUID> trackerOwners = new HashSet<>();
     private static final Set<UUID> debugArmorStands = new HashSet<>();
+    private static final Set<UUID> trackerViewers = ConcurrentHashMap.newKeySet();
     private static int selectionSecondsLeft = 0;
     private static int signalSecondsLeft = SIGNAL_SECONDS;
     private static boolean selectionActive = false;
@@ -57,14 +65,13 @@ public final class ContractManager {
     }
 
     public static void onMatchStart(MinecraftServer server) {
-        contractsByOwner.clear();
-        trackerOwners.clear();
+        clearContracts();
         pickCooldownUntil.clear();
+        trackerViewers.clear();
         signalSecondsLeft = SIGNAL_SECONDS;
         tickCounter = 0;
 
         boolean enabled = server != null
-                && GameStateManager.getCurrentMode() == MatchMode.SOLO
                 && (GameStateManager.onlinePlayers(server) >= MIN_PLAYERS || soloDebugEnabled);
 
         selectionActive = enabled;
@@ -106,10 +113,10 @@ public final class ContractManager {
             removeAllTrackers(server);
             removeDebugArmorStands(server);
         }
-        contractsByOwner.clear();
-        trackerOwners.clear();
+        clearContracts();
         debugArmorStands.clear();
         pickCooldownUntil.clear();
+        trackerViewers.clear();
         selectionActive = false;
         selectionSecondsLeft = 0;
         signalSecondsLeft = SIGNAL_SECONDS;
@@ -126,7 +133,6 @@ public final class ContractManager {
 
     public static void forceStartSelection(MinecraftServer server) {
         if (server == null || !GameStateManager.isRunning(server)) return;
-        if (GameStateManager.getCurrentMode() != MatchMode.SOLO) return;
         selectionActive = true;
         selectionSecondsLeft = SELECTION_SECONDS;
         giveSelectionTrackers(server);
@@ -139,12 +145,6 @@ public final class ContractManager {
 
         if (!selectionActive || selectionSecondsLeft <= 0) {
             owner.sendSystemMessage(Component.literal("[WAR] Выбор контракта уже закрыт."));
-            syncSelection(owner);
-            return false;
-        }
-
-        if (GameStateManager.getCurrentMode() != MatchMode.SOLO) {
-            owner.sendSystemMessage(Component.literal("[WAR] Контракты пока доступны только в соло."));
             syncSelection(owner);
             return false;
         }
@@ -188,7 +188,7 @@ public final class ContractManager {
                 PlayerProgressManager.getWins(target),
                 PlayerProgressManager.getCareerProgressPercent(target)
         );
-        contractsByOwner.put(owner.getUUID(), contract);
+        putContract(contract);
         updateTargetArea(server, contract);
         giveTracker(owner);
 
@@ -196,17 +196,30 @@ public final class ContractManager {
                 + ". Награда: " + difficulty.reward() + " монет."));
         target.sendSystemMessage(Component.literal("[WAR] Игрок \"" + owner.getName().getString()
                 + "\" начал охоту за вами в этой игре."));
-        syncSelection(owner);
-        syncSelection(target);
+        refreshContractAccess(server);
         sendTrackerState(owner, true);
         return true;
     }
 
     public static void onTrackerUsed(ServerPlayer player) {
         if (player == null) return;
+        long now = System.currentTimeMillis();
+        long cooldownUntil = pickCooldownUntil.getOrDefault(player.getUUID(), 0L);
+        if (cooldownUntil > now) {
+            long secondsLeft = Math.max(1L, (cooldownUntil - now + 999L) / 1000L);
+            player.sendSystemMessage(Component.literal("[WAR] РўСЂРµРєРµСЂ РїРµСЂРµР·Р°СЂСЏР¶Р°РµС‚СЃСЏ: " + secondsLeft + " СЃ."));
+            syncSelection(player);
+            return;
+        }
+        pickCooldownUntil.put(player.getUUID(), now + TRACKER_COOLDOWN_MS);
+
         if (!contractsByOwner.containsKey(player.getUUID())) {
             if (canSelectContract(player)) {
                 syncSelection(player);
+                sendTrackerState(player, true);
+                return;
+            }
+            if (!visibleContracts(player).isEmpty()) {
                 sendTrackerState(player, true);
                 return;
             }
@@ -219,6 +232,10 @@ public final class ContractManager {
 
     public static boolean createDebugSelfContract(ServerPlayer player) {
         if (player == null) return false;
+        if (!player.hasPermissions(2)) {
+            player.sendSystemMessage(Component.literal("Доступно только администраторам"));
+            return false;
+        }
 
         ContractDifficulty difficulty = difficultyFor(player);
         Contract contract = new Contract(
@@ -231,7 +248,7 @@ public final class ContractManager {
                 PlayerProgressManager.getWins(player),
                 PlayerProgressManager.getCareerProgressPercent(player)
         );
-        contractsByOwner.put(player.getUUID(), contract);
+        putContract(contract);
         updateTargetArea(player.server, contract);
         giveTracker(player);
         sendTrackerState(player, true);
@@ -241,6 +258,10 @@ public final class ContractManager {
 
     public static boolean createDebugArmorStandContract(ServerPlayer player) {
         if (player == null) return false;
+        if (!player.hasPermissions(2)) {
+            player.sendSystemMessage(Component.literal("Доступно только администраторам"));
+            return false;
+        }
 
         ServerLevel level = GameStateManager.getOverworld(player.server);
         if (level == null) return false;
@@ -273,7 +294,7 @@ public final class ContractManager {
                 0,
                 50
         );
-        contractsByOwner.put(player.getUUID(), contract);
+        putContract(contract);
         contract.setTargetArea(x, z);
         giveTracker(player);
         sendTrackerState(player, true);
@@ -285,69 +306,97 @@ public final class ContractManager {
     public static void onPlayerKilled(ServerPlayer victim, ServerPlayer killer) {
         if (victim == null) return;
         MinecraftServer server = victim.server;
+        Set<UUID> toRemove = new HashSet<>();
 
-        List<UUID> toRemove = new ArrayList<>();
-        for (Contract contract : contractsByOwner.values()) {
-            if (contract.ownerUuid().equals(victim.getUUID())) {
-                ServerPlayer owner = server.getPlayerList().getPlayer(contract.ownerUuid());
-                if (owner != null) {
-                    owner.sendSystemMessage(Component.literal("[WAR] Контракт провален: ты выбыл из матча."));
-                    removeTracker(owner);
+        for (Contract contract : new ArrayList<>(contractsByOwner.values())) {
+            if (contract.targetUuid().equals(victim.getUUID())) {
+                if (killer != null && isContractHunter(contract, killer.getUUID())) {
+                    rewardTeam(
+                            server,
+                            contract.ownerUuid(),
+                            contract.difficulty().reward(),
+                            "Контракт выполнен"
+                    );
+                } else if (isSuicide(victim, killer)) {
+                    ServerPlayer payer = server.getPlayerList().getPlayer(contract.ownerUuid());
+                    if (payer != null) {
+                        PlayerProgressManager.addCoins(payer, contract.difficulty().price());
+                        payer.sendSystemMessage(Component.literal(
+                                "[WAR] Цель контракта погибла сама. Возврат: "
+                                        + contract.difficulty().price() + " монет."
+                        ));
+                    }
+                } else {
+                    notifyTeam(server, contract.ownerUuid(), "Цель выбыла. Контракт закрыт.");
                 }
-                rewardSurvivingTarget(server, contract, "Ты пережил контракт: охотник выбыл");
                 toRemove.add(contract.ownerUuid());
                 continue;
             }
 
-            if (!contract.targetUuid().equals(victim.getUUID())) continue;
-
-            ServerPlayer owner = server.getPlayerList().getPlayer(contract.ownerUuid());
-            boolean completed = killer != null && killer.getUUID().equals(contract.ownerUuid());
-            if (completed && owner != null) {
-                PlayerProgressManager.addCoins(owner, contract.difficulty().reward());
-                PlayerProgressManager.savePlayer(owner);
-                owner.sendSystemMessage(Component.literal("[WAR] Контракт выполнен. Награда: "
-                        + contract.difficulty().reward() + " монет."));
-            } else if (isSuicide(victim, killer) && owner != null) {
-                PlayerProgressManager.addCoins(owner, contract.difficulty().price());
-                PlayerProgressManager.savePlayer(owner);
-                owner.sendSystemMessage(Component.literal("[WAR] Цель контракта погибла сама. Компенсация: "
-                        + contract.difficulty().price() + " монет."));
-            } else if (owner != null) {
-                owner.sendSystemMessage(Component.literal("[WAR] Цель контракта выбыла. Контракт закрыт."));
+            if (isContractHunter(contract, victim.getUUID()) && !hasAliveContractHunter(server, contract)) {
+                notifyTeam(server, contract.ownerUuid(), "Контракт провален: команда выбыла из матча.");
+                rewardSurvivingTarget(server, contract, "Твоя команда пережила контракт");
+                toRemove.add(contract.ownerUuid());
             }
-            if (owner != null) {
-                removeTracker(owner);
-            }
-            toRemove.add(contract.ownerUuid());
         }
 
-        for (UUID uuid : toRemove) {
-            contractsByOwner.remove(uuid);
+        for (UUID ownerUuid : toRemove) {
+            removeContract(ownerUuid);
+        }
+        if (!toRemove.isEmpty()) {
+            refreshContractAccess(server);
         }
     }
-
     public static void syncSelection(ServerPlayer player) {
         if (player == null) return;
         PacketHandler.sendToPlayer(player, selectionState(player));
     }
 
-    public static void finishMatch(MinecraftServer server) {
-        if (server == null || contractsByOwner.isEmpty()) return;
+    public static void onPlayerDisconnect(ServerPlayer player) {
+        if (player == null) return;
+        MinecraftServer server = player.server;
+        UUID uuid = player.getUUID();
+        trackerViewers.remove(uuid);
+        removeTracker(player);
 
+        Set<UUID> toRemove = new HashSet<>();
         for (Contract contract : new ArrayList<>(contractsByOwner.values())) {
-            ServerPlayer owner = server.getPlayerList().getPlayer(contract.ownerUuid());
-            if (owner != null) {
-                removeTracker(owner);
-                owner.sendSystemMessage(Component.literal("[WAR] Контракт закрыт: матч завершён."));
+            if (contract.targetUuid().equals(uuid)) {
+                notifyTeam(server, contract.ownerUuid(), "Цель вышла с сервера. Контракт закрыт.");
+                toRemove.add(contract.ownerUuid());
+                continue;
             }
-            rewardSurvivingTarget(server, contract, "Ты пережил контракт до конца матча");
+
+            if (isContractHunter(contract, uuid)
+                    && !hasAliveContractHunterExcluding(server, contract, uuid)) {
+                rewardSurvivingTarget(server, contract, "Твоя команда пережила контракт");
+                toRemove.add(contract.ownerUuid());
+            }
         }
 
-        contractsByOwner.clear();
-        syncSelectionAll(server);
+        for (UUID ownerUuid : toRemove) {
+            removeContract(ownerUuid);
+        }
+        refreshContractAccess(server);
     }
+    public static void finishMatch(MinecraftServer server) {
+        if (server == null) return;
+        if (contractsByOwner.isEmpty()) {
+            trackerViewers.clear();
+            return;
+        }
 
+        for (Contract contract : new ArrayList<>(contractsByOwner.values())) {
+            notifyTeam(server, contract.ownerUuid(), "Контракт закрыт: матч завершён.");
+            rewardSurvivingTarget(server, contract, "Твоя команда пережила контракт до конца матча");
+        }
+
+        clearContracts();
+        selectionActive = false;
+        selectionSecondsLeft = 0;
+        trackerViewers.clear();
+        refreshContractAccess(server);
+    }
     public static void resetPickCooldowns(MinecraftServer server) {
         pickCooldownUntil.clear();
         syncSelectionAll(server);
@@ -394,9 +443,9 @@ public final class ContractManager {
         return new ContractSelectionStatePacket(
                 selectionActive,
                 selectionSecondsLeft,
-                0L,
+                cooldownLeftMs(viewer),
                 contractsByOwner.containsKey(viewer == null ? null : viewer.getUUID()),
-                GameStateManager.getCurrentMode() == MatchMode.SOLO,
+                GameStateManager.getCurrentMode() != null,
                 entries
         );
     }
@@ -404,6 +453,17 @@ public final class ContractManager {
     public static void sendTrackerState(ServerPlayer player, boolean open) {
         if (player == null) return;
         PacketHandler.sendToPlayer(player, trackerState(player, open));
+    }
+
+    public static void addTrackerViewer(ServerPlayer player) {
+        if (player == null) return;
+        trackerViewers.add(player.getUUID());
+        sendTrackerState(player, false);
+    }
+
+    public static void removeTrackerViewer(ServerPlayer player) {
+        if (player == null) return;
+        trackerViewers.remove(player.getUUID());
     }
 
     public static void giveSelectionTrackerIfAvailable(ServerPlayer player) {
@@ -419,37 +479,44 @@ public final class ContractManager {
     }
 
     private static ContractTrackerStatePacket trackerState(ServerPlayer player, boolean open) {
-        Contract contract = contractsByOwner.get(player.getUUID());
+        List<Contract> contracts = visibleContracts(player);
         ServerLevel overworld = GameStateManager.getOverworld(player.server);
         WorldBorder border = overworld == null ? null : overworld.getWorldBorder();
         int zoneCenterX = border == null ? 0 : (int) Math.round(border.getCenterX());
         int zoneCenterZ = border == null ? 0 : (int) Math.round(border.getCenterZ());
         int zoneRadius = border == null ? 180 : Math.max(1, (int) Math.round(border.getSize() / 2.0D));
 
-        if (contract == null) {
+        if (canSelectContract(player) || contracts.isEmpty()) {
             return ContractTrackerStatePacket.empty(open, zoneCenterX, zoneCenterZ, zoneRadius);
+        }
+
+        List<ContractTrackerStatePacket.TargetEntry> targets = new ArrayList<>();
+        for (Contract contract : contracts) {
+            targets.add(new ContractTrackerStatePacket.TargetEntry(
+                    contract.targetName(),
+                    contract.targetClass(),
+                    contract.targetKills(),
+                    contract.targetWins(),
+                    contract.targetCareerPercent(),
+                    contract.difficulty().ordinal(),
+                    contract.difficulty().price(),
+                    contract.difficulty().reward(),
+                    contract.targetAreaX(),
+                    contract.targetAreaZ(),
+                    TARGET_AREA_RADIUS
+            ));
         }
 
         return new ContractTrackerStatePacket(
                 true,
                 open,
-                contract.targetName(),
-                contract.targetClass(),
-                contract.targetKills(),
-                contract.targetWins(),
-                contract.targetCareerPercent(),
-                contract.difficulty().ordinal(),
-                contract.difficulty().price(),
-                contract.difficulty().reward(),
                 zoneCenterX,
                 zoneCenterZ,
                 zoneRadius,
                 (int) Math.round(player.getX()),
                 (int) Math.round(player.getZ()),
-                contract.targetAreaX(),
-                contract.targetAreaZ(),
-                TARGET_AREA_RADIUS,
-                signalSecondsLeft
+                signalSecondsLeft,
+                targets
         );
     }
 
@@ -458,16 +525,66 @@ public final class ContractManager {
                 && selectionActive
                 && selectionSecondsLeft > 0
                 && GameStateManager.isRunning(player.server)
-                && GameStateManager.getCurrentMode() == MatchMode.SOLO
                 && LivesManager.canContinueMatch(player)
                 && !contractsByOwner.containsKey(player.getUUID());
+    }
+
+    private static long cooldownLeftMs(ServerPlayer player) {
+        if (player == null) return 0L;
+        return Math.max(0L, pickCooldownUntil.getOrDefault(player.getUUID(), 0L) - System.currentTimeMillis());
     }
 
     private static boolean isValidTarget(ServerPlayer owner, ServerPlayer target) {
         return owner != null
                 && target != null
                 && !owner.getUUID().equals(target.getUUID())
+                && !TeamMatchManager.areTeammates(owner, target)
+                && !isTargetClaimedByTeam(owner, target.getUUID())
                 && LivesManager.isAliveParticipant(target);
+    }
+
+    private static boolean isTargetClaimedByTeam(ServerPlayer owner, UUID targetUuid) {
+        if (owner == null || targetUuid == null) return false;
+        for (Contract contract : contractsByOwner.values()) {
+            if (contract.targetUuid().equals(targetUuid)
+                    && sameContractTeam(owner.getUUID(), contract.ownerUuid())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static List<Contract> visibleContracts(ServerPlayer player) {
+        if (player == null) return List.of();
+
+        List<Contract> result = new ArrayList<>();
+        for (Contract contract : contractsByOwner.values()) {
+            if (sameContractTeam(player.getUUID(), contract.ownerUuid())) {
+                result.add(contract);
+            }
+        }
+        result.sort(Comparator.comparing(Contract::targetName, String.CASE_INSENSITIVE_ORDER));
+        return result;
+    }
+
+    private static boolean sameContractTeam(UUID first, UUID second) {
+        if (first == null || second == null) return false;
+        if (first.equals(second)) return true;
+        return GameStateManager.getCurrentMode() != null
+                && GameStateManager.getCurrentMode().isTeamMode()
+                && TeamMatchManager.areTeammates(first, second);
+    }
+
+    private static List<ServerPlayer> contractTeam(MinecraftServer server, UUID playerUuid) {
+        if (server == null || playerUuid == null) return List.of();
+
+        if (GameStateManager.getCurrentMode() != null && GameStateManager.getCurrentMode().isTeamMode()) {
+            List<ServerPlayer> team = TeamMatchManager.getOnlineTeamMembers(server, playerUuid);
+            if (!team.isEmpty()) return team;
+        }
+
+        ServerPlayer player = server.getPlayerList().getPlayer(playerUuid);
+        return player == null ? List.of() : List.of(player);
     }
 
     private static ContractDifficulty difficultyFor(ServerPlayer target) {
@@ -484,47 +601,144 @@ public final class ContractManager {
         return killer == null || killer.getUUID().equals(victim.getUUID());
     }
 
+    private static boolean isContractHunter(Contract contract, UUID playerUuid) {
+        return contract != null
+                && playerUuid != null
+                && sameContractTeam(contract.ownerUuid(), playerUuid);
+    }
+
+    private static boolean hasAliveContractHunter(MinecraftServer server, Contract contract) {
+        for (ServerPlayer player : contractTeam(server, contract.ownerUuid())) {
+            if (LivesManager.isAliveParticipant(player)) return true;
+        }
+        return false;
+    }
+
+    private static boolean hasAliveContractHunterExcluding(
+            MinecraftServer server,
+            Contract contract,
+            UUID excludedUuid
+    ) {
+        for (ServerPlayer player : contractTeam(server, contract.ownerUuid())) {
+            if (player.getUUID().equals(excludedUuid)) continue;
+            if (LivesManager.isAliveParticipant(player)) return true;
+        }
+        return false;
+    }
+
+    private static void notifyTeam(MinecraftServer server, UUID playerUuid, String message) {
+        for (ServerPlayer member : contractTeam(server, playerUuid)) {
+            member.sendSystemMessage(Component.literal("[WAR] " + message));
+        }
+    }
+
+    private static void rewardTeam(MinecraftServer server, UUID playerUuid, int totalReward, String reason) {
+        List<ServerPlayer> recipients = new ArrayList<>(contractTeam(server, playerUuid));
+        if (recipients.isEmpty() || totalReward <= 0) return;
+
+        recipients.sort(Comparator.comparing(ServerPlayer::getStringUUID));
+        int baseShare = totalReward / recipients.size();
+        int remainder = totalReward % recipients.size();
+
+        for (int i = 0; i < recipients.size(); i++) {
+            ServerPlayer recipient = recipients.get(i);
+            int share = baseShare + (i < remainder ? 1 : 0);
+            if (share <= 0) continue;
+
+            PlayerProgressManager.addCoins(recipient, share);
+            recipient.sendSystemMessage(Component.literal(
+                    "[WAR] " + reason + ". Твоя доля: " + share + " монет."
+            ));
+        }
+    }
+
+    private static void putContract(Contract contract) {
+        if (contract == null) return;
+        removeContract(contract.ownerUuid());
+        contractsByOwner.put(contract.ownerUuid(), contract);
+        targetToOwners.computeIfAbsent(contract.targetUuid(), ignored -> new HashSet<>()).add(contract.ownerUuid());
+    }
+
+    private static Contract removeContract(UUID ownerUuid) {
+        if (ownerUuid == null) return null;
+        Contract removed = contractsByOwner.remove(ownerUuid);
+        if (removed != null) {
+            Set<UUID> owners = targetToOwners.get(removed.targetUuid());
+            if (owners != null) {
+                owners.remove(ownerUuid);
+                if (owners.isEmpty()) {
+                    targetToOwners.remove(removed.targetUuid());
+                }
+            }
+        }
+        return removed;
+    }
+
+    private static void clearContracts() {
+        contractsByOwner.clear();
+        targetToOwners.clear();
+    }
+
     private static void rewardSurvivingTarget(MinecraftServer server, Contract contract, String reason) {
         ServerPlayer target = server.getPlayerList().getPlayer(contract.targetUuid());
         if (target == null || !LivesManager.isAliveParticipant(target)) return;
 
         int reward = Math.max(1, contract.difficulty().reward() / 2);
-        PlayerProgressManager.addCoins(target, reward);
-        PlayerProgressManager.savePlayer(target);
-        target.sendSystemMessage(Component.literal("[WAR] " + reason + ". Награда: " + reward + " монет."));
+        rewardTeam(server, contract.targetUuid(), reward, reason);
     }
 
     private static void updateTargetArea(MinecraftServer server, Contract contract) {
         ServerPlayer target = server.getPlayerList().getPlayer(contract.targetUuid());
         if (target == null) return;
 
-        int roundedX = Math.round(target.getBlockX() / 50.0F) * 50;
-        int roundedZ = Math.round(target.getBlockZ() / 50.0F) * 50;
-        contract.setTargetArea(roundedX + RANDOM.nextInt(41) - 20, roundedZ + RANDOM.nextInt(41) - 20);
+        int roundedX = Math.round(target.getBlockX() / (float) ZONE_GRID_SIZE) * ZONE_GRID_SIZE;
+        int roundedZ = Math.round(target.getBlockZ() / (float) ZONE_GRID_SIZE) * ZONE_GRID_SIZE;
+        contract.setTargetArea(
+                roundedX + RANDOM.nextInt(TARGET_AREA_OFFSET * 2 + 1) - TARGET_AREA_OFFSET,
+                roundedZ + RANDOM.nextInt(TARGET_AREA_OFFSET * 2 + 1) - TARGET_AREA_OFFSET
+        );
     }
 
     private static void syncTrackers(MinecraftServer server) {
-        for (UUID ownerUuid : contractsByOwner.keySet()) {
-            ServerPlayer owner = server.getPlayerList().getPlayer(ownerUuid);
-            if (owner != null) {
-                ensureTracker(owner);
-                sendTrackerState(owner, false);
+        trackerViewers.removeIf(uuid -> server.getPlayerList().getPlayer(uuid) == null);
+
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            if (!visibleContracts(player).isEmpty() || trackerViewers.contains(player.getUUID())) {
+                ensureTracker(player);
+                sendTrackerState(player, false);
             }
         }
     }
 
     private static void removeUnclaimedSelectionTrackers(MinecraftServer server) {
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-            if (!contractsByOwner.containsKey(player.getUUID())) {
+            if (visibleContracts(player).isEmpty()) {
                 removeTracker(player);
             }
         }
     }
 
     public static void ensureTracker(ServerPlayer player) {
-        if (player == null || !contractsByOwner.containsKey(player.getUUID())) return;
+        if (player == null || visibleContracts(player).isEmpty()) return;
         if (hasTracker(player)) return;
         giveTracker(player);
+    }
+
+    private static void refreshContractAccess(MinecraftServer server) {
+        if (server == null) return;
+
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            boolean needsTracker = canSelectContract(player) || !visibleContracts(player).isEmpty();
+            if (needsTracker) {
+                giveTracker(player);
+            } else {
+                removeTracker(player);
+            }
+            syncSelection(player);
+            if (trackerViewers.contains(player.getUUID())) {
+                sendTrackerState(player, false);
+            }
+        }
     }
 
     private static void giveTracker(ServerPlayer player) {
@@ -533,17 +747,21 @@ public final class ContractManager {
         if (!player.getInventory().add(stack)) {
             player.drop(stack, false);
         }
-        trackerOwners.add(player.getUUID());
         InventoryManager.syncInventory(player);
     }
 
     private static boolean hasTracker(ServerPlayer player) {
+        return !findTracker(player).isEmpty();
+    }
+
+    private static ItemStack findTracker(ServerPlayer player) {
+        if (player == null) return ItemStack.EMPTY;
         for (int i = 0; i < player.getInventory().getContainerSize(); i++) {
             if (player.getInventory().getItem(i).getItem() == ModItems.CONTRACT_TRACKER.get()) {
-                return true;
+                return player.getInventory().getItem(i);
             }
         }
-        return false;
+        return ItemStack.EMPTY;
     }
 
     public static void removeTracker(ServerPlayer player) {
@@ -558,7 +776,6 @@ public final class ContractManager {
                 player.getInventory().setItem(i, ItemStack.EMPTY);
             }
         }
-        trackerOwners.remove(player.getUUID());
         InventoryManager.syncInventory(player);
     }
 
@@ -604,6 +821,14 @@ public final class ContractManager {
         if ("cowboy".equals(kit)) return "Ковбой";
         if ("solider".equals(kit)) return "Солдат";
         if ("rebel".equals(kit)) return "Повстанец";
+        if ("saboteur".equals(kit)) return "Диверсант";
+        if ("killer".equals(kit)) return "Киллер";
+        if ("miniboss".equals(kit)) return "Мини-Босс";
+        if ("shahed".equals(kit)) return "Шахед оп.";
+        if ("krot".equals(kit)) return "Крот";
+        if ("medic".equals(kit)) return "Медик";
+        if ("microwave".equals(kit)) return "Микровэйв";
+        if ("railgunner".equals(kit)) return "Рэйл-ганнер";
         return kit;
     }
 
@@ -629,11 +854,11 @@ public final class ContractManager {
                 int targetWins,
                 int targetCareerPercent
         ) {
-            this.ownerUuid = ownerUuid;
-            this.targetUuid = targetUuid;
-            this.targetName = targetName;
-            this.targetClass = targetClass;
-            this.difficulty = difficulty;
+            this.ownerUuid = Objects.requireNonNull(ownerUuid, "ownerUuid");
+            this.targetUuid = Objects.requireNonNull(targetUuid, "targetUuid");
+            this.targetName = Objects.requireNonNull(targetName, "targetName");
+            this.targetClass = Objects.requireNonNull(targetClass, "targetClass");
+            this.difficulty = Objects.requireNonNull(difficulty, "difficulty");
             this.targetKills = targetKills;
             this.targetWins = targetWins;
             this.targetCareerPercent = targetCareerPercent;

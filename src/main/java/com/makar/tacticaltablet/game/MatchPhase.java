@@ -6,7 +6,9 @@ public enum MatchPhase {
     TEAM_SELECT,
     STARTING,
     RUNNING,
-    POST_GAME;
+    POST_GAME,
+    MAP_VOTING,
+    RESTARTING;
 
     public static MatchPhase byId(int id) {
         MatchPhase[] values = values();

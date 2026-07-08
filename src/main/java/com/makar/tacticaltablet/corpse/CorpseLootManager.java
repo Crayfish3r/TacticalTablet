@@ -1,6 +1,7 @@
 package com.makar.tacticaltablet.corpse;
 
 import com.makar.tacticaltablet.core.ModEntities;
+import com.makar.tacticaltablet.core.TacticalTabletMod;
 import com.mojang.authlib.properties.Property;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -20,29 +21,36 @@ public final class CorpseLootManager {
     public static void createCorpse(ServerPlayer victim) {
         if (victim == null || !(victim.level() instanceof ServerLevel level)) return;
 
-        List<ItemStack> loot = selectLoot(victim);
-        victim.getInventory().clearContent();
-        victim.getInventory().setChanged();
+        try {
+            List<ItemStack> loot = selectLoot(victim);
+            if (loot.isEmpty()) {
+                return;
+            }
 
-        if (loot.isEmpty()) {
-            return;
+            CorpseEntity corpse = ModEntities.PLAYER_CORPSE.get().create(level);
+            if (corpse == null) {
+                return;
+            }
+
+            SkinData skin = skinData(victim);
+            corpse.initialize(
+                    victim.getUUID(),
+                    victim.getGameProfile().getName(),
+                    skin.value(),
+                    skin.signature(),
+                    loot
+            );
+            corpse.moveTo(victim.getX(), victim.getY(), victim.getZ(), victim.getYRot(), 0.0F);
+
+            if (!level.addFreshEntity(corpse)) {
+                return;
+            }
+
+            victim.getInventory().clearContent();
+            victim.getInventory().setChanged();
+        } catch (RuntimeException exception) {
+            TacticalTabletMod.LOGGER.error("Failed to create corpse for {}", victim.getGameProfile().getName(), exception);
         }
-
-        CorpseEntity corpse = ModEntities.PLAYER_CORPSE.get().create(level);
-        if (corpse == null) {
-            return;
-        }
-
-        SkinData skin = skinData(victim);
-        corpse.initialize(
-                victim.getUUID(),
-                victim.getGameProfile().getName(),
-                skin.value(),
-                skin.signature(),
-                loot
-        );
-        corpse.moveTo(victim.getX(), victim.getY(), victim.getZ(), victim.getYRot(), 0.0F);
-        level.addFreshEntity(corpse);
     }
 
     private static List<ItemStack> selectLoot(ServerPlayer victim) {

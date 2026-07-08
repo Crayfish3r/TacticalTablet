@@ -2,8 +2,12 @@ package com.makar.tacticaltablet.tablet.client;
 
 import com.makar.tacticaltablet.game.MatchMode;
 import com.makar.tacticaltablet.game.MatchPhase;
+import com.makar.tacticaltablet.clan.ClanListPacket;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
@@ -33,6 +37,8 @@ public class TabletClientState {
     private static int alivePlayers;
     private static int remainingLivesTotal;
     private static int tabletAppearanceTier;
+    private static boolean competitiveSet;
+    private static boolean clanWarSet;
     private static MatchPhase matchPhase = MatchPhase.WAITING;
     private static MatchMode matchMode = MatchMode.SOLO;
     private static MatchMode selectedVote;
@@ -46,16 +52,29 @@ public class TabletClientState {
     private static int teamSlotSize = 1;
     private static int selectedTeam = -1;
     private static Map<String, String> teamSlots = new HashMap<>();
+    private static List<ClanListPacket.ClanEntry> clans = new ArrayList<>();
 
     public static void update(Map<Integer, Long> cd, boolean kit, boolean rtp, long rtpTime) {
-        cooldowns = cd == null ? new HashMap<>() : new HashMap<>(cd);
+        long now = System.currentTimeMillis();
+        Map<Integer, Long> updatedCooldowns = new HashMap<>();
+        if (cd != null) {
+            for (var entry : cd.entrySet()) {
+                if (entry.getKey() == null || entry.getValue() == null) continue;
+                long left = Math.max(0L, entry.getValue());
+                if (left > 0L) {
+                    updatedCooldowns.put(entry.getKey(), now + left);
+                }
+            }
+        }
+        cooldowns = updatedCooldowns;
         kitUsed = kit;
         rtpUsed = rtp;
         rtpEndTime = Math.max(rtpTime, 0L);
     }
 
     public static long getCooldown(int id) {
-        return cooldowns.getOrDefault(id, 0L);
+        long left = cooldowns.getOrDefault(id, 0L) - System.currentTimeMillis();
+        return Math.max(left, 0L);
     }
 
     public static boolean isKitUsed() {
@@ -177,6 +196,22 @@ public class TabletClientState {
         return tabletAppearanceTier;
     }
 
+    public static void updateCompetitiveSet(boolean competitive) {
+        competitiveSet = competitive;
+    }
+
+    public static boolean isCompetitiveSet() {
+        return competitiveSet;
+    }
+
+    public static void updateClanWarSet(boolean clanWar) {
+        clanWarSet = clanWar;
+    }
+
+    public static boolean isClanWarSet() {
+        return clanWarSet;
+    }
+
     public static void updateMatchSetup(
             MatchPhase phase,
             MatchMode mode,
@@ -250,6 +285,14 @@ public class TabletClientState {
 
     public static String getTeamSlotName(int teamId, int slot) {
         return teamSlots.getOrDefault(teamId + ":" + slot, "");
+    }
+
+    public static void updateClans(List<ClanListPacket.ClanEntry> updatedClans) {
+        clans = updatedClans == null ? new ArrayList<>() : new ArrayList<>(updatedClans);
+    }
+
+    public static List<ClanListPacket.ClanEntry> getClans() {
+        return Collections.unmodifiableList(clans);
     }
 
     public static int getWins() {

@@ -47,8 +47,8 @@ public class PassiveClassXPManager {
                 seconds = 0;
 
                 String clazz = PlayerTabletState.getSelectedClass(player);
-                ClassXPManager.addXP(player, clazz, PASSIVE_XP);
-                XpNotifier.send(player, PASSIVE_XP, "class survival time");
+                int awardedXp = ClassXPManager.addXP(player, clazz, PASSIVE_XP);
+                XpNotifier.send(player, awardedXp, "class survival time");
             }
 
             playedSeconds.put(uuid, seconds);

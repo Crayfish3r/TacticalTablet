@@ -24,5 +24,23 @@
         "stream": false
       }
     ]
+  },
+
+  "parachute_close": {
+    "sounds": [
+      {
+        "name": "tacticaltablet:parachute_close",
+        "stream": false
+      }
+    ]
+  },
+
+  "sad_thrombone": {
+    "sounds": [
+      {
+        "name": "tacticaltablet:sad_thrombone",
+        "stream": false
+      }
+    ]
   }
 }

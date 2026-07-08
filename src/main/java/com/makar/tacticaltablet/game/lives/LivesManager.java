@@ -1,12 +1,19 @@
 package com.makar.tacticaltablet.game.lives;
 
+import com.makar.tacticaltablet.clan.ClanManager;
 import com.makar.tacticaltablet.game.GameStateManager;
+import com.makar.tacticaltablet.game.MapSetManager;
+import com.makar.tacticaltablet.game.SpectatorCameraManager;
+import com.makar.tacticaltablet.game.clanwar.ClanWarManager;
+import com.makar.tacticaltablet.game.lobby.LobbyManager;
 import com.makar.tacticaltablet.game.respawn.RespawnControlManager;
 import com.makar.tacticaltablet.game.respawn.RtpTimerManager;
 import com.makar.tacticaltablet.inventory.InventoryManager;
 import com.makar.tacticaltablet.progression.ClassXPManager;
+import com.makar.tacticaltablet.progression.ClassCooldownManager;
 import com.makar.tacticaltablet.progression.PassiveClassXPManager;
 import com.makar.tacticaltablet.tablet.PlayerTabletState;
+import com.makar.tacticaltablet.voice.VoiceChatTeamManager;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.commands.CommandSourceStack;
@@ -135,12 +142,18 @@ public class LivesManager {
     public static int handleDeath(ServerPlayer victim) {
         if (victim == null) return 0;
 
+        if (MapSetManager.isClanWarSet()) {
+            return handleClanWarDeath(victim);
+        }
+
         if (!victim.getTags().contains(TAG_LIVES_INIT)) {
             ensureStarted(victim);
         }
 
         int lives = Math.max(0, getLives(victim) - 1);
         setLives(victim, lives);
+
+        ClassCooldownManager.setCooldownForSelectedClass(victim);
 
         victim.removeTag("war.playing");
         RtpTimerManager.cancel(victim);
@@ -156,10 +169,70 @@ public class LivesManager {
         return lives;
     }
 
+    private static int handleClanWarDeath(ServerPlayer victim) {
+        if (victim == null) return 0;
+
+        if (!victim.getTags().contains(TAG_LIVES_INIT)) {
+            ensureStarted(victim);
+        }
+
+        String clanId = ClanManager.getClanIdForPlayer(victim);
+        ClassCooldownManager.setCooldownForSelectedClass(victim);
+
+        victim.removeTag("war.playing");
+        victim.removeTag("in_lobby");
+        victim.addTag(ClanWarManager.TAG_SPECTATING);
+        RtpTimerManager.cancel(victim);
+        PassiveClassXPManager.clear(victim);
+        VoiceChatTeamManager.removePlayerFromVoiceGroup(victim);
+
+        if (clanId.isBlank()) {
+            eliminate(victim, 0);
+            return 0;
+        }
+
+        if (!ClanWarManager.isClanWiped(victim.server, clanId)) {
+            victim.sendSystemMessage(Component.literal("[WAR] Ты погиб. Ожидай исхода боя клана."));
+            return ClanWarManager.getClanLives(clanId);
+        }
+
+        int remaining = ClanWarManager.consumeClanLife(victim.server, clanId);
+        if (remaining <= 0 || RespawnControlManager.areRespawnsDisabled()) {
+            ClanWarManager.eliminateClan(victim.server, clanId);
+            eliminateClan(victim.server, clanId);
+            return 0;
+        }
+
+        regroupClan(victim.server, clanId);
+        return remaining;
+    }
+
+    private static void regroupClan(MinecraftServer server, String clanId) {
+        ClanWarManager.markClanForRegroup(server, clanId);
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            if (!clanId.equals(ClanManager.getClanIdForPlayer(player))) continue;
+            if (player.isDeadOrDying()) continue;
+            ClanWarManager.preparePlayerForRegroup(player);
+            LobbyManager.moveToLobby(player);
+            ClassXPManager.sync(player);
+        }
+    }
+
+    private static void eliminateClan(MinecraftServer server, String clanId) {
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            if (!clanId.equals(ClanManager.getClanIdForPlayer(player))) continue;
+            player.removeTag(ClanWarManager.TAG_SPECTATING);
+            player.removeTag(ClanWarManager.TAG_REGROUP_PENDING);
+            eliminate(player, 0);
+        }
+    }
+
     public static void eliminateForRespawnDisabled(ServerPlayer player) {
         if (player == null) return;
 
         int unusedLives = Math.max(0, getLives(player));
+        ClassCooldownManager.setCooldownForSelectedClass(player);
+
         player.removeTag("war.playing");
         player.removeTag("in_lobby");
         RtpTimerManager.cancel(player);
@@ -186,6 +259,8 @@ public class LivesManager {
     public static void moveEliminatedToSpectator(ServerPlayer player) {
         if (player == null) return;
 
+        VoiceChatTeamManager.removePlayerFromVoiceGroup(player);
+
         MinecraftServer server = player.server;
         ServerLevel overworld = GameStateManager.getOverworld(server);
         if (overworld == null) return;
@@ -211,6 +286,7 @@ public class LivesManager {
 
         player.teleportTo(overworld, x, y, z, player.getYRot(), player.getXRot());
         player.setGameMode(GameType.SPECTATOR);
+        SpectatorCameraManager.onPlayerEliminated(player);
         ClassXPManager.sync(player);
     }
 

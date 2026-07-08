@@ -1,5 +1,6 @@
 package com.makar.tacticaltablet.game.respawn;
 
+import com.makar.tacticaltablet.game.MapSetManager;
 import com.makar.tacticaltablet.game.lives.LivesManager;
 import com.makar.tacticaltablet.progression.ClassXPManager;
 import com.makar.tacticaltablet.progression.PlayerProgressManager;
@@ -54,13 +55,15 @@ public class RespawnControlManager {
         PlayerProgressManager.addCoins(player, coinReward);
 
         String clazz = PlayerTabletState.getSelectedClass(player);
-        if (ClassXPManager.isStandardClass(clazz)) {
-            ClassXPManager.addXP(player, clazz, xpReward);
+        boolean xpEnabled = !MapSetManager.isCompetitiveSet() && ClassXPManager.isStandardClass(clazz);
+        int awardedXp = 0;
+        if (xpEnabled) {
+            awardedXp = ClassXPManager.addXP(player, clazz, xpReward);
         }
 
         player.sendSystemMessage(Component.literal("[WAR] Компенсация за неиспользованные жизни: +"
                 + coinReward + " монет"
-                + (ClassXPManager.isStandardClass(clazz) ? ", +" + xpReward + " опыта" : "")
+                + (xpEnabled ? ", +" + awardedXp + " опыта" : "")
                 + "."));
         PlayerProgressManager.savePlayer(player);
         ClassXPManager.sync(player);

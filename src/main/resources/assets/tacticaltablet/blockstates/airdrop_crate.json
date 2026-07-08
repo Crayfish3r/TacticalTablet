@@ -1,0 +1,10 @@
+{
+  "variants": {
+    "opened=false": {
+      "model": "tacticaltablet:block/airdrop_crate_closed"
+    },
+    "opened=true": {
+      "model": "tacticaltablet:block/airdrop_crate_open"
+    }
+  }
+}

@@ -1,6 +1,7 @@
 package com.makar.tacticaltablet.progression;
 
 import com.makar.tacticaltablet.core.TacticalTabletMod;
+import com.makar.tacticaltablet.game.MapSetManager;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -26,6 +27,8 @@ import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.UUID;
 import java.util.stream.Stream;
 
 public class PlayerProgressManager {
@@ -40,7 +43,7 @@ public class PlayerProgressManager {
     private static final String BACKUPS_DIRECTORY = "backups";
     private static final String SEASON_FILE = "season.json";
 
-    private static final int DATA_VERSION = 5;
+    private static final int DATA_VERSION = 9;
     public static final int STANDARD_TIER = 0;
     public static final int EPIC_TIER = 1;
     public static final int LEGEND_TIER = 2;
@@ -76,7 +79,18 @@ public class PlayerProgressManager {
             "blackops",
             "cowboy",
             "solider",
-            "rebel"
+            "rebel",
+            "saboteur"
+    };
+
+    private static final String[] EXCLUSIVE_CLASSES = new String[]{
+            "killer",
+            "miniboss",
+            "shahed",
+            "krot",
+            "medic",
+            "microwave",
+            "railgunner"
     };
 
     private static final String[] ALL_CLASSES = new String[]{
@@ -93,7 +107,8 @@ public class PlayerProgressManager {
             "blackops",
             "cowboy",
             "solider",
-            "rebel"
+            "rebel",
+            "saboteur"
     };
 
     private static final Map<String, Integer> SHOP_CLASS_PRICES = Map.of(
@@ -103,7 +118,8 @@ public class PlayerProgressManager {
             "blackops", 1000,
             "cowboy", 100,
             "solider", 50,
-            "rebel", 1000
+            "rebel", 1000,
+            "saboteur", 1000
     );
 
     private static final Map<String, Integer> SHOP_CLASS_LEVELS = Map.of(
@@ -113,7 +129,8 @@ public class PlayerProgressManager {
             "blackops", 2,
             "cowboy", 1,
             "solider", 0,
-            "rebel", 2
+            "rebel", 2,
+            "saboteur", 2
     );
 
     private static final int AUTOSAVE_INTERVAL_TICKS = 20 * 60;
@@ -173,6 +190,10 @@ public class PlayerProgressManager {
         return ALL_CLASSES.clone();
     }
 
+    public static String[] getExclusiveClasses() {
+        return EXCLUSIVE_CLASSES.clone();
+    }
+
     public static int getShopPrice(String clazz) {
         return SHOP_CLASS_PRICES.getOrDefault(normalizeClass(clazz), 0);
     }
@@ -183,6 +204,10 @@ public class PlayerProgressManager {
 
     public static boolean isShopClass(String clazz) {
         return SHOP_CLASS_PRICES.containsKey(normalizeClass(clazz));
+    }
+
+    public static boolean isExclusiveClass(String clazz) {
+        return containsClass(EXCLUSIVE_CLASSES, clazz);
     }
 
     public static boolean isInitialBaseClass(String clazz) {
@@ -299,11 +324,11 @@ public class PlayerProgressManager {
         return progress.classes.getOrDefault(normalizeClass(clazz), 0);
     }
 
-    public static synchronized void addXP(ServerPlayer player, String clazz, int amount) {
-        if (player == null || clazz == null || clazz.isBlank() || amount <= 0) return;
+    public static synchronized int addXP(ServerPlayer player, String clazz, int amount) {
+        if (player == null || clazz == null || clazz.isBlank() || amount <= 0) return 0;
 
         String normalizedClass = normalizeClass(clazz);
-        if (!canGainXp(player, normalizedClass)) return;
+        if (!canGainXp(player, normalizedClass)) return 0;
 
         String key = getPlayerKey(player);
         PlayerProgress progress = getOrLoad(player, key);
@@ -313,6 +338,79 @@ public class PlayerProgressManager {
 
         progress.classes.put(normalizedClass, capped);
         markDirty(key);
+        return Math.max(0, capped - current);
+    }
+
+    public static synchronized boolean isXpBoostEnabled(ServerPlayer player) {
+        if (player == null) return false;
+        PlayerProgress progress = getOrLoad(player, getPlayerKey(player));
+        return progress.xpBoost;
+    }
+
+    public static synchronized void setXpBoostEnabled(ServerPlayer player, boolean enabled) {
+        if (player == null) return;
+
+        String key = getPlayerKey(player);
+        PlayerProgress progress = getOrLoad(player, key);
+        if (progress.xpBoost == enabled) return;
+
+        progress.xpBoost = enabled;
+        markDirty(key);
+    }
+
+    public static synchronized boolean isXpBoostEnabled(MinecraftServer server, UUID uuid) {
+        if (server == null || uuid == null) return false;
+        PlayerProgress progress = getOrLoad(server, uuid, "");
+        return progress.xpBoost;
+    }
+
+    public static synchronized void setXpBoostEnabled(MinecraftServer server, UUID uuid, String lastKnownName, boolean enabled) {
+        if (server == null || uuid == null) return;
+
+        PlayerProgress progress = getOrLoad(server, uuid, lastKnownName);
+        if (progress.xpBoost == enabled) {
+            saveOffline(uuid, progress);
+            return;
+        }
+
+        progress.xpBoost = enabled;
+        saveOffline(uuid, progress);
+    }
+
+    public static synchronized boolean isSadTromboneKillsEnabled(ServerPlayer player) {
+        if (player == null) return false;
+        PlayerProgress progress = getOrLoad(player, getPlayerKey(player));
+        return progress.sadTromboneKills;
+    }
+
+    public static synchronized void setSadTromboneKillsEnabled(ServerPlayer player, boolean enabled) {
+        if (player == null) return;
+
+        String key = getPlayerKey(player);
+        PlayerProgress progress = getOrLoad(player, key);
+        if (progress.sadTromboneKills == enabled) return;
+
+        progress.sadTromboneKills = enabled;
+        markDirty(key);
+    }
+
+    public static synchronized boolean isSadTromboneKillsEnabled(MinecraftServer server, UUID uuid) {
+        if (server == null || uuid == null) return false;
+        PlayerProgress progress = getOrLoad(server, uuid, "");
+        return progress.sadTromboneKills;
+    }
+
+    public static synchronized void setSadTromboneKillsEnabled(MinecraftServer server, UUID uuid, String lastKnownName, boolean enabled) {
+        if (server == null || uuid == null) return;
+
+        PlayerProgress progress = getOrLoad(server, uuid, lastKnownName);
+        if (progress.sadTromboneKills == enabled) {
+            saveOffline(uuid, progress);
+            return;
+        }
+
+        progress.sadTromboneKills = enabled;
+        saveOffline(uuid, progress);
     }
 
     public static synchronized void setXP(ServerPlayer player, String clazz, int amount) {
@@ -331,6 +429,10 @@ public class PlayerProgressManager {
 
     public static synchronized int getLevel(ServerPlayer player, String clazz) {
         String normalizedClass = normalizeClass(clazz);
+
+        if (MapSetManager.isCompetitiveSet()) {
+            return isBaseProgressionClass(normalizedClass) ? EPIC_TIER : STANDARD_TIER;
+        }
 
         if (isShopClass(normalizedClass)) {
             return isClassPurchased(player, normalizedClass) ? getShopFixedLevel(normalizedClass) : 0;
@@ -355,6 +457,7 @@ public class PlayerProgressManager {
 
         String normalizedClass = normalizeClass(clazz);
         if (!isBaseProgressionClass(normalizedClass)) return false;
+        if (MapSetManager.isCompetitiveSet()) return true;
 
         PlayerProgress progress = getOrLoad(player, getPlayerKey(player));
         return isBaseClassUnlocked(progress, normalizedClass);
@@ -362,12 +465,14 @@ public class PlayerProgressManager {
 
     public static synchronized boolean canGainXp(ServerPlayer player, String clazz) {
         if (player == null || clazz == null) return false;
+        if (MapSetManager.isCompetitiveSet()) return false;
         String normalizedClass = normalizeClass(clazz);
         return isBaseProgressionClass(normalizedClass) && isBaseClassUnlocked(player, normalizedClass);
     }
 
     public static synchronized ProgressionResult unlockBaseClass(ServerPlayer player, String clazz) {
         if (player == null || clazz == null) return ProgressionResult.INVALID_CLASS;
+        if (MapSetManager.isCompetitiveSet()) return ProgressionResult.ALREADY_UNLOCKED;
 
         String normalizedClass = normalizeClass(clazz);
         if (!isUnlockableBaseClass(normalizedClass)) {
@@ -394,6 +499,7 @@ public class PlayerProgressManager {
 
     public static synchronized ProgressionResult upgradeClassTier(ServerPlayer player, String clazz, int targetTier) {
         if (player == null || clazz == null) return ProgressionResult.INVALID_CLASS;
+        if (MapSetManager.isCompetitiveSet()) return ProgressionResult.WRONG_TIER;
 
         String normalizedClass = normalizeClass(clazz);
         if (!isBaseProgressionClass(normalizedClass)) {
@@ -445,6 +551,19 @@ public class PlayerProgressManager {
         markDirty(key);
     }
 
+    public static synchronized boolean addCoins(MinecraftServer server, UUID uuid, int amount) {
+        if (server == null || uuid == null || amount == 0) return false;
+        return addCoins(server, uuid, "", amount);
+    }
+
+    public static synchronized boolean addCoins(MinecraftServer server, UUID uuid, String lastKnownName, int amount) {
+        if (server == null || uuid == null || amount == 0) return false;
+
+        PlayerProgress progress = getOrLoad(server, uuid, lastKnownName);
+        progress.coins = Math.max(0, safeAdd(progress.coins, amount));
+        return saveOffline(uuid, progress);
+    }
+
     public static synchronized int getCoins(ServerPlayer player) {
         if (player == null) return 0;
 
@@ -459,6 +578,83 @@ public class PlayerProgressManager {
         PlayerProgress progress = getOrLoad(player, key);
         progress.coins = Math.max(0, amount);
         markDirty(key);
+    }
+
+    public static synchronized int getCoins(MinecraftServer server, UUID uuid, String lastKnownName) {
+        if (server == null || uuid == null) return 0;
+        PlayerProgress progress = getOrLoad(server, uuid, lastKnownName);
+        return progress.coins;
+    }
+
+    public static synchronized boolean setCoins(MinecraftServer server, UUID uuid, String lastKnownName, int amount) {
+        if (server == null || uuid == null) return false;
+
+        PlayerProgress progress = getOrLoad(server, uuid, lastKnownName);
+        progress.coins = Math.max(0, amount);
+        return saveOffline(uuid, progress);
+    }
+
+    public static synchronized void updateLastKnownName(MinecraftServer server, UUID uuid, String name) {
+        if (server == null || uuid == null || name == null || name.isBlank()) return;
+
+        PlayerProgress progress = getOrLoad(server, uuid, name);
+        if (!Objects.equals(progress.name, name)) {
+            progress.name = name;
+            saveOffline(uuid, progress);
+        }
+    }
+
+    public static synchronized Optional<KnownPlayer> findKnownPlayerByUuid(MinecraftServer server, UUID uuid) {
+        if (server == null || uuid == null) return Optional.empty();
+
+        String key = compactUuid(uuid);
+        PlayerProgress progress = getOrLoadIfExists(server, uuid);
+        if (progress == null) {
+            return Optional.empty();
+        }
+
+        return Optional.of(new KnownPlayer(uuid, progress.name == null || progress.name.isBlank() ? uuid.toString() : progress.name));
+    }
+
+    public static synchronized Optional<KnownPlayer> findKnownPlayerByName(MinecraftServer server, String name) {
+        if (server == null || name == null || name.isBlank()) return Optional.empty();
+        init(server);
+
+        String normalized = name.trim().toLowerCase(Locale.ROOT);
+        for (Map.Entry<String, PlayerProgress> entry : cache.entrySet()) {
+            PlayerProgress progress = entry.getValue();
+            if (progress == null || progress.name == null) continue;
+            if (progress.name.toLowerCase(Locale.ROOT).equals(normalized)) {
+                UUID uuid = parseProgressUuid(entry.getKey(), progress);
+                if (uuid != null) {
+                    return Optional.of(new KnownPlayer(uuid, progress.name));
+                }
+            }
+        }
+
+        if (playersRoot == null || !Files.isDirectory(playersRoot)) {
+            return Optional.empty();
+        }
+
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(playersRoot, "*.json")) {
+            for (Path file : stream) {
+                PlayerProgress progress = readProgressFile(file);
+                if (progress == null || progress.name == null) continue;
+                if (!progress.name.toLowerCase(Locale.ROOT).equals(normalized)) continue;
+
+                String key = stripJsonExtension(file.getFileName().toString());
+                UUID uuid = parseProgressUuid(key, progress);
+                if (uuid == null) continue;
+
+                normalize(progress);
+                cache.putIfAbsent(key, progress);
+                return Optional.of(new KnownPlayer(uuid, progress.name));
+            }
+        } catch (IOException exception) {
+            TacticalTabletMod.LOGGER.error("Failed to scan Tactical Tablet progress players", exception);
+        }
+
+        return Optional.empty();
     }
 
     public static synchronized void addMatchPlayed(ServerPlayer player) {
@@ -527,6 +723,7 @@ public class PlayerProgressManager {
 
     public static synchronized boolean isClassPurchased(ServerPlayer player, String clazz) {
         if (player == null || clazz == null) return false;
+        if (MapSetManager.isCompetitiveSet()) return false;
 
         String normalizedClass = normalizeClass(clazz);
         if (!isShopClass(normalizedClass)) return false;
@@ -537,6 +734,7 @@ public class PlayerProgressManager {
 
     public static synchronized PurchaseResult purchaseClass(ServerPlayer player, String clazz) {
         if (player == null || clazz == null) return PurchaseResult.NOT_PURCHASABLE;
+        if (MapSetManager.isCompetitiveSet()) return PurchaseResult.NOT_PURCHASABLE;
 
         String normalizedClass = normalizeClass(clazz);
         int price = getShopPrice(normalizedClass);
@@ -563,6 +761,31 @@ public class PlayerProgressManager {
         return PurchaseResult.PURCHASED;
     }
 
+    public static synchronized boolean isExclusiveClassGranted(ServerPlayer player, String clazz) {
+        if (player == null || clazz == null) return false;
+
+        String normalizedClass = normalizeClass(clazz);
+        if (!isExclusiveClass(normalizedClass)) return false;
+
+        PlayerProgress progress = getOrLoad(player, getPlayerKey(player));
+        return progress.purchasedClasses.getOrDefault(normalizedClass, 0) > 0;
+    }
+
+    public static synchronized boolean grantExclusiveClass(ServerPlayer player, String clazz) {
+        if (player == null || clazz == null) return false;
+
+        String normalizedClass = normalizeClass(clazz);
+        if (!isExclusiveClass(normalizedClass)) return false;
+
+        String key = getPlayerKey(player);
+        PlayerProgress progress = getOrLoad(player, key);
+        if (progress.purchasedClasses.getOrDefault(normalizedClass, 0) > 0) return false;
+
+        progress.purchasedClasses.put(normalizedClass, 1);
+        progress.classes.putIfAbsent(normalizedClass, 0);
+        markDirty(key);
+        return true;
+    }
     public static synchronized Map<String, Integer> getPurchasedClasses(ServerPlayer player) {
         Map<String, Integer> result = new HashMap<>();
         if (player == null) return result;
@@ -570,6 +793,13 @@ public class PlayerProgressManager {
         PlayerProgress progress = getOrLoad(player, getPlayerKey(player));
 
         for (String clazz : SHOP_CLASSES) {
+            String normalizedClass = normalizeClass(clazz);
+            result.put(normalizedClass, MapSetManager.isCompetitiveSet()
+                    ? 0
+                    : progress.purchasedClasses.getOrDefault(normalizedClass, 0) > 0 ? 1 : 0);
+        }
+
+        for (String clazz : EXCLUSIVE_CLASSES) {
             String normalizedClass = normalizeClass(clazz);
             result.put(normalizedClass, progress.purchasedClasses.getOrDefault(normalizedClass, 0) > 0 ? 1 : 0);
         }
@@ -584,7 +814,8 @@ public class PlayerProgressManager {
         PlayerProgress progress = getOrLoad(player, getPlayerKey(player));
         for (String clazz : BASE_CLASSES) {
             String normalizedClass = normalizeClass(clazz);
-            result.put(normalizedClass, isBaseClassUnlocked(progress, normalizedClass) ? 1 : 0);
+            result.put(normalizedClass, MapSetManager.isCompetitiveSet()
+                    || isBaseClassUnlocked(progress, normalizedClass) ? 1 : 0);
         }
         return result;
     }
@@ -596,11 +827,15 @@ public class PlayerProgressManager {
         PlayerProgress progress = getOrLoad(player, getPlayerKey(player));
         for (String clazz : BASE_CLASSES) {
             String normalizedClass = normalizeClass(clazz);
-            result.put(normalizedClass, getStoredTier(progress, normalizedClass));
+            result.put(normalizedClass, MapSetManager.isCompetitiveSet()
+                    ? EPIC_TIER
+                    : getStoredTier(progress, normalizedClass));
         }
         for (String clazz : SHOP_CLASSES) {
             String normalizedClass = normalizeClass(clazz);
-            result.put(normalizedClass, isClassPurchased(player, normalizedClass) ? getShopFixedLevel(normalizedClass) : STANDARD_TIER);
+            result.put(normalizedClass, MapSetManager.isCompetitiveSet()
+                    ? STANDARD_TIER
+                    : isClassPurchased(player, normalizedClass) ? getShopFixedLevel(normalizedClass) : STANDARD_TIER);
         }
         return result;
     }
@@ -681,7 +916,9 @@ public class PlayerProgressManager {
 
         for (String clazz : ALL_CLASSES) {
             String normalizedClass = normalizeClass(clazz);
-            int xp = isShopClass(normalizedClass) ? 0 : progress.classes.getOrDefault(normalizedClass, 0);
+            int xp = isShopClass(normalizedClass)
+                    ? 0
+                    : MapSetManager.isCompetitiveSet() ? EPIC_XP : progress.classes.getOrDefault(normalizedClass, 0);
             result.put(normalizedClass, xp);
         }
 
@@ -696,9 +933,11 @@ public class PlayerProgressManager {
 
         for (String clazz : ALL_CLASSES) {
             String normalizedClass = normalizeClass(clazz);
-            int level = isShopClass(normalizedClass)
-                    ? progress.purchasedClasses.getOrDefault(normalizedClass, 0) > 0 ? getShopFixedLevel(normalizedClass) : STANDARD_TIER
-                    : getStoredTier(progress, normalizedClass);
+            int level = MapSetManager.isCompetitiveSet()
+                    ? isBaseProgressionClass(normalizedClass) ? EPIC_TIER : STANDARD_TIER
+                    : isShopClass(normalizedClass)
+                            ? progress.purchasedClasses.getOrDefault(normalizedClass, 0) > 0 ? getShopFixedLevel(normalizedClass) : STANDARD_TIER
+                            : getStoredTier(progress, normalizedClass);
             result.put(normalizedClass, level);
         }
 
@@ -737,6 +976,77 @@ public class PlayerProgressManager {
         return dataRoot;
     }
 
+    private static PlayerProgress getOrLoad(MinecraftServer server, UUID uuid, String lastKnownName) {
+        init(server);
+
+        PlayerProgress cached = findCachedByUuid(uuid);
+        if (cached != null) {
+            updateIdentity(cached, uuid, lastKnownName);
+            normalize(cached);
+            return cached;
+        }
+
+        LoadedProgress loaded = getOrLoadIfExistsWithKey(server, uuid);
+        PlayerProgress progress = loaded == null ? null : loaded.progress;
+        if (progress == null) {
+            progress = createProgress(uuid, lastKnownName);
+        }
+        updateIdentity(progress, uuid, lastKnownName);
+        normalize(progress);
+        cache.put(getPlayerKey(progress, uuid), progress);
+        return progress;
+    }
+
+    private static PlayerProgress getOrLoadIfExists(MinecraftServer server, UUID uuid) {
+        LoadedProgress loaded = getOrLoadIfExistsWithKey(server, uuid);
+        return loaded == null ? null : loaded.progress;
+    }
+
+    private static LoadedProgress getOrLoadIfExistsWithKey(MinecraftServer server, UUID uuid) {
+        init(server);
+
+        PlayerProgress cached = findCachedByUuid(uuid);
+        if (cached != null) {
+            normalize(cached);
+            return new LoadedProgress(getPlayerKey(cached, uuid), cached);
+        }
+
+        String legacyKey = compactUuid(uuid);
+        Path legacyFile = getPlayerFile(legacyKey);
+        if (Files.exists(legacyFile)) {
+            PlayerProgress progress = readProgressFile(legacyFile);
+            if (progress != null) {
+                normalize(progress);
+                String key = getPlayerKey(progress, uuid);
+                cache.put(key, progress);
+                return new LoadedProgress(key, progress);
+            }
+        }
+
+        if (playersRoot == null || !Files.isDirectory(playersRoot)) {
+            return null;
+        }
+
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(playersRoot, "*.json")) {
+            for (Path file : stream) {
+                PlayerProgress progress = readProgressFile(file);
+                if (progress == null) continue;
+
+                UUID progressUuid = parseProgressUuid(stripJsonExtension(file.getFileName().toString()), progress);
+                if (!uuid.equals(progressUuid)) continue;
+
+                normalize(progress);
+                String key = getPlayerKey(progress, uuid);
+                cache.put(key, progress);
+                return new LoadedProgress(key, progress);
+            }
+        } catch (IOException exception) {
+            TacticalTabletMod.LOGGER.error("Failed to scan Tactical Tablet progress players", exception);
+        }
+
+        return null;
+    }
+
     private static PlayerProgress getOrLoad(ServerPlayer player, String key) {
         init(player.server);
 
@@ -746,10 +1056,18 @@ public class PlayerProgressManager {
             return cached;
         }
 
+        cached = findCachedByUuid(player.getUUID());
+        if (cached != null) {
+            updateIdentity(cached, player);
+            normalize(cached);
+            cache.put(getPlayerKey(cached, player.getUUID()), cached);
+            return cached;
+        }
+
         PlayerProgress progress = readOrCreateProgress(player, key);
         updateIdentity(progress, player);
         normalize(progress);
-        cache.put(key, progress);
+        cache.put(getPlayerKey(progress, player.getUUID()), progress);
         return progress;
     }
 
@@ -771,7 +1089,7 @@ public class PlayerProgressManager {
             try (Reader reader = Files.newBufferedReader(legacyFile, StandardCharsets.UTF_8)) {
                 PlayerProgress progress = GSON.fromJson(reader, PlayerProgress.class);
                 TacticalTabletMod.LOGGER.info(
-                        "Migrating Tactical Tablet progress for {} from name key {} to UUID key {}",
+                        "Migrating Tactical Tablet progress for {} from UUID key {} to name key {}",
                         player.getGameProfile().getName(),
                         legacyFile.getFileName(),
                         file.getFileName()
@@ -790,6 +1108,16 @@ public class PlayerProgressManager {
         PlayerProgress progress = new PlayerProgress();
         progress.name = player.getGameProfile().getName();
         progress.uuid = compactUuid(player);
+        progress.firstSeen = Instant.now().toEpochMilli();
+        progress.lastSeen = progress.firstSeen;
+        normalize(progress);
+        return progress;
+    }
+
+    private static PlayerProgress createProgress(UUID uuid, String lastKnownName) {
+        PlayerProgress progress = new PlayerProgress();
+        progress.name = lastKnownName == null || lastKnownName.isBlank() ? uuid.toString() : lastKnownName;
+        progress.uuid = compactUuid(uuid);
         progress.firstSeen = Instant.now().toEpochMilli();
         progress.lastSeen = progress.firstSeen;
         normalize(progress);
@@ -820,6 +1148,32 @@ public class PlayerProgressManager {
         return changed;
     }
 
+    private static boolean updateIdentity(PlayerProgress progress, UUID uuid, String lastKnownName) {
+        boolean changed = false;
+        String compactUuid = compactUuid(uuid);
+        String safeName = lastKnownName == null || lastKnownName.isBlank()
+                ? progress.name == null || progress.name.isBlank() ? uuid.toString() : progress.name
+                : lastKnownName;
+
+        if (!Objects.equals(progress.uuid, compactUuid)) {
+            progress.uuid = compactUuid;
+            changed = true;
+        }
+
+        if (!Objects.equals(progress.name, safeName)) {
+            progress.name = safeName;
+            changed = true;
+        }
+
+        if (progress.firstSeen <= 0L) {
+            progress.firstSeen = Instant.now().toEpochMilli();
+            changed = true;
+        }
+
+        progress.lastSeen = Instant.now().toEpochMilli();
+        return changed;
+    }
+
     private static void init(MinecraftServer server) {
         if (server == null || dataRoot != null) return;
 
@@ -837,9 +1191,49 @@ public class PlayerProgressManager {
         try {
             Files.createDirectories(playersRoot);
             Files.createDirectories(backupsRoot);
+            migratePlayerFilesToNameKeys();
             ensureSeasonFile();
         } catch (IOException exception) {
             TacticalTabletMod.LOGGER.error("Failed to initialize Tactical Tablet progress storage", exception);
+        }
+    }
+
+    private static void migratePlayerFilesToNameKeys() throws IOException {
+        if (!Files.isDirectory(playersRoot)) return;
+
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(playersRoot, "*.json")) {
+            for (Path source : stream) {
+                String sourceKey = stripJsonExtension(source.getFileName().toString());
+                PlayerProgress progress = readProgressFile(source);
+                if (progress == null) continue;
+
+                UUID uuid = parseProgressUuid(sourceKey, progress);
+                if (uuid == null) continue;
+
+                updateIdentity(progress, uuid, progress.name);
+                normalize(progress);
+
+                String targetKey = getPlayerKey(progress, uuid);
+                if (targetKey.isBlank() || targetKey.equals(sourceKey)) continue;
+
+                Path target = getPlayerFile(targetKey);
+                if (Files.exists(target)) {
+                    TacticalTabletMod.LOGGER.warn(
+                            "Cannot migrate Tactical Tablet progress file {} to {} because target already exists",
+                            source.getFileName(),
+                            target.getFileName()
+                    );
+                    continue;
+                }
+
+                writeJsonAtomically(target, progress);
+                Files.deleteIfExists(source);
+                TacticalTabletMod.LOGGER.info(
+                        "Migrated Tactical Tablet progress file {} to {}",
+                        source.getFileName(),
+                        target.getFileName()
+                );
+            }
         }
     }
 
@@ -880,6 +1274,20 @@ public class PlayerProgressManager {
 
     private static void markDirty(String key) {
         dirty.put(key, Boolean.TRUE);
+    }
+
+    private static PlayerProgress findCachedByUuid(UUID uuid) {
+        if (uuid == null) return null;
+        String compact = compactUuid(uuid);
+
+        for (PlayerProgress progress : cache.values()) {
+            if (progress == null) continue;
+            if (compact.equals(progress.uuid)) {
+                return progress;
+            }
+        }
+
+        return null;
     }
 
     private static void normalize(PlayerProgress progress) {
@@ -933,6 +1341,10 @@ public class PlayerProgressManager {
         }
 
         for (String clazz : SHOP_CLASSES) {
+            progress.purchasedClasses.putIfAbsent(normalizeClass(clazz), 0);
+        }
+
+        for (String clazz : EXCLUSIVE_CLASSES) {
             progress.purchasedClasses.putIfAbsent(normalizeClass(clazz), 0);
         }
     }
@@ -1000,23 +1412,28 @@ public class PlayerProgressManager {
     }
 
     private static String getPlayerKey(ServerPlayer player) {
-        return compactUuid(player);
+        return getPlayerKey(player.getGameProfile().getName(), player.getUUID());
     }
 
     private static Path getLegacyPlayerFile(ServerPlayer player) {
-        String legacyKey = getLegacyPlayerKey(player);
+        String legacyKey = compactUuid(player);
         if (legacyKey.isBlank()) return null;
 
         return getPlayerFile(legacyKey);
     }
 
-    private static String getLegacyPlayerKey(ServerPlayer player) {
-        String name = player.getGameProfile().getName();
+    private static String getPlayerKey(PlayerProgress progress, UUID fallbackUuid) {
+        String key = getPlayerKey(progress == null ? "" : progress.name, fallbackUuid);
+        if (!key.isBlank()) return key;
+        return fallbackUuid == null ? "" : compactUuid(fallbackUuid);
+    }
+
+    private static String getPlayerKey(String name, UUID fallbackUuid) {
         String normalized = name == null ? "" : name.trim().toLowerCase(Locale.ROOT);
         normalized = normalized.replaceAll("[^a-z0-9_.-]", "_");
 
         if (normalized.isBlank()) {
-            normalized = compactUuid(player);
+            normalized = fallbackUuid == null ? "" : compactUuid(fallbackUuid);
         }
 
         return normalized;
@@ -1026,8 +1443,72 @@ public class PlayerProgressManager {
         return player.getUUID().toString().replace("-", "");
     }
 
+    private static String compactUuid(UUID uuid) {
+        return uuid.toString().replace("-", "");
+    }
+
     private static Path getPlayerFile(String key) {
         return playersRoot.resolve(key + ".json");
+    }
+
+    private static boolean saveOffline(UUID uuid, PlayerProgress progress) {
+        if (uuid == null || progress == null) return false;
+
+        progress.lastSeen = Instant.now().toEpochMilli();
+        normalize(progress);
+
+        String key = getPlayerKey(progress, uuid);
+        if (key.isBlank()) return false;
+
+        try {
+            writeJsonAtomically(getPlayerFile(key), progress);
+            dirty.remove(key);
+            cache.put(key, progress);
+            return true;
+        } catch (IOException exception) {
+            TacticalTabletMod.LOGGER.error("Failed to save Tactical Tablet progress for {}", key, exception);
+            markDirty(key);
+            return false;
+        }
+    }
+
+    private static PlayerProgress readProgressFile(Path file) {
+        try (Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
+            return GSON.fromJson(reader, PlayerProgress.class);
+        } catch (JsonSyntaxException | IOException exception) {
+            TacticalTabletMod.LOGGER.error("Failed to read Tactical Tablet progress file {}", file, exception);
+            backupCorruptFile(file);
+            return null;
+        }
+    }
+
+    private static UUID parseProgressUuid(String key, PlayerProgress progress) {
+        UUID uuid = parseCompactUuid(progress == null ? "" : progress.uuid);
+        if (uuid != null) return uuid;
+        return parseCompactUuid(key);
+    }
+
+    private static UUID parseCompactUuid(String value) {
+        if (value == null || value.isBlank()) return null;
+        String normalized = value.trim();
+        try {
+            if (normalized.length() == 32 && normalized.indexOf('-') < 0) {
+                normalized = normalized.substring(0, 8) + "-"
+                        + normalized.substring(8, 12) + "-"
+                        + normalized.substring(12, 16) + "-"
+                        + normalized.substring(16, 20) + "-"
+                        + normalized.substring(20);
+            }
+            return UUID.fromString(normalized);
+        } catch (IllegalArgumentException exception) {
+            return null;
+        }
+    }
+
+    private static String stripJsonExtension(String fileName) {
+        return fileName != null && fileName.endsWith(".json")
+                ? fileName.substring(0, fileName.length() - 5)
+                : fileName;
     }
 
     private static void writeJsonAtomically(Path file, Object value) throws IOException {
@@ -1132,11 +1613,18 @@ public class PlayerProgressManager {
         private int matchesPlayed;
         private int coins;
         private int battlePassXp;
+        private boolean xpBoost;
+        private boolean sadTromboneKills;
         private Map<String, Integer> purchasedClasses = new HashMap<>();
         private Map<String, Integer> donations = new HashMap<>();
         private Map<String, Integer> stats = new HashMap<>();
         private long firstSeen;
         private long lastSeen;
     }
-}
 
+    private record LoadedProgress(String key, PlayerProgress progress) {
+    }
+
+    public record KnownPlayer(UUID uuid, String name) {
+    }
+}

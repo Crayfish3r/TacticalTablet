@@ -8,10 +8,11 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.Level;
 
-import java.util.HashMap;
-import java.util.Iterator;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 public final class MovementAntiCheat {
 
@@ -19,8 +20,10 @@ public final class MovementAntiCheat {
     private static final long MIN_SAMPLE_MS = 250L;
     private static final double MAX_BLOCKS_PER_SECOND = 18.0D;
     private static final double EXTRA_DISTANCE_ALLOWANCE = 6.0D;
+    private static final String TAG_IN_LOBBY = "in_lobby";
+    private static final String TAG_WAR_PLAYING = "war.playing";
 
-    private static final Map<UUID, MovementState> states = new HashMap<>();
+    private static final Map<UUID, MovementState> states = new ConcurrentHashMap<>();
 
     private MovementAntiCheat() {
     }
@@ -34,7 +37,10 @@ public final class MovementAntiCheat {
             check(player, now);
         }
 
-        states.keySet().removeIf(uuid -> server.getPlayerList().getPlayer(uuid) == null);
+        Set<UUID> onlinePlayers = server.getPlayerList().getPlayers().stream()
+                .map(ServerPlayer::getUUID)
+                .collect(Collectors.toSet());
+        states.keySet().removeIf(uuid -> !onlinePlayers.contains(uuid));
     }
 
     public static void reset(ServerPlayer player) {
@@ -42,6 +48,7 @@ public final class MovementAntiCheat {
         states.remove(player.getUUID());
     }
 
+    // Clears all movement anti-cheat runtime state. Intended for server shutdown/reset paths only.
     public static void resetAll() {
         states.clear();
     }
@@ -92,9 +99,9 @@ public final class MovementAntiCheat {
         if (player == null) return false;
         if (player.isSpectator()) return false;
         if (LivesManager.isEliminated(player)) return false;
-        if (GameStateManager.isInLobby(player) || player.getTags().contains("in_lobby")) return false;
+        if (GameStateManager.isInLobby(player) || player.getTags().contains(TAG_IN_LOBBY)) return false;
 
-        return player.getTags().contains("war.playing");
+        return player.getTags().contains(TAG_WAR_PLAYING);
     }
 
     private static String format(double value) {
