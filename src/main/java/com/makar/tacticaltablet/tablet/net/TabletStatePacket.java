@@ -277,10 +277,9 @@ public class TabletStatePacket {
         this.alivePlayers = buf.readInt();
         this.remainingLivesTotal = buf.readInt();
         this.tabletAppearanceTier = buf.readInt();
-        this.matchPhase = MatchPhase.byId(buf.readByte());
-        this.matchMode = MatchMode.byId(buf.readByte());
-        int selectedVoteId = buf.readByte();
-        this.selectedVote = selectedVoteId < 0 ? null : MatchMode.byId(selectedVoteId);
+        this.matchPhase = PacketCodecs.readEnumOrdinal(buf, MatchPhase.values(), "match phase");
+        this.matchMode = PacketCodecs.readEnumOrdinal(buf, MatchMode.values(), "match mode");
+        this.selectedVote = PacketCodecs.readOptionalEnumOrdinal(buf, MatchMode.values(), "selected vote");
         this.voteTimeLeft = buf.readInt();
         this.soloVotes = buf.readInt();
         this.duoVotes = buf.readInt();
@@ -316,31 +315,31 @@ public class TabletStatePacket {
 
         buf.writeInt(classLevels.size());
         for (var entry : classLevels.entrySet()) {
-            buf.writeUtf(entry.getKey());
+            buf.writeUtf(entry.getKey(), MAX_CLASS_KEY_LENGTH);
             buf.writeInt(entry.getValue());
         }
 
         buf.writeInt(classXP.size());
         for (var entry : classXP.entrySet()) {
-            buf.writeUtf(entry.getKey());
+            buf.writeUtf(entry.getKey(), MAX_CLASS_KEY_LENGTH);
             buf.writeInt(entry.getValue());
         }
 
         buf.writeInt(classTiers.size());
         for (var entry : classTiers.entrySet()) {
-            buf.writeUtf(entry.getKey());
+            buf.writeUtf(entry.getKey(), MAX_CLASS_KEY_LENGTH);
             buf.writeInt(entry.getValue());
         }
 
         buf.writeInt(unlockedBaseClasses.size());
         for (var entry : unlockedBaseClasses.entrySet()) {
-            buf.writeUtf(entry.getKey());
+            buf.writeUtf(entry.getKey(), MAX_CLASS_KEY_LENGTH);
             buf.writeInt(entry.getValue());
         }
 
         buf.writeInt(purchasedClasses.size());
         for (var entry : purchasedClasses.entrySet()) {
-            buf.writeUtf(entry.getKey());
+            buf.writeUtf(entry.getKey(), MAX_CLASS_KEY_LENGTH);
             buf.writeInt(entry.getValue());
         }
 
@@ -419,11 +418,7 @@ public class TabletStatePacket {
     }
 
     private static int readBoundedSize(FriendlyByteBuf buf, int max, String field) {
-        int size = buf.readInt();
-        if (size < 0 || size > max) {
-            throw new IllegalArgumentException("Invalid " + field + " size: " + size + " max=" + max);
-        }
-        return size;
+        return PacketCodecs.readBoundedIntSize(buf, max, field);
     }
 
     private static Map<Integer, Long> copyIntLongMap(Map<Integer, Long> input, int maxEntries) {

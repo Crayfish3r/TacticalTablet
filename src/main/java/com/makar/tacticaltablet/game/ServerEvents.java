@@ -7,6 +7,7 @@ import com.makar.tacticaltablet.anticheat.ViolationType;
 import com.makar.tacticaltablet.admin.TestModeManager;
 import com.makar.tacticaltablet.airdrop.AirdropManager;
 import com.makar.tacticaltablet.client.NameTagManager;
+import com.makar.tacticaltablet.clan.ClanManager;
 import com.makar.tacticaltablet.corpse.CorpseLootManager;
 import com.makar.tacticaltablet.core.TacticalTabletMod;
 import com.makar.tacticaltablet.game.clanwar.ClanWarManager;
@@ -39,6 +40,7 @@ import com.makar.tacticaltablet.progression.PlayerProgressManager;
 import com.makar.tacticaltablet.progression.XpNotifier;
 import com.makar.tacticaltablet.progression.kit.KitRotationManager;
 import com.makar.tacticaltablet.tablet.PlayerTabletState;
+import com.makar.tacticaltablet.tablet.net.PacketHandler;
 import com.makar.tacticaltablet.tablet.net.TabletPacket;
 import com.makar.tacticaltablet.voice.VoiceChatTeamManager;
 import net.minecraft.network.chat.Component;
@@ -259,6 +261,7 @@ public class ServerEvents {
 
         if (++utilityTickCounter >= 100) {
             utilityTickCounter = 0;
+            PacketHandler.clearExpiredC2SRateLimits();
             LobbyManager.keepLobbyWeatherClear(event.getServer());
             NameTagManager.applyToAll(event.getServer());
             PunishmentManager.cleanupExpired();
@@ -268,6 +271,7 @@ public class ServerEvents {
     @SubscribeEvent
     public static void onLogout(PlayerEvent.PlayerLoggedOutEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
+            PacketHandler.clearC2SRateLimits(player);
             boolean runningMatchParticipant = GameStateManager.isRunning(player.server)
                     && GameStateManager.getMatchPhase() == MatchPhase.RUNNING
                     && LivesManager.isAliveParticipant(player);
@@ -408,6 +412,7 @@ public class ServerEvents {
 
     @SubscribeEvent
     public static void onServerStarted(ServerStartedEvent event) {
+        PlayerProgressManager.onServerStarted(event.getServer());
         event.getServer().getGameRules().getRule(GameRules.RULE_ANNOUNCE_ADVANCEMENTS).set(false, event.getServer());
         event.getServer().getGameRules().getRule(GameRules.RULE_DO_IMMEDIATE_RESPAWN).set(true, event.getServer());
         DropControlManager.enforceGameRules(event.getServer());
@@ -417,6 +422,7 @@ public class ServerEvents {
         KitRotationManager.onServerStarted(event.getServer());
         MapSetManager.onServerStarted(event.getServer());
         PunishmentManager.load(event.getServer());
+        ClanManager.recoverCreateClanTransactions(event.getServer());
         DiscordLeaderboardService.init(event.getServer());
         LeaderboardScheduler.onServerStarted(event.getServer());
         OnlineWebhookService.onServerStarted(event.getServer());
@@ -462,7 +468,7 @@ public class ServerEvents {
 
     @SubscribeEvent
     public static void onServerStopping(ServerStoppingEvent event) {
-        PlayerProgressManager.saveAll();
+        PlayerProgressManager.flushForShutdown();
         PrefixManager.save();
         PunishmentManager.saveAtomic();
     }

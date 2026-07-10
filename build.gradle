@@ -1,14 +1,14 @@
 plugins {
     id 'eclipse'
     id 'idea'
-    id 'net.minecraftforge.gradle' version '[6.0,6.2)'
+    id 'net.minecraftforge.gradle' version "${forgegradle_version}"
 }
 
-group = 'com.makar.tacticaltablet'
-version = '0.1'
+group = mod_group_id
+version = mod_version
 
 base {
-    archivesName = 'TacticalTablet-fix'
+    archivesName = mod_id
 }
 
 java {
@@ -16,7 +16,20 @@ java {
 }
 
 repositories {
+    mavenCentral()
     maven { url = 'https://maven.maxhenkel.de/repository/public' }
+    exclusiveContent {
+        forRepository {
+            maven {
+                name = 'Modrinth'
+                url = 'https://api.modrinth.com/maven'
+            }
+        }
+        forRepositories(fg.repository)
+        filter {
+            includeGroup 'maven.modrinth'
+        }
+    }
 }
 
 minecraft {
@@ -29,7 +42,7 @@ minecraft {
             property 'forge.logging.markers', 'REGISTRIES'
             property 'forge.logging.console.level', 'debug'
             mods {
-                tacticaltablet {
+                "${mod_id}" {
                     source sourceSets.main
                 }
             }
@@ -39,7 +52,7 @@ minecraft {
             property 'forge.logging.markers', 'REGISTRIES'
             property 'forge.logging.console.level', 'debug'
             mods {
-                tacticaltablet {
+                "${mod_id}" {
                     source sourceSets.main
                 }
             }
@@ -50,6 +63,8 @@ minecraft {
 dependencies {
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
     implementation "de.maxhenkel.voicechat:voicechat-api:${voicechat_api_version}"
+    runtimeOnly fg.deobf("maven.modrinth:simple-voice-chat:forge-${voicechat_version}")
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
 }
 
 
@@ -57,22 +72,106 @@ tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
 }
 
-// Disables the gradle meta-inf replacement task if you are using a static mods.toml
+tasks.named('test', Test).configure {
+    useJUnitPlatform()
+}
+
+def modMetadataProperties = [
+        minecraft_version      : minecraft_version,
+        minecraft_version_range: minecraft_version_range,
+        forge_version_range    : forge_version_range,
+        loader_version_range   : loader_version_range,
+        voicechat_api_version  : voicechat_api_version,
+        mod_id                 : mod_id,
+        mod_name               : mod_name,
+        mod_license            : mod_license,
+        mod_version            : mod_version,
+        mod_authors            : mod_authors,
+        mod_description        : mod_description
+]
+
 tasks.withType(ProcessResources).configureEach {
     filteringCharset = 'UTF-8'
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    inputs.properties(modMetadataProperties)
+    filesMatching('META-INF/mods.toml') {
+        expand(modMetadataProperties)
+    }
 }
 
-jar {
+tasks.withType(AbstractArchiveTask).configureEach {
+    preserveFileTimestamps = false
+    reproducibleFileOrder = true
+}
+
+def verifyModsToml = { File modsToml, String source ->
+    if (!modsToml.isFile()) {
+        throw new GradleException("${source} does not contain META-INF/mods.toml")
+    }
+
+    String content = modsToml.getText('UTF-8')
+    if (content.contains('${')) {
+        throw new GradleException("${source} contains unresolved mods.toml placeholders")
+    }
+
+    def modIdMatcher = content =~ /(?m)^modId\s*=\s*"([^"]+)"/
+    if (!modIdMatcher.find() || modIdMatcher.group(1) != mod_id) {
+        throw new GradleException("${source} modId must match gradle.properties mod_id (${mod_id})")
+    }
+
+    if (!content.contains("version=\"${mod_version}\"")) {
+        throw new GradleException("${source} version must match gradle.properties mod_version (${mod_version})")
+    }
+}
+
+def processedModsToml = layout.buildDirectory.file('resources/main/META-INF/mods.toml')
+
+tasks.register('verifyProcessedModsToml') {
+    dependsOn tasks.named('processResources')
+    inputs.file(processedModsToml)
+    doLast {
+        verifyModsToml(processedModsToml.get().asFile, 'Processed resources')
+    }
+}
+
+tasks.named('jar', Jar).configure {
     manifest {
         attributes([
-            "Specification-Title"     : "tacticaltablet",
-            "Specification-Vendor"    : "makar",
-            "Specification-Version"   : "1",
-            "Implementation-Title"    : project.name,
-            "Implementation-Version"  : project.jar.archiveVersion,
-            "Implementation-Vendor"   : "makar",
-            "Implementation-Timestamp": new Date().format("yyyy-MM-dd'T'HH:mm:ssZ")
+            "Specification-Title"     : mod_id,
+            "Specification-Vendor"    : mod_authors,
+            "Specification-Version"   : project.version,
+            "Implementation-Title"    : mod_name,
+            "Implementation-Version"  : project.version,
+            "Implementation-Vendor"   : mod_authors
         ])
     }
+}
+
+tasks.register('verifyJarModsToml') {
+    dependsOn tasks.named('jar')
+    def archiveFile = tasks.named('jar', Jar).flatMap { it.archiveFile }
+    inputs.file(archiveFile)
+    doLast {
+        def archive = new java.util.zip.ZipFile(archiveFile.get().asFile)
+        try {
+            def entry = archive.getEntry('META-INF/mods.toml')
+            if (entry == null) {
+                throw new GradleException('JAR does not contain META-INF/mods.toml')
+            }
+            def extractedModsToml = File.createTempFile('tacticaltablet-mods-', '.toml')
+            try {
+                extractedModsToml.bytes = archive.getInputStream(entry).bytes
+                verifyModsToml(extractedModsToml, 'JAR')
+            } finally {
+                extractedModsToml.delete()
+            }
+        } finally {
+            archive.close()
+        }
+    }
+}
+
+tasks.named('check') {
+    dependsOn tasks.named('verifyProcessedModsToml')
+    dependsOn tasks.named('verifyJarModsToml')
 }

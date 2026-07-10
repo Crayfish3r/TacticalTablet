@@ -1,5 +1,8 @@
 package com.makar.tacticaltablet.clan;
 
+import com.makar.tacticaltablet.tablet.net.PacketHandler;
+import com.makar.tacticaltablet.inventory.InventoryManager;
+
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
@@ -22,6 +25,8 @@ public class ClanLeavePacket {
         ctx.get().enqueueWork(() -> {
             ServerPlayer player = ctx.get().getSender();
             if (player == null) return;
+            if (!PacketHandler.allowC2S(player, PacketHandler.C2SAction.CLAN_MUTATION)) return;
+            if (!InventoryManager.hasTablet(player)) return;
 
             ClanManager.Result result = ClanManager.leaveCurrentClan(player);
             player.sendSystemMessage(Component.literal(message(result)));

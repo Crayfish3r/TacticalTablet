@@ -8,6 +8,7 @@ import com.makar.tacticaltablet.game.MatchPhase;
 import com.makar.tacticaltablet.game.GameStateManager;
 import com.makar.tacticaltablet.game.lobby.LobbyManager;
 import com.makar.tacticaltablet.game.team.VoteManager;
+import com.makar.tacticaltablet.inventory.InventoryManager;
 
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
@@ -39,6 +40,14 @@ public class VoteModePacket {
         ctx.get().enqueueWork(() -> {
             ServerPlayer player = ctx.get().getSender();
             if (player == null) return;
+            if (!PacketHandler.allowC2S(player, PacketHandler.C2SAction.VOTE)) {
+                LobbyManager.sync(player);
+                return;
+            }
+            if (!InventoryManager.hasTablet(player)) {
+                LobbyManager.sync(player);
+                return;
+            }
 
             if (mode == null) {
                 AntiCheatManager.record(

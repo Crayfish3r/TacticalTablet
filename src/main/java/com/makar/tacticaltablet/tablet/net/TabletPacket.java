@@ -21,11 +21,8 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.network.NetworkEvent;
 
-import java.util.ArrayDeque;
-import java.util.Deque;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.UUID;
 import java.util.function.Supplier;
 
 public class TabletPacket {
@@ -36,9 +33,6 @@ public class TabletPacket {
     private static final int UNLOCK_BASE_ACTION_OFFSET = 100;
     private static final int UPGRADE_EPIC_ACTION_OFFSET = 200;
     private static final int UPGRADE_LEGEND_ACTION_OFFSET = 300;
-    private static final int MAX_TABLET_ACTIONS = 3;
-    private static final long TABLET_RATE_WINDOW_MS = 2_000L;
-    private static final Map<UUID, Deque<Long>> tabletActionTimes = new HashMap<>();
 
     private static final Map<Integer, String> KITS = Map.ofEntries(
             Map.entry(0, "stormtrooper"),
@@ -81,12 +75,11 @@ public class TabletPacket {
     }
 
     public static void reset(ServerPlayer player) {
-        if (player == null) return;
-        tabletActionTimes.remove(player.getUUID());
+        PacketHandler.clearC2SRateLimits(player);
     }
 
     public static void resetAll() {
-        tabletActionTimes.clear();
+        PacketHandler.clearAllC2SRateLimits();
     }
 
     public void handle(Supplier<NetworkEvent.Context> ctx) {
@@ -104,13 +97,8 @@ public class TabletPacket {
                 return;
             }
 
-            if (!allowTabletAction(player)) {
-                AntiCheatManager.record(
-                        player,
-                        ViolationType.PACKET_SPAM,
-                        Severity.HIGH,
-                        "tablet packet rate exceeded actionId=" + actionId
-                );
+            if (!PacketHandler.allowC2S(player, PacketHandler.C2SAction.TABLET)) {
+                LobbyManager.sync(player);
                 return;
             }
 
@@ -189,22 +177,6 @@ public class TabletPacket {
 
     private static boolean isUpgradeLegendAction(int id) {
         return id >= UPGRADE_LEGEND_ACTION_OFFSET && id <= MAX_ACTION_ID;
-    }
-
-    private boolean allowTabletAction(ServerPlayer player) {
-        long now = System.currentTimeMillis();
-        Deque<Long> timestamps = tabletActionTimes.computeIfAbsent(player.getUUID(), uuid -> new ArrayDeque<>());
-
-        while (!timestamps.isEmpty() && now - timestamps.peekFirst() > TABLET_RATE_WINDOW_MS) {
-            timestamps.removeFirst();
-        }
-
-        if (timestamps.size() >= MAX_TABLET_ACTIONS) {
-            return false;
-        }
-
-        timestamps.addLast(now);
-        return true;
     }
 
     private void handleShopPurchase(ServerPlayer player, String kit) {

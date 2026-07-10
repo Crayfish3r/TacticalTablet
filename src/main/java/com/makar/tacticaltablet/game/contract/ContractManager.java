@@ -754,6 +754,11 @@ public final class ContractManager {
         return !findTracker(player).isEmpty();
     }
 
+    /** Server-side packet authorization hook; never trust the client tracker screen. */
+    public static boolean hasTrackerItem(ServerPlayer player) {
+        return hasTracker(player);
+    }
+
     private static ItemStack findTracker(ServerPlayer player) {
         if (player == null) return ItemStack.EMPTY;
         for (int i = 0; i < player.getInventory().getContainerSize(); i++) {

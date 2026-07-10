@@ -13,22 +13,30 @@ import com.makar.tacticaltablet.game.lobby.LobbyManager;
 import com.makar.tacticaltablet.game.team.TeamMatchManager;
 import com.makar.tacticaltablet.progression.ClassXPManager;
 import com.makar.tacticaltablet.progression.PlayerProgressManager;
+import com.makar.tacticaltablet.storage.AtomicFileStore;
+import com.makar.tacticaltablet.storage.FileSaveResult;
+import com.makar.tacticaltablet.storage.LegacyStorageMigration;
+import com.makar.tacticaltablet.storage.TacticalTabletStoragePaths;
 import com.makar.tacticaltablet.tablet.net.PacketHandler;
+import com.makar.tacticaltablet.clan.transaction.ClanCreationPayload;
+import com.makar.tacticaltablet.clan.transaction.ClanEconomyService;
+import com.makar.tacticaltablet.clan.transaction.CreateClanTransaction;
+import com.makar.tacticaltablet.clan.transaction.FileTransactionJournal;
+import com.makar.tacticaltablet.clan.transaction.RepositoryResult;
+import com.makar.tacticaltablet.clan.transaction.TransactionResult;
 
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.level.storage.LevelResource;
 
 import java.io.IOException;
 import java.io.Reader;
-import java.io.Writer;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.format.DateTimeFormatter;
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -53,15 +61,15 @@ public class ClanManager {
             .setPrettyPrinting()
             .disableHtmlEscaping()
             .create();
-    private static final String DATA_DIRECTORY = "tacticaltablet_data";
-    private static final String LEGACY_DATA_DIRECTORY = "tacticaltabletdata";
     private static final String CLANS_FILE = "clans.json";
     private static final int COLOR_SCHEMA_VERSION = 2;
     private static final long JOIN_REQUEST_COOLDOWN_MS = 5_000L;
     private static final int MAX_PENDING_REQUESTS_PER_PLAYER = 5;
     private static final DateTimeFormatter BROKEN_FILE_TIMESTAMP = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
 
+    private static final AtomicFileStore FILE_STORE = new AtomicFileStore();
     private static Path clansFile;
+    private static TacticalTabletStoragePaths storagePaths;
     private static ClanStorage storage = new ClanStorage();
     private static final Map<UUID, Long> lastJoinRequestTimes = new HashMap<>();
     private static boolean loaded;
@@ -82,60 +90,39 @@ public class ClanManager {
         }
     }
 
-    public static synchronized Result createClan(ServerPlayer player, String rawName, int color, String rawTag) {
+    public static Result createClan(ServerPlayer player, String rawName, int color, String rawTag) {
         if (player == null) return Result.INVALID;
 
-        init(player.server);
-
-        String name = normalizeName(rawName);
-        String tag = normalizeTag(rawTag);
-        if (name.length() < 3 || name.length() > ClanConstants.MAX_NAME_LENGTH
-                || tag.isBlank() || tag.length() > ClanConstants.MAX_TAG_LENGTH || !isAllowedColor(color)) {
-            return Result.INVALID;
+        TacticalTabletStoragePaths paths;
+        synchronized (ClanManager.class) {
+            init(player.server);
+            paths = storagePaths;
         }
+        ClanEconomyService service = createEconomyService(player.server, paths, () -> {
+            ClassXPManager.sync(player);
+            syncAll(player.server);
+        });
+        TransactionResult result = service.createClan(new ClanEconomyService.CreateClanRequest(
+                player.getUUID(), player.getGameProfile().getName(), rawName, rawTag, color, ClanConstants.CREATE_COST
+        ));
+        return result.clanResult();
+    }
 
-        String playerId = player.getUUID().toString();
-        if (findClanByMember(playerId) != null) {
-            return Result.ALREADY_IN_CLAN;
+    public static void recoverCreateClanTransactions(MinecraftServer server) {
+        if (server == null) return;
+        TacticalTabletStoragePaths paths;
+        synchronized (ClanManager.class) {
+            init(server);
+            paths = storagePaths;
         }
-
-        if (storage.clans.size() >= ClanConstants.MAX_CLANS) {
-            return Result.CLAN_LIMIT_REACHED;
+        ClanEconomyService.RecoveryReport report = createEconomyService(server, paths, () -> { })
+                .recoverPendingTransactions();
+        if (report.blocked() > 0) {
+            TacticalTabletMod.LOGGER.error("Clan transaction recovery blocked {} record(s): {}",
+                    report.blocked(), report.diagnostics());
+        } else if (report.committed() > 0) {
+            TacticalTabletMod.LOGGER.info("Recovered {} pending clan creation transaction(s)", report.committed());
         }
-
-        String normalizedName = name.toLowerCase(Locale.ROOT);
-        String normalizedTag = tag.toLowerCase(Locale.ROOT);
-        for (ClanData clan : storage.clans) {
-            if (clan.name.toLowerCase(Locale.ROOT).equals(normalizedName)
-                    || clan.tag.toLowerCase(Locale.ROOT).equals(normalizedTag)) {
-                return Result.NAME_TAKEN;
-            }
-        }
-
-        if (isColorTaken(color, null)) {
-            return Result.COLOR_TAKEN;
-        }
-
-        if (PlayerProgressManager.getCoins(player) < ClanConstants.CREATE_COST) {
-            return Result.NOT_ENOUGH_COINS;
-        }
-
-        PlayerProgressManager.addCoins(player, -ClanConstants.CREATE_COST);
-        PlayerProgressManager.savePlayer(player);
-        ClassXPManager.sync(player);
-
-        ClanData clan = new ClanData();
-        clan.id = UUID.randomUUID().toString();
-        clan.name = name;
-        clan.tag = tag.toUpperCase(Locale.ROOT);
-        clan.color = color;
-        clan.ownerUuid = playerId;
-        clan.ownerName = player.getGameProfile().getName();
-        clan.members.add(new ClanPlayerEntry(playerId, player.getGameProfile().getName()));
-        storage.clans.add(clan);
-        save();
-        syncAll(player.server);
-        return Result.SUCCESS;
     }
 
     public static synchronized Result changeClanColor(ServerPlayer owner, String clanId, int color) {
@@ -149,9 +136,10 @@ public class ClanManager {
         if (isColorTaken(color, clan.id)) return Result.COLOR_TAKEN;
         if (clan.clanCoins < CHANGE_COLOR_COST) return Result.NOT_ENOUGH_COINS;
 
+        ClanStorage previous = snapshotStorage();
         clan.clanCoins -= CHANGE_COLOR_COST;
         clan.color = color;
-        save();
+        if (!saveOrRestore(previous)) return Result.STORAGE_ERROR;
 
         if (MapSetManager.isClanWarSet() && GameStateManager.isRunning(owner.server)) {
             TeamMatchManager.assignClanWarTeams(owner.server);
@@ -196,8 +184,9 @@ public class ClanManager {
         }
         if (clan.pending.size() >= ClanConstants.MAX_PENDING) return Result.CLAN_PENDING_FULL;
 
+        ClanStorage previous = snapshotStorage();
         clan.pending.add(new ClanPlayerEntry(playerId, player.getGameProfile().getName()));
-        save();
+        if (!saveOrRestore(previous)) return Result.STORAGE_ERROR;
 
         ServerPlayer owner = getOnlinePlayer(player.server, clan.ownerUuid);
         if (owner != null) {
@@ -222,15 +211,17 @@ public class ClanManager {
         if (applicant == null) return Result.NOT_FOUND;
         if (clan.members.size() >= ClanConstants.MAX_MEMBERS) return Result.CLAN_FULL;
         if (findClanByMember(applicantUuid) != null) {
+            ClanStorage previous = snapshotStorage();
             removeEntry(clan.pending, applicantUuid);
-            save();
+            if (!saveOrRestore(previous)) return Result.STORAGE_ERROR;
             sync(owner);
             return Result.ALREADY_IN_CLAN;
         }
 
+        ClanStorage previous = snapshotStorage();
         removeEntry(clan.pending, applicantUuid);
         clan.members.add(new ClanPlayerEntry(applicant.uuid, applicant.name));
-        save();
+        if (!saveOrRestore(previous)) return Result.STORAGE_ERROR;
 
         ServerPlayer applicantPlayer = getOnlinePlayer(owner.server, applicantUuid);
         if (applicantPlayer != null) {
@@ -260,8 +251,9 @@ public class ClanManager {
         ClanPlayerEntry applicant = findEntry(clan.pending, applicantUuid);
         if (applicant == null) return Result.NOT_FOUND;
 
+        ClanStorage previous = snapshotStorage();
         removeEntry(clan.pending, applicantUuid);
-        save();
+        if (!saveOrRestore(previous)) return Result.STORAGE_ERROR;
 
         ServerPlayer applicantPlayer = getOnlinePlayer(owner.server, applicantUuid);
         if (applicantPlayer != null) {
@@ -283,8 +275,9 @@ public class ClanManager {
         if (clan == null) return Result.NOT_FOUND;
         if (playerId.equals(clan.ownerUuid)) return Result.OWNER_CANNOT_LEAVE;
 
+        ClanStorage previous = snapshotStorage();
         removeEntry(clan.members, playerId);
-        save();
+        if (!saveOrRestore(previous)) return Result.STORAGE_ERROR;
         syncAll(player.server);
         return Result.SUCCESS;
     }
@@ -299,8 +292,9 @@ public class ClanManager {
         if (clan == null) return Result.NOT_FOUND;
         if (!owner.getUUID().toString().equals(clan.ownerUuid)) return Result.NOT_OWNER;
 
+        ClanStorage previous = snapshotStorage();
         storage.clans.remove(clan);
-        save();
+        if (!saveOrRestore(previous)) return Result.STORAGE_ERROR;
 
         for (ClanPlayerEntry member : clan.members) {
             if (member.uuid.equals(owner.getUUID().toString())) continue;
@@ -327,8 +321,9 @@ public class ClanManager {
         ClanPlayerEntry member = findEntry(clan.members, memberUuid);
         if (member == null) return Result.NOT_FOUND;
 
+        ClanStorage previous = snapshotStorage();
         removeEntry(clan.members, memberUuid);
-        save();
+        if (!saveOrRestore(previous)) return Result.STORAGE_ERROR;
 
         ServerPlayer kicked = getOnlinePlayer(owner.server, memberUuid);
         if (kicked != null) {
@@ -386,8 +381,9 @@ public class ClanManager {
         init(server);
         ClanData clan = findClan(clanId);
         if (clan == null) return false;
+        ClanStorage previous = snapshotStorage();
         clan.clanCoins = Math.max(0, clan.clanCoins + amount);
-        save();
+        if (!saveOrRestore(previous)) return false;
         syncAll(server);
         return true;
     }
@@ -411,9 +407,10 @@ public class ClanManager {
         if (clan.unlockedClasses.contains(classKey)) return Result.ALREADY_IN_CLAN;
         if (clan.clanCoins < MARINE_CLASS_COST) return Result.NOT_ENOUGH_COINS;
 
+        ClanStorage previous = snapshotStorage();
         clan.clanCoins -= MARINE_CLASS_COST;
         clan.unlockedClasses.add(classKey);
-        save();
+        if (!saveOrRestore(previous)) return Result.STORAGE_ERROR;
         syncAll(player.server);
         return Result.SUCCESS;
     }
@@ -473,10 +470,18 @@ public class ClanManager {
     private static void init(MinecraftServer server) {
         if (loaded || server == null) return;
 
-        Path serverRoot = getServerRoot(server);
-        Path dataRoot = serverRoot.resolve(DATA_DIRECTORY);
-        clansFile = dataRoot.resolve(CLANS_FILE);
-        migrateLegacyFile(server, clansFile);
+        storagePaths = TacticalTabletStoragePaths.fromServer(server);
+        LegacyStorageMigration.Result migration = LegacyStorageMigration.migrate(
+                storagePaths,
+                message -> TacticalTabletMod.LOGGER.warn("{}", message)
+        );
+        if (migration.status() == LegacyStorageMigration.Status.FAILED) {
+            TacticalTabletMod.LOGGER.error("Tactical Tablet legacy storage migration failed: {}",
+                    migration.markerWrite() == null ? migration.marker() : migration.markerWrite().diagnostic());
+        }
+
+        Path dataRoot = storagePaths.dataRoot();
+        clansFile = storagePaths.clansFile();
 
         ClanStorage loadedStorage = new ClanStorage();
         boolean readOk = true;
@@ -502,62 +507,229 @@ public class ClanManager {
         }
     }
 
-    private static Path getServerRoot(MinecraftServer server) {
-        Path worldRoot = server.getWorldPath(LevelResource.ROOT).toAbsolutePath().normalize();
-        Path parent = worldRoot.getParent();
-        return parent == null ? worldRoot : parent;
+    private static ClanEconomyService createEconomyService(
+            MinecraftServer server,
+            TacticalTabletStoragePaths paths,
+            ClanEconomyService.ClientSynchronizer synchronizer
+    ) {
+        return new ClanEconomyService(
+                new PlayerProgressRepositoryAdapter(server),
+                new ClanRepositoryAdapter(server),
+                new FileTransactionJournal(paths, FILE_STORE),
+                synchronizer,
+                UUID::randomUUID,
+                Clock.systemUTC(),
+                message -> TacticalTabletMod.LOGGER.info("{}", message)
+        );
     }
 
-    private static void migrateLegacyFile(MinecraftServer server, Path targetFile) {
-        Path legacyFile = getServerRoot(server).resolve(LEGACY_DATA_DIRECTORY).resolve(CLANS_FILE);
-        if (Files.exists(targetFile) || !Files.exists(legacyFile)) return;
-
-        try {
-            Files.createDirectories(targetFile.getParent());
-            Files.copy(legacyFile, targetFile, StandardCopyOption.REPLACE_EXISTING);
-            TacticalTabletMod.LOGGER.info("Migrated Tactical Tablet clans from {} to {}", legacyFile, targetFile);
-        } catch (IOException exception) {
-            TacticalTabletMod.LOGGER.error("Failed to migrate Tactical Tablet clans from {} to {}", legacyFile, targetFile, exception);
+    private static synchronized ClanEconomyService.PreflightResult preflightCreateClan(
+            MinecraftServer server,
+            ClanEconomyService.CreateClanRequest request,
+            String clanId
+    ) {
+        init(server);
+        String name = normalizeName(request.name());
+        String tag = normalizeTag(request.tag());
+        if (name.length() < 3 || name.length() > ClanConstants.MAX_NAME_LENGTH
+                || tag.isBlank() || tag.length() > ClanConstants.MAX_TAG_LENGTH || !isAllowedColor(request.color())) {
+            return new ClanEconomyService.PreflightResult(Result.INVALID, null);
         }
-    }
 
-    private static void save() {
-        if (clansFile == null) return;
+        String playerId = request.playerUuid().toString();
+        if (findClanByMember(playerId) != null) {
+            return new ClanEconomyService.PreflightResult(Result.ALREADY_IN_CLAN, null);
+        }
+        if (storage.clans.size() >= ClanConstants.MAX_CLANS) {
+            return new ClanEconomyService.PreflightResult(Result.CLAN_LIMIT_REACHED, null);
+        }
 
-        Path tmp = clansFile.resolveSibling(CLANS_FILE + ".tmp");
-        try {
-            Files.createDirectories(clansFile.getParent());
-            try (Writer writer = Files.newBufferedWriter(tmp, StandardCharsets.UTF_8)) {
-                GSON.toJson(storage, writer);
+        String normalizedName = name.toLowerCase(Locale.ROOT);
+        String normalizedTag = tag.toLowerCase(Locale.ROOT);
+        for (ClanData clan : storage.clans) {
+            if (clan.name.toLowerCase(Locale.ROOT).equals(normalizedName)
+                    || clan.tag.toLowerCase(Locale.ROOT).equals(normalizedTag)) {
+                return new ClanEconomyService.PreflightResult(Result.NAME_TAKEN, null);
             }
-            moveReplace(tmp, clansFile);
-        } catch (IOException exception) {
-            TacticalTabletMod.LOGGER.error("Failed to save Tactical Tablet clans to {}", clansFile, exception);
-            try {
-                Files.deleteIfExists(tmp);
-            } catch (IOException ignored) {
+        }
+        if (isColorTaken(request.color(), null)) {
+            return new ClanEconomyService.PreflightResult(Result.COLOR_TAKEN, null);
+        }
+
+        return new ClanEconomyService.PreflightResult(
+                Result.SUCCESS,
+                new ClanCreationPayload(
+                        clanId,
+                        name,
+                        tag.toUpperCase(Locale.ROOT),
+                        request.color(),
+                        request.playerUuid(),
+                        request.playerName()
+                )
+        );
+    }
+
+    private static synchronized RepositoryResult applyTransactionClanCreate(
+            MinecraftServer server,
+            CreateClanTransaction transaction
+    ) {
+        init(server);
+        ClanCreationPayload payload = transaction.clanPayload();
+        ClanData existing = findClan(payload.clanId());
+        if (existing != null) {
+            return clanMatchesPayload(existing, payload)
+                    ? RepositoryResult.alreadyApplied()
+                    : RepositoryResult.conflict("Clan ID exists with a different payload");
+        }
+
+        if (findClanByMember(payload.ownerUuid().toString()) != null) {
+            return RepositoryResult.conflict("Clan owner already belongs to another clan");
+        }
+        for (ClanData clan : storage.clans) {
+            if (clan.name.equalsIgnoreCase(payload.name()) || clan.tag.equalsIgnoreCase(payload.tag())) {
+                return RepositoryResult.conflict("Clan name or tag already exists");
+            }
+        }
+        if (storage.clans.size() >= ClanConstants.MAX_CLANS || isColorTaken(payload.color(), null)) {
+            return RepositoryResult.conflict("Clan limits or colour changed after prepare");
+        }
+
+        ClanData clan = new ClanData();
+        clan.id = payload.clanId();
+        clan.name = payload.name();
+        clan.tag = payload.tag();
+        clan.color = payload.color();
+        clan.ownerUuid = payload.ownerUuid().toString();
+        clan.ownerName = payload.ownerName();
+        clan.members.add(new ClanPlayerEntry(clan.ownerUuid, clan.ownerName));
+        ClanStorage previous = snapshotStorage();
+        storage.clans.add(clan);
+        if (!saveOrRestore(previous)) {
+            return RepositoryResult.failed("Failed to persist clans.json", null);
+        }
+        return RepositoryResult.applied();
+    }
+
+    private static boolean clanMatchesPayload(ClanData clan, ClanCreationPayload payload) {
+        return clan.id.equals(payload.clanId())
+                && clan.name.equals(payload.name())
+                && clan.tag.equals(payload.tag())
+                && clan.color == payload.color()
+                && clan.ownerUuid.equals(payload.ownerUuid().toString())
+                && clan.ownerName.equals(payload.ownerName())
+                && clan.members.size() == 1
+                && containsUuid(clan.members, payload.ownerUuid().toString())
+                && clan.pending.isEmpty()
+                && clan.unlockedClasses.isEmpty();
+    }
+
+    private static final class PlayerProgressRepositoryAdapter implements ClanEconomyService.PlayerProgressRepository {
+        private final MinecraftServer server;
+
+        private PlayerProgressRepositoryAdapter(MinecraftServer server) {
+            this.server = server;
+        }
+
+        @Override
+        public int currentBalance(UUID playerUuid, String playerName) {
+            return PlayerProgressManager.getCoins(server, playerUuid, playerName);
+        }
+
+        @Override
+        public RepositoryResult applyDebit(CreateClanTransaction transaction) {
+            int current = PlayerProgressManager.getCoins(server, transaction.playerUuid(), transaction.playerName());
+            if (current == transaction.newBalance()) {
+                return RepositoryResult.alreadyApplied();
+            }
+            if (current != transaction.expectedOldBalance()) {
+                return RepositoryResult.conflict("Player balance does not match transaction precondition");
+            }
+            return PlayerProgressManager.setCoins(
+                    server,
+                    transaction.playerUuid(),
+                    transaction.playerName(),
+                    transaction.newBalance()
+            ) ? RepositoryResult.applied() : RepositoryResult.failed("Failed to persist player progress", null);
+        }
+
+        @Override
+        public RepositoryResult verifyDebit(CreateClanTransaction transaction) {
+            return PlayerProgressManager.getCoins(server, transaction.playerUuid(), transaction.playerName())
+                    == transaction.newBalance()
+                    ? RepositoryResult.alreadyApplied()
+                    : RepositoryResult.conflict("Player balance was not durably updated");
+        }
+    }
+
+    private static final class ClanRepositoryAdapter implements ClanEconomyService.ClanRepository {
+        private final MinecraftServer server;
+
+        private ClanRepositoryAdapter(MinecraftServer server) {
+            this.server = server;
+        }
+
+        @Override
+        public ClanEconomyService.PreflightResult preflight(ClanEconomyService.CreateClanRequest request, String clanId) {
+            return preflightCreateClan(server, request, clanId);
+        }
+
+        @Override
+        public RepositoryResult applyCreate(CreateClanTransaction transaction) {
+            return applyTransactionClanCreate(server, transaction);
+        }
+
+        @Override
+        public RepositoryResult verifyCreate(CreateClanTransaction transaction) {
+            synchronized (ClanManager.class) {
+                init(server);
+                ClanData clan = findClan(transaction.clanId());
+                return clan != null && clanMatchesPayload(clan, transaction.clanPayload())
+                        ? RepositoryResult.alreadyApplied()
+                        : RepositoryResult.conflict("Clan was not durably created with the journal payload");
             }
         }
     }
 
-    private static void moveReplace(Path source, Path target) throws IOException {
-        try {
-            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-        } catch (AtomicMoveNotSupportedException exception) {
-            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
+    private static FileSaveResult save() {
+        if (clansFile == null) {
+            return FileSaveResult.failure(Path.of(CLANS_FILE), "Clan storage path has not been initialized", null);
         }
+
+        FileSaveResult result = FILE_STORE.write(clansFile, writer -> GSON.toJson(storage, writer));
+        if (result.status() != FileSaveResult.Status.SUCCESS) {
+            TacticalTabletMod.LOGGER.error("Failed to save Tactical Tablet clans to {}: {}",
+                    result.target(), result.diagnostic(), result.exception().orElse(null));
+        }
+        return result;
+    }
+
+    private static boolean saveOrRestore(ClanStorage previous) {
+        FileSaveResult result = save();
+        if (result.status() == FileSaveResult.Status.SUCCESS) {
+            return true;
+        }
+        storage = previous;
+        return false;
+    }
+
+    private static ClanStorage snapshotStorage() {
+        ClanStorage snapshot = GSON.fromJson(GSON.toJson(storage), ClanStorage.class);
+        return snapshot == null ? new ClanStorage() : snapshot;
     }
 
     private static void backupBrokenFile(Path file) {
         if (file == null || !Files.exists(file)) return;
 
         String timestamp = BROKEN_FILE_TIMESTAMP.format(java.time.LocalDateTime.now());
-        Path broken = file.resolveSibling(CLANS_FILE + ".broken." + timestamp);
+        Path broken = storagePaths == null
+                ? file.resolveSibling(CLANS_FILE + ".broken." + timestamp)
+                : storagePaths.backupsDirectory().resolve(CLANS_FILE + ".broken." + timestamp);
         try {
-            Files.move(file, broken, StandardCopyOption.REPLACE_EXISTING);
-            TacticalTabletMod.LOGGER.warn("Moved broken Tactical Tablet clans file to {}", broken);
+            Files.createDirectories(broken.getParent());
+            Files.copy(file, broken, StandardCopyOption.REPLACE_EXISTING);
+            TacticalTabletMod.LOGGER.warn("Backed up broken Tactical Tablet clans file to {}", broken);
         } catch (IOException exception) {
-            TacticalTabletMod.LOGGER.error("Failed to move broken Tactical Tablet clans file {}", file, exception);
+            TacticalTabletMod.LOGGER.error("Failed to back up broken Tactical Tablet clans file {}", file, exception);
         }
     }
 

@@ -1,6 +1,7 @@
 package com.makar.tacticaltablet.prefix;
 
 import net.minecraft.network.FriendlyByteBuf;
+import com.makar.tacticaltablet.tablet.net.PacketCodecs;
 import net.minecraftforge.network.NetworkEvent;
 
 import java.util.ArrayList;
@@ -20,7 +21,7 @@ public class PrefixListPacket {
     }
 
     public PrefixListPacket(FriendlyByteBuf buf) {
-        int size = Math.min(buf.readVarInt(), MAX_PLAYERS);
+        int size = PacketCodecs.readBoundedVarIntSize(buf, MAX_PLAYERS, "prefix player count");
         this.entries = new ArrayList<>();
         for (int i = 0; i < size; i++) {
             entries.add(new Entry(

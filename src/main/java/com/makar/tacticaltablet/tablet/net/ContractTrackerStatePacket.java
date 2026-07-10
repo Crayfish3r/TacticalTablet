@@ -63,10 +63,7 @@ public class ContractTrackerStatePacket {
         this.playerZ = buf.readInt();
         this.signalSecondsLeft = buf.readInt();
 
-        int size = buf.readInt();
-        if (size < 0 || size > MAX_TARGETS) {
-            throw new IllegalArgumentException("Invalid tracker target count: " + size);
-        }
+        int size = PacketCodecs.readBoundedIntSize(buf, MAX_TARGETS, "tracker target count");
 
         List<TargetEntry> entries = new ArrayList<>();
         for (int i = 0; i < size; i++) {

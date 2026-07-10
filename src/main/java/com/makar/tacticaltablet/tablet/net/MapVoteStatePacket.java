@@ -56,10 +56,7 @@ public final class MapVoteStatePacket {
         secondsLeft = Math.max(0, buf.readInt());
         selectedMap = buf.readUtf(MAX_MAP_NAME_LENGTH);
 
-        int size = buf.readInt();
-        if (size < 0 || size > MAX_MAPS) {
-            throw new IllegalArgumentException("Invalid map vote pool size: " + size);
-        }
+        int size = PacketCodecs.readBoundedIntSize(buf, MAX_MAPS, "map vote pool");
 
         List<String> decodedMaps = new ArrayList<>();
         Map<String, Integer> decodedCounts = new LinkedHashMap<>();

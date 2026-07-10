@@ -32,9 +32,8 @@ public class SpectatorCameraSwitchPacket {
             }
 
             ServerPlayer player = ctx.get().getSender();
-            if (player != null) {
-                SpectatorCameraManager.switchCamera(player, normalizedDirection);
-            }
+            if (player == null || !PacketHandler.allowC2S(player, PacketHandler.C2SAction.SPECTATOR)) return;
+            SpectatorCameraManager.switchCamera(player, normalizedDirection);
         });
         ctx.get().setPacketHandled(true);
     }

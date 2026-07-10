@@ -1,6 +1,7 @@
 package com.makar.tacticaltablet.clan;
 
 import com.makar.tacticaltablet.tablet.client.TabletClientState;
+import com.makar.tacticaltablet.tablet.net.PacketCodecs;
 
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraftforge.network.NetworkEvent;
@@ -18,7 +19,7 @@ public class ClanListPacket {
     }
 
     public ClanListPacket(FriendlyByteBuf buf) {
-        int size = Math.min(buf.readVarInt(), ClanConstants.MAX_CLANS);
+        int size = PacketCodecs.readBoundedVarIntSize(buf, ClanConstants.MAX_CLANS, "clan count");
         this.clans = new ArrayList<>();
         for (int i = 0; i < size; i++) {
             String id = buf.readUtf(ClanConstants.MAX_ID_LENGTH);
@@ -34,7 +35,7 @@ public class ClanListPacket {
             boolean pending = buf.readBoolean();
             boolean marineUnlocked = buf.readBoolean();
 
-            int pendingSize = Math.min(buf.readVarInt(), ClanConstants.MAX_PENDING);
+            int pendingSize = PacketCodecs.readBoundedVarIntSize(buf, ClanConstants.MAX_PENDING, "clan pending count");
             List<PendingEntry> pendingEntries = new ArrayList<>();
             for (int j = 0; j < pendingSize; j++) {
                 pendingEntries.add(new PendingEntry(
@@ -43,7 +44,7 @@ public class ClanListPacket {
                 ));
             }
 
-            int memberSize = Math.min(buf.readVarInt(), ClanConstants.MAX_MEMBERS);
+            int memberSize = PacketCodecs.readBoundedVarIntSize(buf, ClanConstants.MAX_MEMBERS, "clan member count");
             List<MemberEntry> memberEntries = new ArrayList<>();
             for (int j = 0; j < memberSize; j++) {
                 memberEntries.add(new MemberEntry(

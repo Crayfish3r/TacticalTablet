@@ -1,31 +1,31 @@
 modLoader="javafml"
-loaderVersion="[47,)"
-license="All rights reserved"
+loaderVersion="${loader_version_range}"
+license="${mod_license}"
 
 [[mods]]
-modId="tacticaltablet"
-version="0.1"
-displayName="Тактический планшет"
-authors="makar"
-description="Добавляет тактический планшет, через который игроки выбирают наборы в интерфейсе."
+modId="${mod_id}"
+version="${mod_version}"
+displayName="${mod_name}"
+authors="${mod_authors}"
+description="${mod_description}"
 
-[[dependencies.tacticaltablet]]
+[[dependencies.${mod_id}]]
     modId="forge"
     mandatory=true
-    versionRange="[47,)"
+    versionRange="${forge_version_range}"
     ordering="NONE"
     side="BOTH"
 
-[[dependencies.tacticaltablet]]
+[[dependencies.${mod_id}]]
     modId="minecraft"
     mandatory=true
-    versionRange="[1.20.1,1.21)"
+    versionRange="${minecraft_version_range}"
     ordering="NONE"
     side="BOTH"
 
-[[dependencies.tacticaltablet]]
+[[dependencies.${mod_id}]]
     modId="voicechat_api"
     mandatory=true
-    versionRange="[2.6.0,)"
+    versionRange="[${voicechat_api_version},)"
     ordering="AFTER"
     side="BOTH"

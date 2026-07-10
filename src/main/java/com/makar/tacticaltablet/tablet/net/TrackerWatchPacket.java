@@ -30,8 +30,10 @@ public class TrackerWatchPacket {
             if (player == null) {
                 return;
             }
+            if (!PacketHandler.allowC2S(player, PacketHandler.C2SAction.TRACKER)) return;
 
             if (watching) {
+                if (!ContractManager.hasTrackerItem(player)) return;
                 ContractManager.addTrackerViewer(player);
             } else {
                 ContractManager.removeTrackerViewer(player);

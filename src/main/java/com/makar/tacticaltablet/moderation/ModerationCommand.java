@@ -6,6 +6,7 @@ import com.makar.tacticaltablet.core.TacticalTabletMod;
 import com.makar.tacticaltablet.prefix.PrefixManager;
 import com.makar.tacticaltablet.prefix.PrefixPermission;
 import com.makar.tacticaltablet.prefix.PrefixRole;
+import com.makar.tacticaltablet.storage.FileSaveResult;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import net.minecraft.commands.CommandSourceStack;
@@ -122,7 +123,13 @@ public final class ModerationCommand {
         if (!canPunish(source, target, "mute")) return 0;
 
         long expiresAt = safeExpiresAt(duration);
-        PunishmentManager.mute(target.uuid(), target.name(), issuerUuid(source), issuerName(source), expiresAt, reason);
+        FileSaveResult saveResult = PunishmentManager.mute(
+                target.uuid(), target.name(), issuerUuid(source), issuerName(source), expiresAt, reason
+        );
+        if (saveResult.status() != FileSaveResult.Status.SUCCESS) {
+            reportStorageFailure(source, saveResult);
+            return 0;
+        }
 
         ServerPlayer online = PlayerLookup.getOnline(source.getServer(), target);
         if (online != null) {
@@ -146,7 +153,12 @@ public final class ModerationCommand {
             return 0;
         }
 
-        boolean removed = PunishmentManager.unmute(target.uuid());
+        PunishmentManager.RemovalResult removal = PunishmentManager.unmute(target.uuid());
+        if (removal.status() == PunishmentManager.RemovalStatus.STORAGE_ERROR) {
+            reportStorageFailure(source, removal.storageResult());
+            return 0;
+        }
+        boolean removed = removal.status() == PunishmentManager.RemovalStatus.REMOVED;
         if (removed) {
             audit(source, "unmute", target, "", 0L);
         }
@@ -190,7 +202,13 @@ public final class ModerationCommand {
         if (!canPunish(source, target, "tempban")) return 0;
 
         long expiresAt = safeExpiresAt(duration);
-        PunishmentManager.tempBan(target.uuid(), target.name(), issuerUuid(source), issuerName(source), expiresAt, reason);
+        FileSaveResult saveResult = PunishmentManager.tempBan(
+                target.uuid(), target.name(), issuerUuid(source), issuerName(source), expiresAt, reason
+        );
+        if (saveResult.status() != FileSaveResult.Status.SUCCESS) {
+            reportStorageFailure(source, saveResult);
+            return 0;
+        }
 
         ServerPlayer online = PlayerLookup.getOnline(source.getServer(), target);
         if (online != null) {
@@ -214,7 +232,12 @@ public final class ModerationCommand {
             return 0;
         }
 
-        boolean removed = PunishmentManager.unban(target.uuid());
+        PunishmentManager.RemovalResult removal = PunishmentManager.unban(target.uuid());
+        if (removal.status() == PunishmentManager.RemovalStatus.STORAGE_ERROR) {
+            reportStorageFailure(source, removal.storageResult());
+            return 0;
+        }
+        boolean removed = removal.status() == PunishmentManager.RemovalStatus.REMOVED;
         if (removed) {
             audit(source, "unban", target, "", 0L);
         }
@@ -471,5 +494,10 @@ public final class ModerationCommand {
                 record.issuerUuid(),
                 reason
         );
+    }
+
+    private static void reportStorageFailure(CommandSourceStack source, FileSaveResult result) {
+        String detail = result == null ? "unknown persistence failure" : result.diagnostic();
+        source.sendFailure(Component.literal("[Moderation] Storage error: " + detail));
     }
 }

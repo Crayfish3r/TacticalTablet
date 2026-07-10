@@ -7,14 +7,15 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonSyntaxException;
 import com.makar.tacticaltablet.core.TacticalTabletMod;
+import com.makar.tacticaltablet.storage.AtomicFileStore;
+import com.makar.tacticaltablet.storage.FileSaveResult;
+import com.makar.tacticaltablet.storage.LegacyStorageMigration;
+import com.makar.tacticaltablet.storage.TacticalTabletStoragePaths;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.world.level.storage.LevelResource;
 
 import java.io.IOException;
 import java.io.Reader;
-import java.io.Writer;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -33,7 +34,6 @@ public final class PunishmentManager {
             .setPrettyPrinting()
             .disableHtmlEscaping()
             .create();
-    private static final String DATA_DIRECTORY = "tacticaltabletdata";
     private static final String PUNISHMENTS_FILE = "punishments.json";
     private static final DateTimeFormatter BROKEN_TIMESTAMP = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
     private static final DateTimeFormatter DISPLAY_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
@@ -41,7 +41,9 @@ public final class PunishmentManager {
 
     private static final Map<UUID, PunishmentRecord> mutes = new HashMap<>();
     private static final Map<UUID, PunishmentRecord> tempBans = new HashMap<>();
+    private static final AtomicFileStore FILE_STORE = new AtomicFileStore();
     private static Path punishmentsFile;
+    private static TacticalTabletStoragePaths storagePaths;
 
     private PunishmentManager() {
     }
@@ -71,7 +73,6 @@ public final class PunishmentManager {
             backupBrokenFile();
             mutes.clear();
             tempBans.clear();
-            saveAtomic();
         }
     }
 
@@ -79,11 +80,12 @@ public final class PunishmentManager {
         mutes.clear();
         tempBans.clear();
         punishmentsFile = null;
+        storagePaths = null;
     }
 
-    public static synchronized void mute(UUID target, String name, UUID issuer, String issuerName, long expiresAt, String reason) {
-        if (target == null) return;
-        mutes.put(target, new PunishmentRecord(
+    public static synchronized FileSaveResult mute(UUID target, String name, UUID issuer, String issuerName, long expiresAt, String reason) {
+        if (target == null) return FileSaveResult.failure(uninitializedPath(), "Mute target is required", null);
+        PunishmentRecord previous = mutes.put(target, new PunishmentRecord(
                 PunishmentType.MUTE,
                 target,
                 name,
@@ -93,21 +95,20 @@ public final class PunishmentManager {
                 expiresAt,
                 reason
         ));
-        saveAtomic();
-    }
-
-    public static synchronized boolean unmute(UUID target) {
-        if (target == null) return false;
-        boolean removed = mutes.remove(target) != null;
-        if (removed) {
-            saveAtomic();
+        FileSaveResult result = saveAtomic();
+        if (result.status() != FileSaveResult.Status.SUCCESS) {
+            restoreRecord(mutes, target, previous);
         }
-        return removed;
+        return result;
     }
 
-    public static synchronized void tempBan(UUID target, String name, UUID issuer, String issuerName, long expiresAt, String reason) {
-        if (target == null) return;
-        tempBans.put(target, new PunishmentRecord(
+    public static synchronized RemovalResult unmute(UUID target) {
+        return removeAndSave(target, mutes);
+    }
+
+    public static synchronized FileSaveResult tempBan(UUID target, String name, UUID issuer, String issuerName, long expiresAt, String reason) {
+        if (target == null) return FileSaveResult.failure(uninitializedPath(), "Temp-ban target is required", null);
+        PunishmentRecord previous = tempBans.put(target, new PunishmentRecord(
                 PunishmentType.TEMPBAN,
                 target,
                 name,
@@ -117,16 +118,15 @@ public final class PunishmentManager {
                 expiresAt,
                 reason
         ));
-        saveAtomic();
+        FileSaveResult result = saveAtomic();
+        if (result.status() != FileSaveResult.Status.SUCCESS) {
+            restoreRecord(tempBans, target, previous);
+        }
+        return result;
     }
 
-    public static synchronized boolean unban(UUID target) {
-        if (target == null) return false;
-        boolean removed = tempBans.remove(target) != null;
-        if (removed) {
-            saveAtomic();
-        }
-        return removed;
+    public static synchronized RemovalResult unban(UUID target) {
+        return removeAndSave(target, tempBans);
     }
 
     public static synchronized boolean isMuted(UUID target) {
@@ -145,31 +145,33 @@ public final class PunishmentManager {
         return getActive(target, tempBans);
     }
 
-    public static synchronized void cleanupExpired() {
+    public static synchronized FileSaveResult cleanupExpired() {
+        Map<UUID, PunishmentRecord> previousMutes = new HashMap<>(mutes);
+        Map<UUID, PunishmentRecord> previousTempBans = new HashMap<>(tempBans);
         boolean changed = removeExpired(mutes) | removeExpired(tempBans);
         if (changed) {
-            saveAtomic();
+            FileSaveResult result = saveAtomic();
+            if (result.status() != FileSaveResult.Status.SUCCESS) {
+                mutes.clear();
+                mutes.putAll(previousMutes);
+                tempBans.clear();
+                tempBans.putAll(previousTempBans);
+            }
+            return result;
         }
+        return FileSaveResult.success(uninitializedPath());
     }
 
-    public static synchronized void saveAtomic() {
-        if (punishmentsFile == null) return;
-
-        Path tmp = punishmentsFile.resolveSibling(PUNISHMENTS_FILE + ".tmp");
-        try {
-            Files.createDirectories(punishmentsFile.getParent());
-            JsonObject root = buildStorageJson();
-            try (Writer writer = Files.newBufferedWriter(tmp, StandardCharsets.UTF_8)) {
-                GSON.toJson(root, writer);
-            }
-            moveReplace(tmp, punishmentsFile);
-        } catch (IOException exception) {
-            TacticalTabletMod.LOGGER.error("Failed to save Tactical Tablet punishments to {}", punishmentsFile, exception);
-            try {
-                Files.deleteIfExists(tmp);
-            } catch (IOException ignored) {
-            }
+    public static synchronized FileSaveResult saveAtomic() {
+        if (punishmentsFile == null) {
+            return FileSaveResult.failure(uninitializedPath(), "Punishment storage path has not been initialized", null);
         }
+        FileSaveResult result = FILE_STORE.write(punishmentsFile, writer -> GSON.toJson(buildStorageJson(), writer));
+        if (result.status() != FileSaveResult.Status.SUCCESS) {
+            TacticalTabletMod.LOGGER.error("Failed to save Tactical Tablet punishments to {}: {}",
+                    result.target(), result.diagnostic(), result.exception().orElse(null));
+        }
+        return result;
     }
 
     public static String formatExpiresAt(long expiresAt) {
@@ -202,7 +204,10 @@ public final class PunishmentManager {
         }
 
         records.remove(target);
-        saveAtomic();
+        FileSaveResult result = saveAtomic();
+        if (result.status() != FileSaveResult.Status.SUCCESS) {
+            records.put(target, record);
+        }
         return null;
     }
 
@@ -279,34 +284,69 @@ public final class PunishmentManager {
     }
 
     private static void initPath(MinecraftServer server) {
-        Path worldRoot = server.getWorldPath(LevelResource.ROOT).toAbsolutePath().normalize();
-        Path serverRoot = worldRoot.getParent();
-        if (serverRoot == null) {
-            serverRoot = worldRoot;
+        storagePaths = TacticalTabletStoragePaths.fromServer(server);
+        LegacyStorageMigration.Result migration = LegacyStorageMigration.migrate(
+                storagePaths,
+                message -> TacticalTabletMod.LOGGER.warn("{}", message)
+        );
+        if (migration.status() == LegacyStorageMigration.Status.FAILED) {
+            TacticalTabletMod.LOGGER.error("Tactical Tablet legacy storage migration failed: {}",
+                    migration.markerWrite() == null ? migration.marker() : migration.markerWrite().diagnostic());
         }
-
-        punishmentsFile = serverRoot.resolve(DATA_DIRECTORY).resolve(PUNISHMENTS_FILE);
-    }
-
-    private static void moveReplace(Path source, Path target) throws IOException {
-        try {
-            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-        } catch (AtomicMoveNotSupportedException exception) {
-            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
-        }
+        punishmentsFile = storagePaths.punishmentsFile();
     }
 
     private static void backupBrokenFile() {
         if (punishmentsFile == null || !Files.exists(punishmentsFile)) return;
 
         String timestamp = BROKEN_TIMESTAMP.format(LocalDateTime.now());
-        Path broken = punishmentsFile.resolveSibling("punishments.broken." + timestamp + ".json");
+        Path broken = storagePaths == null
+                ? punishmentsFile.resolveSibling("punishments.broken." + timestamp + ".json")
+                : storagePaths.backupsDirectory().resolve("punishments.broken." + timestamp + ".json");
         try {
-            Files.move(punishmentsFile, broken, StandardCopyOption.REPLACE_EXISTING);
-            TacticalTabletMod.LOGGER.warn("Moved broken Tactical Tablet punishments file to {}", broken);
+            Files.createDirectories(broken.getParent());
+            Files.copy(punishmentsFile, broken, StandardCopyOption.REPLACE_EXISTING);
+            TacticalTabletMod.LOGGER.warn("Backed up broken Tactical Tablet punishments file to {}", broken);
         } catch (IOException exception) {
-            TacticalTabletMod.LOGGER.error("Failed to move broken Tactical Tablet punishments file {}", punishmentsFile, exception);
+            TacticalTabletMod.LOGGER.error("Failed to back up broken Tactical Tablet punishments file {}", punishmentsFile, exception);
         }
+    }
+
+    private static RemovalResult removeAndSave(UUID target, Map<UUID, PunishmentRecord> records) {
+        if (target == null) {
+            return new RemovalResult(RemovalStatus.NOT_FOUND, null);
+        }
+        PunishmentRecord removed = records.remove(target);
+        if (removed == null) {
+            return new RemovalResult(RemovalStatus.NOT_FOUND, null);
+        }
+        FileSaveResult result = saveAtomic();
+        if (result.status() == FileSaveResult.Status.SUCCESS) {
+            return new RemovalResult(RemovalStatus.REMOVED, result);
+        }
+        records.put(target, removed);
+        return new RemovalResult(RemovalStatus.STORAGE_ERROR, result);
+    }
+
+    private static void restoreRecord(Map<UUID, PunishmentRecord> records, UUID target, PunishmentRecord previous) {
+        if (previous == null) {
+            records.remove(target);
+        } else {
+            records.put(target, previous);
+        }
+    }
+
+    private static Path uninitializedPath() {
+        return punishmentsFile == null ? Path.of(PUNISHMENTS_FILE) : punishmentsFile;
+    }
+
+    public enum RemovalStatus {
+        REMOVED,
+        NOT_FOUND,
+        STORAGE_ERROR
+    }
+
+    public record RemovalResult(RemovalStatus status, FileSaveResult storageResult) {
     }
 
     private static String getString(JsonObject object, String key, String fallback) {

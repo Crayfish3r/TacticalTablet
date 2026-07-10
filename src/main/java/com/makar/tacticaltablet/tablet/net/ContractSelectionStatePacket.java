@@ -46,10 +46,7 @@ public class ContractSelectionStatePacket {
         this.hasActiveContract = buf.readBoolean();
         this.soloMode = buf.readBoolean();
 
-        int size = buf.readInt();
-        if (size < 0 || size > MAX_TARGETS) {
-            throw new IllegalArgumentException("Invalid contract target count: " + size);
-        }
+        int size = PacketCodecs.readBoundedIntSize(buf, MAX_TARGETS, "contract target count");
 
         List<TargetEntry> entries = new ArrayList<>();
         for (int i = 0; i < size; i++) {

@@ -2,6 +2,10 @@ package com.makar.tacticaltablet.progression;
 
 import com.makar.tacticaltablet.core.TacticalTabletMod;
 import com.makar.tacticaltablet.game.MapSetManager;
+import com.makar.tacticaltablet.storage.AtomicFileStore;
+import com.makar.tacticaltablet.storage.BackupCoordinator;
+import com.makar.tacticaltablet.storage.FileSaveResult;
+import com.makar.tacticaltablet.storage.ModPersistenceExecutor;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -12,17 +16,19 @@ import net.minecraft.world.level.storage.LevelResource;
 
 import java.io.IOException;
 import java.io.Reader;
-import java.io.Writer;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Instant;
+import java.time.Duration;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.Comparator;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -136,6 +142,8 @@ public class PlayerProgressManager {
     private static final int AUTOSAVE_INTERVAL_TICKS = 20 * 60;
     private static final int BACKUP_INTERVAL_TICKS = 20 * 60 * 30;
     private static final int MAX_BACKUP_FOLDERS = 48;
+    private static final int PERSISTENCE_QUEUE_LIMIT = 512;
+    private static final Duration SHUTDOWN_FLUSH_TIMEOUT = Duration.ofSeconds(10);
 
     private static final DateTimeFormatter BACKUP_FORMAT = DateTimeFormatter
             .ofPattern("yyyy-MM-dd_HH-mm-ss")
@@ -143,12 +151,18 @@ public class PlayerProgressManager {
 
     private static final Map<String, PlayerProgress> cache = new HashMap<>();
     private static final Map<String, Boolean> dirty = new HashMap<>();
+    private static final Map<String, Long> snapshotRevisions = new HashMap<>();
+    private static final BackupCoordinator backupCoordinator = new BackupCoordinator();
+    private static final AtomicFileStore FILE_STORE = new AtomicFileStore();
 
     private static Path dataRoot;
     private static Path playersRoot;
     private static Path backupsRoot;
     private static int autosaveTicks;
     private static int backupTicks;
+    private static long nextSnapshotRevision;
+    private static long nextBackupRevision;
+    private static ModPersistenceExecutor persistenceExecutor;
 
     public enum PurchaseResult {
         PURCHASED,
@@ -279,15 +293,14 @@ public class PlayerProgressManager {
         progress.lastSeen = Instant.now().toEpochMilli();
         normalize(progress);
 
-        try {
-            writeJsonAtomically(getPlayerFile(key), progress);
-            dirty.remove(key);
-        } catch (IOException exception) {
-            TacticalTabletMod.LOGGER.error("Failed to save Tactical Tablet progress for {}", key, exception);
-        }
+        enqueueSnapshot(key, progress);
     }
 
     public static synchronized void saveAll() {
+        saveAll(false);
+    }
+
+    private static void saveAll(boolean finalSnapshots) {
         if (playersRoot == null) return;
 
         for (Map.Entry<String, PlayerProgress> entry : cache.entrySet()) {
@@ -296,25 +309,26 @@ public class PlayerProgressManager {
 
             progress.lastSeen = Instant.now().toEpochMilli();
             normalize(progress);
-
-            try {
-                writeJsonAtomically(getPlayerFile(key), progress);
-                dirty.remove(key);
-            } catch (IOException exception) {
-                TacticalTabletMod.LOGGER.error("Failed to save Tactical Tablet progress for {}", key, exception);
-            }
+            enqueueSnapshot(key, progress, finalSnapshots);
         }
     }
 
     public static synchronized void resetStorage() {
-        saveAll();
+        if (persistenceExecutor != null) {
+            persistenceExecutor.stopAccepting();
+            persistenceExecutor.close();
+        }
         cache.clear();
         dirty.clear();
+        snapshotRevisions.clear();
         dataRoot = null;
         playersRoot = null;
         backupsRoot = null;
         autosaveTicks = 0;
         backupTicks = 0;
+        nextSnapshotRevision = 0L;
+        nextBackupRevision = 0L;
+        persistenceExecutor = null;
     }
 
     public static synchronized int getXP(ServerPlayer player, String clazz) {
@@ -882,9 +896,7 @@ public class PlayerProgressManager {
     }
 
     public static synchronized void tick(MinecraftServer server) {
-        if (server == null) return;
-
-        init(server);
+        if (server == null || dataRoot == null || persistenceExecutor == null) return;
 
         autosaveTicks++;
         backupTicks++;
@@ -945,31 +957,50 @@ public class PlayerProgressManager {
     }
 
     public static synchronized void backupNow() {
-        if (playersRoot == null || backupsRoot == null) return;
+        if (playersRoot == null || backupsRoot == null || persistenceExecutor == null) return;
+        if (!backupCoordinator.tryStart()) return;
 
-        saveAll();
-
-        String timestamp = BACKUP_FORMAT.format(Instant.now());
-        Path backupRoot = backupsRoot.resolve(timestamp);
-        Path backupPlayersRoot = backupRoot.resolve(PLAYERS_DIRECTORY);
-
-        try {
-            Files.createDirectories(backupPlayersRoot);
-            copyJsonFiles(playersRoot, backupPlayersRoot);
-
-            Path seasonFile = dataRoot.resolve(SEASON_FILE);
-            if (Files.exists(seasonFile)) {
-                Files.copy(
-                        seasonFile,
-                        backupRoot.resolve(SEASON_FILE),
-                        StandardCopyOption.REPLACE_EXISTING
-                );
-            }
-
-            cleanOldBackups();
-        } catch (IOException exception) {
-            TacticalTabletMod.LOGGER.error("Failed to create Tactical Tablet progress backup", exception);
+        List<PlayerProgressSnapshot> snapshots = new ArrayList<>();
+        for (Map.Entry<String, PlayerProgress> entry : cache.entrySet()) {
+            PlayerProgress progress = entry.getValue();
+            progress.lastSeen = Instant.now().toEpochMilli();
+            normalize(progress);
+            snapshots.add(snapshot(entry.getKey(), progress, ++nextSnapshotRevision));
+            enqueueSnapshot(entry.getKey(), progress, snapshots.get(snapshots.size() - 1));
         }
+
+        BackupSnapshot backup = new BackupSnapshot(
+                dataRoot,
+                playersRoot,
+                backupsRoot,
+                BACKUP_FORMAT.format(Instant.now()) + "_" + (nextBackupRevision + 1),
+                List.copyOf(snapshots),
+                ++nextBackupRevision
+        );
+        ModPersistenceExecutor.SubmitResult result = persistenceExecutor.submit(new BackupWriteTask(backup));
+        if (result.status() == ModPersistenceExecutor.SubmitStatus.BACKPRESSURED
+                || result.status() == ModPersistenceExecutor.SubmitStatus.CLOSED) {
+            backupCoordinator.finish();
+            TacticalTabletMod.LOGGER.warn("Could not queue Tactical Tablet progress backup: {}", result.diagnostic());
+        }
+    }
+
+    /** Initializes synchronous migration/loading before the first tick can schedule persistence. */
+    public static synchronized void onServerStarted(MinecraftServer server) {
+        init(server);
+    }
+
+    /** Queues final immutable snapshots, then waits only a bounded time during server shutdown. */
+    public static synchronized void flushForShutdown() {
+        if (persistenceExecutor == null) return;
+        persistenceExecutor.stopAccepting();
+        saveAll(true);
+        boolean completed = persistenceExecutor.flush(SHUTDOWN_FLUSH_TIMEOUT);
+        if (!completed) {
+            TacticalTabletMod.LOGGER.error("Timed out after {} ms while flushing Tactical Tablet progress persistence; {} target(s) remain queued",
+                    SHUTDOWN_FLUSH_TIMEOUT.toMillis(), persistenceExecutor.pendingTargets());
+        }
+        persistenceExecutor.close();
     }
 
     public static synchronized Path getDataRoot() {
@@ -1187,6 +1218,11 @@ public class PlayerProgressManager {
         dataRoot = serverRoot.resolve(DATA_DIRECTORY);
         playersRoot = dataRoot.resolve(PLAYERS_DIRECTORY);
         backupsRoot = dataRoot.resolve(BACKUPS_DIRECTORY);
+        persistenceExecutor = new ModPersistenceExecutor(
+                "TacticalTablet-Persistence",
+                PERSISTENCE_QUEUE_LIMIT,
+                message -> TacticalTabletMod.LOGGER.warn("{}", message)
+        );
 
         try {
             Files.createDirectories(playersRoot);
@@ -1251,6 +1287,7 @@ public class PlayerProgressManager {
     }
 
     private static void saveDirty() {
+        reconcileCompletedWrites();
         if (dirty.isEmpty()) return;
 
         for (String key : dirty.keySet().toArray(new String[0])) {
@@ -1262,14 +1299,78 @@ public class PlayerProgressManager {
 
             progress.lastSeen = Instant.now().toEpochMilli();
             normalize(progress);
+            enqueueSnapshot(key, progress);
+        }
+    }
 
-            try {
-                writeJsonAtomically(getPlayerFile(key), progress);
-                dirty.remove(key);
-            } catch (IOException exception) {
-                TacticalTabletMod.LOGGER.error("Failed to autosave Tactical Tablet progress for {}", key, exception);
+    private static void enqueueSnapshot(String key, PlayerProgress progress) {
+        enqueueSnapshot(key, progress, snapshot(key, progress, ++nextSnapshotRevision), false);
+    }
+
+    private static void enqueueSnapshot(String key, PlayerProgress progress, PlayerProgressSnapshot snapshot) {
+        enqueueSnapshot(key, progress, snapshot, false);
+    }
+
+    private static void enqueueSnapshot(String key, PlayerProgress progress, boolean finalSnapshot) {
+        enqueueSnapshot(key, progress, snapshot(key, progress, ++nextSnapshotRevision), finalSnapshot);
+    }
+
+    private static void enqueueSnapshot(String key, PlayerProgress progress, PlayerProgressSnapshot snapshot, boolean finalSnapshot) {
+        if (persistenceExecutor == null || playersRoot == null) {
+            markDirty(key);
+            return;
+        }
+        Path target = getPlayerFile(key);
+        ModPersistenceExecutor.SubmitResult result = finalSnapshot
+                ? persistenceExecutor.submitFinal(new PlayerWriteTask(target, snapshot))
+                : persistenceExecutor.submit(new PlayerWriteTask(target, snapshot));
+        switch (result.status()) {
+            case ACCEPTED, COALESCED -> {
+                snapshotRevisions.put(key, snapshot.revision());
+                markDirty(key);
+            }
+            case STALE -> { }
+            case BACKPRESSURED -> markDirty(key);
+            case CLOSED -> {
+                markDirty(key);
+                TacticalTabletMod.LOGGER.warn("Could not queue Tactical Tablet progress save for {}: {}", key, result.diagnostic());
             }
         }
+    }
+
+    private static void reconcileCompletedWrites() {
+        if (persistenceExecutor == null) return;
+        for (String key : dirty.keySet().toArray(new String[0])) {
+            Long revision = snapshotRevisions.get(key);
+            if (revision == null) continue;
+            if (persistenceExecutor.completedRevision(getPlayerFile(key)) >= revision) {
+                dirty.remove(key);
+            }
+        }
+    }
+
+    private static PlayerProgressSnapshot snapshot(String key, PlayerProgress progress, long revision) {
+        return new PlayerProgressSnapshot(key, revision, new PlayerProgressData(
+                progress.dataVersion,
+                progress.name,
+                progress.uuid,
+                Map.copyOf(progress.classes),
+                Map.copyOf(progress.classTiers),
+                Map.copyOf(progress.unlockedBaseClasses),
+                progress.wins,
+                progress.kills,
+                progress.deaths,
+                progress.matchesPlayed,
+                progress.coins,
+                progress.battlePassXp,
+                progress.xpBoost,
+                progress.sadTromboneKills,
+                Map.copyOf(progress.purchasedClasses),
+                Map.copyOf(progress.donations),
+                Map.copyOf(progress.stats),
+                progress.firstSeen,
+                progress.lastSeen
+        ));
     }
 
     private static void markDirty(String key) {
@@ -1459,17 +1560,24 @@ public class PlayerProgressManager {
 
         String key = getPlayerKey(progress, uuid);
         if (key.isBlank()) return false;
-
-        try {
-            writeJsonAtomically(getPlayerFile(key), progress);
-            dirty.remove(key);
-            cache.put(key, progress);
-            return true;
-        } catch (IOException exception) {
-            TacticalTabletMod.LOGGER.error("Failed to save Tactical Tablet progress for {}", key, exception);
+        if (persistenceExecutor == null) {
+            TacticalTabletMod.LOGGER.error("Cannot durably save Tactical Tablet progress for {}: persistence executor is unavailable", key);
             markDirty(key);
             return false;
         }
+
+        PlayerProgressSnapshot snapshot = snapshot(key, progress, ++nextSnapshotRevision);
+        enqueueSnapshot(key, progress, snapshot);
+        boolean flushed = persistenceExecutor.flush(SHUTDOWN_FLUSH_TIMEOUT);
+        boolean saved = flushed && persistenceExecutor.completedRevision(getPlayerFile(key)) >= snapshot.revision();
+        if (saved) {
+            dirty.remove(key);
+            cache.put(key, progress);
+            return true;
+        }
+        TacticalTabletMod.LOGGER.error("Failed to durably flush Tactical Tablet progress for {}", key);
+        markDirty(key);
+        return false;
     }
 
     private static PlayerProgress readProgressFile(Path file) {
@@ -1512,27 +1620,13 @@ public class PlayerProgressManager {
     }
 
     private static void writeJsonAtomically(Path file, Object value) throws IOException {
-        Files.createDirectories(file.getParent());
-
-        Path tempFile = file.resolveSibling(file.getFileName().toString() + ".tmp");
-
-        try (Writer writer = Files.newBufferedWriter(tempFile, StandardCharsets.UTF_8)) {
-            GSON.toJson(value, writer);
-        }
-
-        try {
-            Files.move(
-                    tempFile,
-                    file,
-                    StandardCopyOption.REPLACE_EXISTING,
-                    StandardCopyOption.ATOMIC_MOVE
-            );
-        } catch (AtomicMoveNotSupportedException exception) {
-            Files.move(tempFile, file, StandardCopyOption.REPLACE_EXISTING);
+        FileSaveResult result = FILE_STORE.write(file, writer -> GSON.toJson(value, writer));
+        if (result.status() != FileSaveResult.Status.SUCCESS) {
+            throw new IOException(result.diagnostic(), result.exception().orElse(null));
         }
     }
 
-    private static void copyJsonFiles(Path sourceRoot, Path targetRoot) throws IOException {
+    static void copyJsonFiles(Path sourceRoot, Path targetRoot) throws IOException {
         if (!Files.isDirectory(sourceRoot)) return;
 
         try (DirectoryStream<Path> stream = Files.newDirectoryStream(sourceRoot, "*.json")) {
@@ -1565,6 +1659,7 @@ public class PlayerProgressManager {
         try (Stream<Path> stream = Files.list(backupsRoot)) {
             Path[] backups = stream
                     .filter(Files::isDirectory)
+                    .filter(path -> !path.getFileName().toString().startsWith("."))
                     .sorted(Comparator.comparing((Path path) -> path.getFileName().toString()).reversed())
                     .toArray(Path[]::new);
 
@@ -1598,6 +1693,146 @@ public class PlayerProgressManager {
         }
 
         return current + amount;
+    }
+
+    /** Immutable, Minecraft-free payload handed to the persistence thread. */
+    static record PlayerProgressSnapshot(String key, long revision, PlayerProgressData data) {
+        PlayerProgressSnapshot {
+            Objects.requireNonNull(key, "key");
+            Objects.requireNonNull(data, "data");
+        }
+    }
+
+    /** JSON-compatible immutable copy of a player progress document. */
+    static record PlayerProgressData(
+            int dataVersion, String name, String uuid,
+            Map<String, Integer> classes, Map<String, Integer> classTiers, Map<String, Integer> unlockedBaseClasses,
+            int wins, int kills, int deaths, int matchesPlayed, int coins, int battlePassXp,
+            boolean xpBoost, boolean sadTromboneKills,
+            Map<String, Integer> purchasedClasses, Map<String, Integer> donations, Map<String, Integer> stats,
+            long firstSeen, long lastSeen
+    ) {
+        PlayerProgressData {
+            classes = Map.copyOf(classes);
+            classTiers = Map.copyOf(classTiers);
+            unlockedBaseClasses = Map.copyOf(unlockedBaseClasses);
+            purchasedClasses = Map.copyOf(purchasedClasses);
+            donations = Map.copyOf(donations);
+            stats = Map.copyOf(stats);
+        }
+    }
+
+    private static final class PlayerWriteTask implements ModPersistenceExecutor.WriteTask {
+        private final Path target;
+        private final PlayerProgressSnapshot snapshot;
+
+        private PlayerWriteTask(Path target, PlayerProgressSnapshot snapshot) {
+            this.target = target;
+            this.snapshot = snapshot;
+        }
+
+        @Override
+        public Path target() {
+            return target;
+        }
+
+        @Override
+        public long revision() {
+            return snapshot.revision();
+        }
+
+        @Override
+        public FileSaveResult write() {
+            return FILE_STORE.write(target, writer -> GSON.toJson(snapshot.data(), writer));
+        }
+    }
+
+    private record BackupSnapshot(
+            Path dataRoot,
+            Path playersRoot,
+            Path backupsRoot,
+            String timestamp,
+            List<PlayerProgressSnapshot> players,
+            long revision
+    ) {
+        BackupSnapshot {
+            players = List.copyOf(players);
+        }
+    }
+
+    private static final class BackupWriteTask implements ModPersistenceExecutor.WriteTask {
+        private final BackupSnapshot snapshot;
+
+        private BackupWriteTask(BackupSnapshot snapshot) {
+            this.snapshot = snapshot;
+        }
+
+        @Override
+        public Path target() {
+            return snapshot.backupsRoot().resolve(snapshot.timestamp());
+        }
+
+        @Override
+        public long revision() {
+            return snapshot.revision();
+        }
+
+        @Override
+        public FileSaveResult write() {
+            try {
+                createBackup(snapshot);
+                return FileSaveResult.success(target());
+            } catch (IOException | RuntimeException exception) {
+                return FileSaveResult.failure(target(), "Failed to create progress backup", exception);
+            } finally {
+                backupCoordinator.finish();
+            }
+        }
+    }
+
+    private static void createBackup(BackupSnapshot snapshot) throws IOException {
+        Path completed = snapshot.backupsRoot().resolve(snapshot.timestamp());
+        Path temporary = snapshot.backupsRoot().resolve("." + snapshot.timestamp() + ".incomplete");
+        Path temporaryPlayers = temporary.resolve(PLAYERS_DIRECTORY);
+        Files.createDirectories(temporaryPlayers);
+
+        // Existing offline players are copied first; active players are then replaced by the agreed snapshots.
+        copyJsonFiles(snapshot.playersRoot(), temporaryPlayers);
+        List<String> files = new ArrayList<>();
+        for (PlayerProgressSnapshot player : snapshot.players()) {
+            Path target = temporaryPlayers.resolve(player.key() + ".json");
+            FileSaveResult result = FILE_STORE.write(target, writer -> GSON.toJson(player.data(), writer));
+            if (result.status() != FileSaveResult.Status.SUCCESS) {
+                throw new IOException(result.diagnostic(), result.exception().orElse(null));
+            }
+            files.add(PLAYERS_DIRECTORY + "/" + target.getFileName());
+        }
+
+        Path season = snapshot.dataRoot().resolve(SEASON_FILE);
+        if (Files.isRegularFile(season)) {
+            Files.copy(season, temporary.resolve(SEASON_FILE), StandardCopyOption.REPLACE_EXISTING);
+            files.add(SEASON_FILE);
+        }
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(temporaryPlayers, "*.json")) {
+            for (Path file : stream) {
+                String entry = PLAYERS_DIRECTORY + "/" + file.getFileName();
+                if (!files.contains(entry)) files.add(entry);
+            }
+        }
+        Map<String, Object> manifest = new HashMap<>();
+        manifest.put("schemaVersion", DATA_VERSION);
+        manifest.put("timestamp", snapshot.timestamp());
+        manifest.put("files", List.copyOf(files));
+        FileSaveResult manifestWrite = FILE_STORE.write(temporary.resolve("manifest.json"), writer -> GSON.toJson(manifest, writer));
+        if (manifestWrite.status() != FileSaveResult.Status.SUCCESS) {
+            throw new IOException(manifestWrite.diagnostic(), manifestWrite.exception().orElse(null));
+        }
+        try {
+            Files.move(temporary, completed, StandardCopyOption.ATOMIC_MOVE);
+        } catch (java.nio.file.AtomicMoveNotSupportedException exception) {
+            Files.move(temporary, completed);
+        }
+        cleanOldBackups();
     }
 
     private static final class PlayerProgress {
