@@ -29,10 +29,16 @@ public final class FileTransactionJournal implements TransactionJournal {
 
     private final TacticalTabletStoragePaths paths;
     private final AtomicFileStore fileStore;
+    private final FileOperations fileOperations;
 
     public FileTransactionJournal(TacticalTabletStoragePaths paths, AtomicFileStore fileStore) {
+        this(paths, fileStore, new DefaultFileOperations());
+    }
+
+    FileTransactionJournal(TacticalTabletStoragePaths paths, AtomicFileStore fileStore, FileOperations fileOperations) {
         this.paths = Objects.requireNonNull(paths, "paths");
         this.fileStore = Objects.requireNonNull(fileStore, "fileStore");
+        this.fileOperations = Objects.requireNonNull(fileOperations, "fileOperations");
     }
 
     @Override
@@ -84,6 +90,9 @@ public final class FileTransactionJournal implements TransactionJournal {
         List<CreateClanTransaction> committed = new ArrayList<>();
         List<String> diagnostics = new ArrayList<>();
         int quarantined = 0;
+        int quarantineFailures = 0;
+        int backupFailures = 0;
+        int reasonWriteFailures = 0;
         int archived = 0;
         int archiveFailures = 0;
         try {
@@ -96,7 +105,11 @@ public final class FileTransactionJournal implements TransactionJournal {
                             transactions.add(transaction);
                         } else if (transaction.state().requiresManualRecovery()) {
                             rollbackRequired.add(transaction);
-                            diagnostics.add("Clan transaction requires manual recovery: " + transaction.transactionId());
+                            diagnostics.add("transactionId=" + transaction.transactionId()
+                                    + " state=" + transaction.state()
+                                    + " type=ROLLBACK_REQUIRED message=manual recovery required"
+                                    + " playerUuid=" + transaction.playerUuid()
+                                    + " clanId=" + transaction.clanId());
                         } else if (transaction.state().isCommitted()) {
                             committed.add(transaction);
                             JournalResult archivedResult = archiveCommitted(transaction);
@@ -109,10 +122,19 @@ public final class FileTransactionJournal implements TransactionJournal {
                             }
                         }
                     } catch (IOException | InvalidJournalException exception) {
-                        quarantined++;
-                        diagnostics.add("Corrupt clan transaction journal isolated: " + file.getFileName()
-                                + " (" + exception.getMessage() + ")");
-                        isolateCorrupt(file, exception, diagnostics);
+                        IsolationResult isolation = isolateCorrupt(file, exception);
+                        if (isolation.status() == IsolationStatus.ISOLATED
+                                || isolation.status() == IsolationStatus.REASON_WRITE_FAILED) {
+                            quarantined++;
+                        }
+                        if (isolation.status() == IsolationStatus.REASON_WRITE_FAILED) {
+                            reasonWriteFailures++;
+                        } else if (isolation.status() == IsolationStatus.BACKUP_FAILED) {
+                            backupFailures++;
+                        } else if (isolation.status() == IsolationStatus.MOVE_FAILED) {
+                            quarantineFailures++;
+                        }
+                        diagnostics.add(isolation.diagnostic());
                     }
                 }
             }
@@ -122,7 +144,18 @@ public final class FileTransactionJournal implements TransactionJournal {
         transactions.sort(Comparator.comparing(transaction -> transaction.transactionId().toString()));
         rollbackRequired.sort(Comparator.comparing(transaction -> transaction.transactionId().toString()));
         committed.sort(Comparator.comparing(transaction -> transaction.transactionId().toString()));
-        return new JournalLoadResult(transactions, rollbackRequired, committed, quarantined, archived, archiveFailures, diagnostics);
+        return new JournalLoadResult(
+                transactions,
+                rollbackRequired,
+                committed,
+                quarantined,
+                quarantineFailures,
+                backupFailures,
+                reasonWriteFailures,
+                archived,
+                archiveFailures,
+                diagnostics
+        );
     }
 
     @Override
@@ -135,13 +168,13 @@ public final class FileTransactionJournal implements TransactionJournal {
             Path source = transactionPath(transaction);
             Path archive = uniquePath(paths.transactionsDirectory().resolve("archive").resolve(source.getFileName()));
             Path canonicalArchive = paths.transactionsDirectory().resolve("archive").resolve(source.getFileName());
-            if (!Files.exists(source)) {
-                return Files.exists(canonicalArchive)
+            if (!fileOperations.exists(source)) {
+                return fileOperations.exists(canonicalArchive)
                         ? JournalResult.success()
                         : JournalResult.failure("Committed journal is missing: " + transaction.transactionId(), null);
             }
-            Files.createDirectories(archive.getParent());
-            Files.move(source, archive);
+            fileOperations.createDirectories(archive.getParent());
+            fileOperations.move(source, archive);
             return JournalResult.success();
         } catch (IOException | InvalidJournalException exception) {
             return JournalResult.failure("Archive committed journal failed: " + exception.getMessage(), exception);
@@ -177,28 +210,54 @@ public final class FileTransactionJournal implements TransactionJournal {
             return transaction;
         } catch (JsonParseException | IllegalArgumentException | NullPointerException exception) {
             throw new InvalidJournalException("Journal object is invalid: " + exception.getMessage(), exception);
+        } catch (RuntimeException exception) {
+            throw new InvalidJournalException("Journal object is invalid: " + exception.getMessage(), exception);
         }
     }
 
-    private void isolateCorrupt(Path source, Exception exception, List<String> diagnostics) {
-        String evidenceName = "corrupt_" + Instant.now().toEpochMilli() + "_" + source.getFileName();
-        Path backup = uniquePath(paths.backupsDirectory().resolve("transactions").resolve(evidenceName));
-        Path quarantine = uniquePath(paths.transactionsDirectory().resolve("quarantine").resolve(evidenceName));
+    private IsolationResult isolateCorrupt(Path source, Exception exception) {
+        Path backup = null;
+        Path quarantine = null;
+        Path reason = null;
         try {
-            Files.createDirectories(backup.getParent());
-            Files.createDirectories(quarantine.getParent());
-            Files.copy(source, backup);
-            Files.move(source, quarantine);
-            Files.writeString(quarantine.resolveSibling(quarantine.getFileName() + ".reason.txt"),
+            if (!fileOperations.exists(source)) {
+                return isolationResult(IsolationStatus.BACKUP_FAILED, source, null, null, null,
+                        "source file no longer exists", exception);
+            }
+            String evidenceName = "corrupt_" + Instant.now().toEpochMilli() + "_" + source.getFileName();
+            Path backupDirectory = paths.backupsDirectory().resolve("transactions");
+            Path quarantineDirectory = paths.transactionsDirectory().resolve("quarantine");
+            fileOperations.createDirectories(backupDirectory);
+            fileOperations.createDirectories(quarantineDirectory);
+            backup = uniquePath(backupDirectory.resolve(evidenceName));
+            quarantine = uniquePath(quarantineDirectory.resolve(evidenceName));
+            reason = uniquePath(quarantine.resolveSibling(quarantine.getFileName() + ".reason.txt"));
+            fileOperations.copy(source, backup);
+            try {
+                fileOperations.move(source, quarantine);
+            } catch (IOException moveFailure) {
+                exception.addSuppressed(moveFailure);
+                return isolationResult(IsolationStatus.MOVE_FAILED, source, backup, quarantine, reason,
+                        moveFailure.getMessage(), exception);
+            }
+            try {
+                fileOperations.writeString(reason,
                     "source=" + source.getFileName() + System.lineSeparator()
                             + "category=" + exception.getClass().getSimpleName() + System.lineSeparator()
                             + "message=" + safeDiagnostic(exception.getMessage()) + System.lineSeparator()
                             + "backup=" + backup.getFileName() + System.lineSeparator()
                             + "quarantine=" + quarantine.getFileName() + System.lineSeparator(),
                     StandardCharsets.UTF_8);
+            } catch (IOException reasonFailure) {
+                exception.addSuppressed(reasonFailure);
+                return isolationResult(IsolationStatus.REASON_WRITE_FAILED, source, backup, quarantine, reason,
+                        reasonFailure.getMessage(), exception);
+            }
+            return isolationResult(IsolationStatus.ISOLATED, source, backup, quarantine, reason, "", exception);
         } catch (IOException isolationFailure) {
             exception.addSuppressed(isolationFailure);
-            diagnostics.add("Could not isolate corrupt journal " + source.getFileName() + ": " + isolationFailure.getMessage());
+            return isolationResult(IsolationStatus.BACKUP_FAILED, source, backup, quarantine, reason,
+                    isolationFailure.getMessage(), exception);
         }
     }
 
@@ -246,11 +305,18 @@ public final class FileTransactionJournal implements TransactionJournal {
         if (!transaction.clanId().equals(transaction.clanPayload().clanId())) {
             throw new InvalidJournalException("Journal clan ID does not match payload");
         }
+        if (!transaction.playerUuid().equals(payload.ownerUuid())) {
+            throw new InvalidJournalException("Journal payer UUID does not match clan owner UUID");
+        }
+        if (!CreateClanTransaction.normalizeDisplayName(transaction.playerName())
+                .equals(CreateClanTransaction.normalizeDisplayName(payload.ownerName()))) {
+            throw new InvalidJournalException("Journal payer name does not match clan owner name");
+        }
         if (!transaction.payloadHash().equals(CreateClanTransaction.payloadHash(transaction.clanPayload()))) {
             throw new InvalidJournalException("Journal payload hash does not match payload");
         }
         if (transaction.expectedOldBalance() < 0 || transaction.newBalance() < 0
-                || transaction.expectedOldBalance() < transaction.newBalance()) {
+                || transaction.expectedOldBalance() <= transaction.newBalance()) {
             throw new InvalidJournalException("Invalid journal balance transition");
         }
         if (transaction.createdAt() <= 0 || transaction.updatedAt() <= 0 || transaction.updatedAt() < transaction.createdAt()) {
@@ -341,19 +407,100 @@ public final class FileTransactionJournal implements TransactionJournal {
         }
     }
 
-    private static Path uniquePath(Path preferred) {
-        if (!Files.exists(preferred)) return preferred;
+    private Path uniquePath(Path preferred) throws IOException {
+        if (!fileOperations.exists(preferred)) return preferred;
         String fileName = preferred.getFileName().toString();
         Path parent = preferred.getParent();
         for (int index = 1; index < 10_000; index++) {
             Path candidate = parent.resolve(fileName + "." + index);
-            if (!Files.exists(candidate)) return candidate;
+            if (!fileOperations.exists(candidate)) return candidate;
         }
-        throw new IllegalStateException("Cannot allocate unique journal evidence path for " + preferred);
+        throw new IOException("Cannot allocate unique journal evidence path for " + preferred.getFileName());
     }
 
     private static String safeDiagnostic(String message) {
         if (message == null || message.isBlank()) return "";
         return message.length() <= 256 ? message : message.substring(0, 256);
+    }
+
+    private static IsolationResult isolationResult(
+            IsolationStatus status,
+            Path source,
+            Path backup,
+            Path quarantine,
+            Path reason,
+            String reasonMessage,
+            Exception exception
+    ) {
+        String diagnostic = "source=" + fileName(source)
+                + " isolationStatus=" + status
+                + " backup=" + fileName(backup)
+                + " quarantine=" + fileName(quarantine)
+                + " reason=" + fileName(reason)
+                + " message=" + safeDiagnostic(reasonMessage == null || reasonMessage.isBlank()
+                ? exception.getMessage()
+                : reasonMessage);
+        return new IsolationResult(status, source, backup, quarantine, reason, diagnostic, exception);
+    }
+
+    private static String fileName(Path path) {
+        return path == null || path.getFileName() == null ? "" : path.getFileName().toString();
+    }
+
+    enum IsolationStatus {
+        ISOLATED,
+        BACKUP_FAILED,
+        MOVE_FAILED,
+        REASON_WRITE_FAILED
+    }
+
+    record IsolationResult(
+            IsolationStatus status,
+            Path source,
+            Path backup,
+            Path quarantine,
+            Path reason,
+            String diagnostic,
+            Exception exception
+    ) {
+    }
+
+    interface FileOperations {
+        boolean exists(Path path) throws IOException;
+
+        void createDirectories(Path path) throws IOException;
+
+        void copy(Path source, Path target) throws IOException;
+
+        void move(Path source, Path target) throws IOException;
+
+        void writeString(Path target, String value, java.nio.charset.Charset charset) throws IOException;
+    }
+
+    private static final class DefaultFileOperations implements FileOperations {
+        @Override
+        public boolean exists(Path path) {
+            return Files.exists(path);
+        }
+
+        @Override
+        public void createDirectories(Path path) throws IOException {
+            Files.createDirectories(path);
+        }
+
+        @Override
+        public void copy(Path source, Path target) throws IOException {
+            Files.copy(source, target);
+        }
+
+        @Override
+        public void move(Path source, Path target) throws IOException {
+            Files.move(source, target);
+        }
+
+        @Override
+        public void writeString(Path target, String value, java.nio.charset.Charset charset) throws IOException {
+            Files.writeString(target, value, charset);
+        }
     }
 }

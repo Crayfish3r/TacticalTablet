@@ -128,6 +128,14 @@ public class ClanManager {
             TacticalTabletMod.LOGGER.error("Clan transaction recovery quarantined {} corrupt record(s)",
                     report.quarantined());
         }
+        if (report.quarantineFailures() > 0 || report.backupFailures() > 0 || report.reasonWriteFailures() > 0) {
+            TacticalTabletMod.LOGGER.error(
+                    "Clan transaction recovery quarantine issues: quarantineFailures={} backupFailures={} reasonWriteFailures={}",
+                    report.quarantineFailures(),
+                    report.backupFailures(),
+                    report.reasonWriteFailures()
+            );
+        }
         if (report.archiveFailures() > 0) {
             TacticalTabletMod.LOGGER.error("Clan transaction recovery failed to archive {} committed record(s)",
                     report.archiveFailures());

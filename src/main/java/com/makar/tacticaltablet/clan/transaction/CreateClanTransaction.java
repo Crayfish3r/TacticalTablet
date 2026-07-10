@@ -33,6 +33,15 @@ public record CreateClanTransaction(
         Objects.requireNonNull(clanId, "clanId");
         Objects.requireNonNull(clanPayload, "clanPayload");
         Objects.requireNonNull(state, "state");
+        if (!playerUuid.equals(clanPayload.ownerUuid())) {
+            throw new IllegalArgumentException("Journal payer UUID does not match clan owner UUID");
+        }
+        if (!normalizeDisplayName(playerName).equals(normalizeDisplayName(clanPayload.ownerName()))) {
+            throw new IllegalArgumentException("Journal payer name does not match clan owner name");
+        }
+        if (expectedOldBalance <= newBalance || newBalance < 0) {
+            throw new IllegalArgumentException("Journal debit must be positive");
+        }
         String calculatedPayloadHash = payloadHash(clanPayload);
         if (payloadHash == null || payloadHash.isBlank()) {
             payloadHash = calculatedPayloadHash;
@@ -72,5 +81,9 @@ public record CreateClanTransaction(
         } catch (NoSuchAlgorithmException exception) {
             throw new IllegalStateException("SHA-256 is unavailable", exception);
         }
+    }
+
+    public static String normalizeDisplayName(String value) {
+        return value == null ? "" : value.trim().toLowerCase(java.util.Locale.ROOT);
     }
 }

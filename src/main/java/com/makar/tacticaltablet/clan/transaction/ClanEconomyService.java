@@ -121,13 +121,16 @@ public final class ClanEconomyService {
         TransactionJournal.JournalLoadResult loaded = journal.loadPending();
         int recoveredCommitted = 0;
         int blocked = 0;
+        java.util.List<String> diagnostics = new java.util.ArrayList<>(loaded.diagnostics());
         for (CreateClanTransaction transaction : loaded.transactions()) {
             if (!transaction.state().isAutoRecoverable()) continue;
+            TransactionState initialState = transaction.state();
             TransactionResult result = applyAndCommit(transaction);
             if (result.status() == TransactionResult.Status.SUCCESS) {
                 recoveredCommitted++;
             } else {
                 blocked++;
+                diagnostics.add(recoveryDiagnostic(transaction, initialState, result));
             }
         }
         return new RecoveryReport(
@@ -135,10 +138,13 @@ public final class ClanEconomyService {
                 blocked,
                 loaded.rollbackRequired().size(),
                 loaded.quarantined(),
+                loaded.quarantineFailures(),
+                loaded.backupFailures(),
+                loaded.reasonWriteFailures(),
                 loaded.committed().size(),
                 loaded.archived(),
                 loaded.archiveFailures(),
-                loaded.diagnostics()
+                diagnostics
         );
     }
 
@@ -147,6 +153,9 @@ public final class ClanEconomyService {
             int blocked,
             int rollbackRequired,
             int quarantined,
+            int quarantineFailures,
+            int backupFailures,
+            int reasonWriteFailures,
             int alreadyCommitted,
             int archived,
             int archiveFailures,
@@ -254,5 +263,23 @@ public final class ClanEconomyService {
                 "Journal " + stage + " failed: " + result.diagnostic(),
                 result.exception()
         );
+    }
+
+    private static String recoveryDiagnostic(
+            CreateClanTransaction transaction,
+            TransactionState initialState,
+            TransactionResult result
+    ) {
+        return "transactionId=" + transaction.transactionId()
+                + " state=" + initialState
+                + " resultStatus=" + result.status()
+                + " diagnostic=" + safeDiagnostic(result.diagnostic())
+                + " playerUuid=" + transaction.playerUuid()
+                + " clanId=" + transaction.clanId();
+    }
+
+    private static String safeDiagnostic(String value) {
+        if (value == null || value.isBlank()) return "";
+        return value.length() <= 256 ? value : value.substring(0, 256);
     }
 }

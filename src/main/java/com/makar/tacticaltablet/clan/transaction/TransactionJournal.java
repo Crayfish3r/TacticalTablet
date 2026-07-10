@@ -34,12 +34,15 @@ public interface TransactionJournal {
             List<CreateClanTransaction> rollbackRequired,
             List<CreateClanTransaction> committed,
             int quarantined,
+            int quarantineFailures,
+            int backupFailures,
+            int reasonWriteFailures,
             int archived,
             int archiveFailures,
             List<String> diagnostics
     ) {
         public JournalLoadResult(List<CreateClanTransaction> transactions, List<String> diagnostics) {
-            this(transactions, List.of(), List.of(), 0, 0, 0, diagnostics);
+            this(transactions, List.of(), List.of(), 0, 0, 0, 0, 0, 0, diagnostics);
         }
 
         public JournalLoadResult {

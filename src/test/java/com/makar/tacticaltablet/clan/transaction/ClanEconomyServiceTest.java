@@ -17,6 +17,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 class ClanEconomyServiceTest {
@@ -201,7 +202,26 @@ class ClanEconomyServiceTest {
 
         assertEquals(0, recovery.committed());
         assertEquals(1, recovery.blocked());
+        assertFalse(recovery.diagnostics().isEmpty());
         assertEquals(TransactionState.ROLLBACK_REQUIRED, journal.onlyTransaction().state());
+    }
+
+    @Test
+    void blockedRecoveryDiagnosticContainsTransactionIdentityAndState() {
+        FakePlayerRepository player = new FakePlayerRepository(1);
+        FakeJournal journal = new FakeJournal();
+        CreateClanTransaction prepared = transaction(TransactionState.PREPARED);
+        journal.transactions.put(prepared.transactionId(), prepared);
+
+        ClanEconomyService.RecoveryReport recovery = service(player, new FakeClanRepository(), journal, () -> { })
+                .recoverPendingTransactions();
+
+        assertEquals(1, recovery.blocked());
+        String diagnostic = recovery.diagnostics().get(0);
+        assertEquals(true, diagnostic.contains("transactionId=" + prepared.transactionId()));
+        assertEquals(true, diagnostic.contains("state=PREPARED"));
+        assertEquals(true, diagnostic.contains("playerUuid=" + prepared.playerUuid()));
+        assertEquals(true, diagnostic.contains("clanId=" + prepared.clanId()));
     }
 
     @Test
@@ -431,7 +451,7 @@ class ClanEconomyServiceTest {
                     committed.add(transaction);
                 }
             }
-            return new JournalLoadResult(pending, rollback, committed, 0, 0, 0, List.of());
+            return new JournalLoadResult(pending, rollback, committed, 0, 0, 0, 0, 0, 0, List.of());
         }
 
         private CreateClanTransaction onlyTransaction() {
