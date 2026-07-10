@@ -3,6 +3,9 @@ package com.makar.tacticaltablet.clan;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonSyntaxException;
+import com.makar.tacticaltablet.anticheat.AntiCheatManager;
+import com.makar.tacticaltablet.anticheat.Severity;
+import com.makar.tacticaltablet.anticheat.ViolationType;
 import com.makar.tacticaltablet.core.TacticalTabletMod;
 import com.makar.tacticaltablet.game.GameStateManager;
 import com.makar.tacticaltablet.game.MapSetManager;
@@ -28,6 +31,7 @@ import java.nio.file.StandardCopyOption;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
@@ -53,10 +57,13 @@ public class ClanManager {
     private static final String LEGACY_DATA_DIRECTORY = "tacticaltabletdata";
     private static final String CLANS_FILE = "clans.json";
     private static final int COLOR_SCHEMA_VERSION = 2;
+    private static final long JOIN_REQUEST_COOLDOWN_MS = 5_000L;
+    private static final int MAX_PENDING_REQUESTS_PER_PLAYER = 5;
     private static final DateTimeFormatter BROKEN_FILE_TIMESTAMP = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
 
     private static Path clansFile;
     private static ClanStorage storage = new ClanStorage();
+    private static final Map<UUID, Long> lastJoinRequestTimes = new HashMap<>();
     private static boolean loaded;
 
     public static synchronized void sync(ServerPlayer player) {
@@ -163,8 +170,31 @@ public class ClanManager {
         if (clan == null) return Result.NOT_FOUND;
 
         String playerId = player.getUUID().toString();
+        long now = System.currentTimeMillis();
+        Long lastRequest = lastJoinRequestTimes.get(player.getUUID());
+        if (lastRequest != null && now - lastRequest < JOIN_REQUEST_COOLDOWN_MS) {
+            AntiCheatManager.record(
+                    player,
+                    ViolationType.PACKET_SPAM,
+                    Severity.MEDIUM,
+                    "clan join request cooldown"
+            );
+            return Result.RATE_LIMITED;
+        }
+        lastJoinRequestTimes.put(player.getUUID(), now);
+
         if (findClanByMember(playerId) != null) return Result.ALREADY_IN_CLAN;
         if (containsUuid(clan.pending, playerId)) return Result.ALREADY_PENDING;
+        if (countPendingRequests(playerId) >= MAX_PENDING_REQUESTS_PER_PLAYER) {
+            AntiCheatManager.record(
+                    player,
+                    ViolationType.PACKET_SPAM,
+                    Severity.MEDIUM,
+                    "too many active clan join requests"
+            );
+            return Result.PENDING_LIMIT_REACHED;
+        }
+        if (clan.pending.size() >= ClanConstants.MAX_PENDING) return Result.CLAN_PENDING_FULL;
 
         clan.pending.add(new ClanPlayerEntry(playerId, player.getGameProfile().getName()));
         save();
@@ -655,6 +685,10 @@ public class ClanManager {
 
         changed |= normalizeEntries(clan.members);
         changed |= normalizeEntries(clan.pending);
+        if (clan.pending.size() > ClanConstants.MAX_PENDING) {
+            clan.pending = new ArrayList<>(clan.pending.subList(0, ClanConstants.MAX_PENDING));
+            changed = true;
+        }
 
         if (parseUuidOrNull(clan.ownerUuid) != null && !containsUuid(clan.members, clan.ownerUuid)) {
             clan.members.add(0, new ClanPlayerEntry(clan.ownerUuid, clan.ownerName));
@@ -770,6 +804,16 @@ public class ClanManager {
         return null;
     }
 
+    private static int countPendingRequests(String playerId) {
+        int count = 0;
+        for (ClanData clan : storage.clans) {
+            if (containsUuid(clan.pending, playerId)) {
+                count++;
+            }
+        }
+        return count;
+    }
+
     private static ClanPlayerEntry findEntry(List<ClanPlayerEntry> entries, String uuid) {
         for (ClanPlayerEntry entry : entries) {
             if (entry.uuid.equals(uuid)) return entry;
@@ -840,6 +884,9 @@ public class ClanManager {
         CLAN_WAR_LOCKED,
         CLAN_LIMIT_REACHED,
         COLOR_TAKEN,
+        RATE_LIMITED,
+        PENDING_LIMIT_REACHED,
+        CLAN_PENDING_FULL,
         STORAGE_ERROR
     }
 

@@ -9,7 +9,7 @@ import java.util.Set;
 
 public enum PrefixRole {
     NONE("none", "", 0, 0xFFFFFF, 0x000000, Set.of()),
-    CREATOR("creator", "Создатель", 1000, 0xFFFFFF, 0xFF3333, Set.of(
+    OWNER("owner", "OWNER", 1000, 0xFFFFFF, 0xFF3333, Set.of(
             PrefixPermission.ADMIN,
             PrefixPermission.PREFIX_MANAGE,
             PrefixPermission.PREFIX_RELOAD,
@@ -17,10 +17,22 @@ public enum PrefixRole {
             PrefixPermission.DEBUG,
             "tacticaltablet.*"
     )),
-    ELITE("elite", "Элита", 200, 0xFFFFFF, 0xAA55FF, Set.of(
+    MODER("moder", "MODER", 500, 0xFFFFFF, 0xFFAA00, Set.of(
+            PrefixPermission.MODER_MODE,
+            PrefixPermission.MOD_MUTE,
+            PrefixPermission.MOD_UNMUTE,
+            PrefixPermission.MOD_KICK,
+            PrefixPermission.MOD_TEMPBAN,
+            PrefixPermission.MOD_UNBAN,
+            PrefixPermission.MOD_PUNISHMENTS
+    )),
+    BUILDER("builder", "BUILDER", 300, 0xFFFFFF, 0x55FF55, Set.of(
+            PrefixPermission.BUILD
+    )),
+    ELITE("elite", "ELITE", 200, 0xFFFFFF, 0xAA55FF, Set.of(
             "tacticaltablet.prefix.elite"
     )),
-    PRO("pro", "Про", 100, 0xFFFFFF, 0x5599FF, Set.of(
+    PRO("pro", "PRO", 100, 0xFFFFFF, 0x5599FF, Set.of(
             "tacticaltablet.prefix.pro"
     ));
 
@@ -42,7 +54,9 @@ public enum PrefixRole {
 
     public static PrefixRole byId(String id) {
         String normalized = id == null ? "" : id.trim().toLowerCase(Locale.ROOT);
-        if (normalized.equals("создатель")) return CREATOR;
+        if (normalized.equals("creator") || normalized.equals("создатель")) return OWNER;
+        if (normalized.equals("moderator") || normalized.equals("модератор") || normalized.equals("модер")) return MODER;
+        if (normalized.equals("строитель")) return BUILDER;
         if (normalized.equals("элита")) return ELITE;
         if (normalized.equals("про")) return PRO;
         if (normalized.equals("clear") || normalized.equals("нет")) return NONE;
@@ -111,7 +125,9 @@ public enum PrefixRole {
 
     public ChatFormatting fallbackFormatting() {
         return switch (this) {
-            case CREATOR -> ChatFormatting.RED;
+            case OWNER -> ChatFormatting.RED;
+            case MODER -> ChatFormatting.GOLD;
+            case BUILDER -> ChatFormatting.GREEN;
             case ELITE -> ChatFormatting.LIGHT_PURPLE;
             case PRO -> ChatFormatting.BLUE;
             case NONE -> ChatFormatting.WHITE;

@@ -1,5 +1,6 @@
 package com.makar.tacticaltablet.tablet.net;
 
+import com.makar.tacticaltablet.airdrop.net.AirdropNoticePacket;
 import com.makar.tacticaltablet.airdrop.net.AirdropSmokeStatePacket;
 import com.makar.tacticaltablet.clan.ClanAcceptJoinPacket;
 import com.makar.tacticaltablet.clan.ClanChangeColorPacket;
@@ -22,7 +23,7 @@ import java.util.Optional;
 
 public class PacketHandler {
 
-    private static final String VERSION = "29";
+    private static final String VERSION = "31";
 
     public static final SimpleChannel INSTANCE = NetworkRegistry.newSimpleChannel(
             new ResourceLocation("tacticaltablet", "main"),
@@ -134,6 +135,13 @@ public class PacketHandler {
                 AirdropSmokeStatePacket::encode,
                 AirdropSmokeStatePacket::new,
                 AirdropSmokeStatePacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_CLIENT));
+
+        INSTANCE.registerMessage(id++,
+                AirdropNoticePacket.class,
+                AirdropNoticePacket::encode,
+                AirdropNoticePacket::new,
+                AirdropNoticePacket::handle,
                 Optional.of(NetworkDirection.PLAY_TO_CLIENT));
 
         INSTANCE.registerMessage(id++,

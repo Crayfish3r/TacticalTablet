@@ -9,6 +9,7 @@ import com.makar.tacticaltablet.game.lobby.LobbyManager;
 import com.makar.tacticaltablet.game.respawn.RespawnControlManager;
 import com.makar.tacticaltablet.game.respawn.RtpTimerManager;
 import com.makar.tacticaltablet.inventory.InventoryManager;
+import com.makar.tacticaltablet.moderation.ModerModeManager;
 import com.makar.tacticaltablet.progression.ClassXPManager;
 import com.makar.tacticaltablet.progression.ClassCooldownManager;
 import com.makar.tacticaltablet.progression.PassiveClassXPManager;
@@ -78,6 +79,7 @@ public class LivesManager {
 
     public static boolean canContinueMatch(ServerPlayer player) {
         if (player == null) return false;
+        if (ModerModeManager.isInModerMode(player)) return false;
         if (isEliminated(player)) return false;
 
         if (!player.getTags().contains(TAG_LIVES_INIT)) {
@@ -105,6 +107,7 @@ public class LivesManager {
 
     public static boolean isAliveParticipant(ServerPlayer player) {
         if (player == null) return false;
+        if (ModerModeManager.isInModerMode(player)) return false;
         if (!player.getTags().contains(TAG_LIVES_INIT)) return false;
         if (isEliminated(player)) return false;
 

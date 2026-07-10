@@ -609,12 +609,13 @@ public class MapRotationManager {
         }
     }
 
-    private static RotationConfig normalizeConfig(RotationConfig value) {
+    private static RotationConfig normalizeConfig(RotationConfig value) throws IOException {
         value.dataVersion = DATA_VERSION;
 
         if (value.mapsFolder == null || value.mapsFolder.isBlank()) {
             value.mapsFolder = DEFAULT_MAP_POOL;
         }
+        value.mapsFolder = normalizeMapsFolder(value.mapsFolder);
 
         if (value.rotationMode == null || value.rotationMode.isBlank()) {
             value.rotationMode = "round_robin";
@@ -626,6 +627,27 @@ public class MapRotationManager {
         }
 
         return value;
+    }
+
+    private static String normalizeMapsFolder(String mapsFolder) throws IOException {
+        String value = nullToEmpty(mapsFolder).trim();
+        if (value.isBlank()) {
+            return DEFAULT_MAP_POOL;
+        }
+
+        Path configured = Path.of(value);
+        if (configured.isAbsolute()) {
+            throw new IOException("Unsafe mapsFolder outside server root");
+        }
+
+        Path resolved = serverRoot.resolve(value).normalize();
+        if (!resolved.startsWith(serverRoot)) {
+            throw new IOException("Unsafe mapsFolder outside server root");
+        }
+
+        Path relative = serverRoot.relativize(resolved);
+        String normalized = relative.toString();
+        return normalized.isBlank() ? DEFAULT_MAP_POOL : normalized;
     }
 
     private static RotationState normalizeState(RotationState value) {
@@ -669,7 +691,11 @@ public class MapRotationManager {
     }
 
     private static Path getMapsRoot() {
-        return serverRoot.resolve(config.mapsFolder).normalize();
+        Path mapsRoot = serverRoot.resolve(config.mapsFolder).normalize();
+        if (!mapsRoot.startsWith(serverRoot)) {
+            throw new IllegalStateException("Unsafe mapsFolder outside server root");
+        }
+        return mapsRoot;
     }
 
     private static boolean isZip(Path path) {

@@ -15,6 +15,8 @@ import net.minecraftforge.registries.ForgeRegistries;
 
 public final class AirdropLootGenerator {
 
+    private static final int MAX_NBT_LENGTH = 2048;
+
     private AirdropLootGenerator() {
     }
 
@@ -105,11 +107,16 @@ public final class AirdropLootGenerator {
         ItemStack stack = new ItemStack(item, entry.count);
 
         if (entry.nbt != null && !entry.nbt.isBlank()) {
+            if (entry.nbt.length() > MAX_NBT_LENGTH) {
+                TacticalTabletMod.LOGGER.warn("Skipped AirDrop loot NBT for {}: NBT is too long.", entry.item);
+                return ItemStack.EMPTY;
+            }
+
             try {
                 CompoundTag tag = TagParser.parseTag(entry.nbt);
                 stack.setTag(tag);
             } catch (Exception exception) {
-                TacticalTabletMod.LOGGER.warn("Failed to parse AirDrop loot NBT for {}: {}", entry.item, entry.nbt, exception);
+                TacticalTabletMod.LOGGER.warn("Failed to parse AirDrop loot NBT for {}.", entry.item, exception);
                 return ItemStack.EMPTY;
             }
         }

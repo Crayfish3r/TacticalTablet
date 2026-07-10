@@ -1,6 +1,7 @@
 package com.makar.tacticaltablet.airdrop;
 
 import com.makar.tacticaltablet.airdrop.loot.AirdropLootGenerator;
+import com.makar.tacticaltablet.airdrop.net.AirdropNoticePacket;
 import com.makar.tacticaltablet.airdrop.net.AirdropSmokeStatePacket;
 import com.makar.tacticaltablet.core.TacticalTabletMod;
 import com.makar.tacticaltablet.core.ModBlocks;
@@ -15,9 +16,6 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ClientboundSetActionBarTextPacket;
-import net.minecraft.network.protocol.game.ClientboundSetSubtitleTextPacket;
-import net.minecraft.network.protocol.game.ClientboundSetTitleTextPacket;
-import net.minecraft.network.protocol.game.ClientboundSetTitlesAnimationPacket;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundSource;
@@ -48,6 +46,8 @@ public final class AirdropManager {
     private static final double MIN_RADIUS_FACTOR = 0.18D;
     private static final double MAX_RADIUS_FACTOR = 0.75D;
     private static final boolean REMOVE_CHEST_ON_EXPIRE = false;
+    private static final int AIRDROP_NOTICE_DURATION_TICKS = 5 * 20;
+    private static final int AIRDROP_NOTICE_COLOR = 0xFFFF5555;
 
     private static AirdropData activeAirdrop;
     private static int autoSpawnTicker = 0;
@@ -94,7 +94,9 @@ public final class AirdropManager {
                 realDropPos.getY() + FALL_START_HEIGHT
         );
 
-        announceStart(level);
+        if (!instant) {
+            announceStart(level);
+        }
         giveOrUpdateCompasses(level);
         if (GameStateManager.isRunning(level.getServer())) {
             DiscordLeaderboardService.recordMatchAirdropStarted();
@@ -102,6 +104,7 @@ public final class AirdropManager {
 
         if (instant) {
             broadcast(level, "§c[СБРОС] §fГруз уже в пути.");
+            sendAirdropNotice(level, "AirDrop падает!", AirdropNoticePacket.NoticeType.DROPPING);
             spawnFallingCrate(level);
         }
 
@@ -255,6 +258,7 @@ public final class AirdropManager {
         activeAirdrop.ticksUntilDrop--;
 
         if (activeAirdrop.ticksUntilDrop == 30 * 20) {
+            sendAirdropNotice(level, "AirDrop через 30 секунд!", AirdropNoticePacket.NoticeType.COUNTDOWN_30);
             broadcast(level, "§c[СБРОС] §fДо сброса: 30 сек.");
         }
 
@@ -264,6 +268,7 @@ public final class AirdropManager {
 
         if (activeAirdrop.ticksUntilDrop <= 0) {
             activeAirdrop.state = AirdropState.FALLING;
+            sendAirdropNotice(level, "AirDrop падает!", AirdropNoticePacket.NoticeType.DROPPING);
             spawnFallingCrate(level);
         }
     }
@@ -379,7 +384,7 @@ public final class AirdropManager {
     }
 
     private static void announceStart(ServerLevel level) {
-        sendTitle(level, "§cСБРОС", "§fГруз будет сброшен через 60 секунд");
+        sendAirdropNotice(level, "AirDrop через 60 секунд!", AirdropNoticePacket.NoticeType.COUNTDOWN_60);
         broadcast(level, "§c[СБРОС] §fКомпас указывает в примерную зону сброса.");
     }
 
@@ -482,6 +487,20 @@ public final class AirdropManager {
         return new AirdropSmokeStatePacket(active, activeAirdrop.dimension.location(), smokePos);
     }
 
+    private static void sendAirdropNotice(ServerLevel level, String message, AirdropNoticePacket.NoticeType type) {
+        if (level == null || level.getServer() == null) return;
+
+        AirdropNoticePacket packet = new AirdropNoticePacket(
+                message,
+                AIRDROP_NOTICE_COLOR,
+                AIRDROP_NOTICE_DURATION_TICKS,
+                type
+        );
+        for (ServerPlayer player : level.getServer().getPlayerList().getPlayers()) {
+            PacketHandler.sendToPlayer(player, packet);
+        }
+    }
+
     private static BlockPos findChestPlacement(ServerLevel level, BlockPos origin) {
         BlockPos[] candidates = new BlockPos[]{
                 origin,
@@ -533,17 +552,6 @@ public final class AirdropManager {
 
         for (ServerPlayer player : level.getServer().getPlayerList().getPlayers()) {
             player.sendSystemMessage(component);
-        }
-    }
-
-    private static void sendTitle(ServerLevel level, String title, String subtitle) {
-        Component titleComponent = Component.literal(title);
-        Component subtitleComponent = Component.literal(subtitle);
-
-        for (ServerPlayer player : level.getServer().getPlayerList().getPlayers()) {
-            player.connection.send(new ClientboundSetTitlesAnimationPacket(10, 70, 20));
-            player.connection.send(new ClientboundSetTitleTextPacket(titleComponent));
-            player.connection.send(new ClientboundSetSubtitleTextPacket(subtitleComponent));
         }
     }
 

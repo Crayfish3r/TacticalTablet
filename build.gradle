@@ -21,7 +21,7 @@ repositories {
 
 minecraft {
     // Standard mappings for 1.20.1
-    mappings channel: 'official', version: '1.20.1'
+    mappings channel: mapping_channel, version: mapping_version
 
     runs {
         client {
@@ -48,8 +48,7 @@ minecraft {
 }
 
 dependencies {
-    // Using a stable Forge version for 1.20.1
-    minecraft 'net.minecraftforge:forge:1.20.1-47.2.0'
+    minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
     implementation "de.maxhenkel.voicechat:voicechat-api:${voicechat_api_version}"
 }
 

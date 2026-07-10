@@ -40,7 +40,7 @@ public final class DiscordWebhookClient {
             return CompletableFuture.completedFuture(false);
         }
 
-        URI uri = parseUri(url, "Discord webhook URL");
+        URI uri = parseDiscordWebhookUri(url);
 
         if (uri == null) {
             return CompletableFuture.completedFuture(false);
@@ -79,7 +79,7 @@ public final class DiscordWebhookClient {
             return CompletableFuture.completedFuture(false);
         }
 
-        URI uri = parseUri(url, "Discord webhook URL");
+        URI uri = parseDiscordWebhookUri(url);
 
         if (uri == null) {
             return CompletableFuture.completedFuture(false);
@@ -114,7 +114,7 @@ public final class DiscordWebhookClient {
             return CompletableFuture.completedFuture("");
         }
 
-        URI uri = parseUri(url, "Discord webhook URL");
+        URI uri = parseDiscordWebhookUri(url);
 
         if (uri == null) {
             return CompletableFuture.completedFuture("");
@@ -160,7 +160,7 @@ public final class DiscordWebhookClient {
             return CompletableFuture.completedFuture("");
         }
 
-        URI uri = parseUri(url, "Discord webhook URL");
+        URI uri = parseDiscordWebhookUri(url);
 
         if (uri == null) {
             return CompletableFuture.completedFuture("");
@@ -206,7 +206,7 @@ public final class DiscordWebhookClient {
             return CompletableFuture.completedFuture(WebhookResponse.invalid());
         }
 
-        URI uri = parseUri(url, "Discord webhook edit URL");
+        URI uri = parseDiscordWebhookUri(url);
 
         if (uri == null) {
             return CompletableFuture.completedFuture(WebhookResponse.invalid());
@@ -237,7 +237,7 @@ public final class DiscordWebhookClient {
             return CompletableFuture.completedFuture(WebhookResponse.invalid());
         }
 
-        URI uri = parseUri(url, "Discord webhook edit URL");
+        URI uri = parseDiscordWebhookUri(url);
 
         if (uri == null) {
             return CompletableFuture.completedFuture(WebhookResponse.invalid());
@@ -331,13 +331,34 @@ public final class DiscordWebhookClient {
         return value.substring(0, Math.max(0, limit - 1)) + "…";
     }
 
-    private static URI parseUri(String url, String description) {
-        try {
-            return URI.create(url);
-        } catch (IllegalArgumentException exception) {
-            TacticalTabletMod.LOGGER.error("Invalid {}", description, exception);
+    private static URI parseDiscordWebhookUri(String url) {
+        if (url == null || url.isBlank()) {
             return null;
         }
+
+        URI uri;
+        try {
+            uri = URI.create(url.trim());
+        } catch (IllegalArgumentException exception) {
+            TacticalTabletMod.LOGGER.warn("Discord webhook URL is invalid or not allowed");
+            return null;
+        }
+
+        String scheme = uri.getScheme();
+        String host = uri.getHost();
+        String path = uri.getPath();
+
+        boolean okScheme = "https".equalsIgnoreCase(scheme);
+        boolean okHost = "discord.com".equalsIgnoreCase(host)
+                || "discordapp.com".equalsIgnoreCase(host);
+        boolean okPath = path != null && path.startsWith("/api/webhooks/");
+
+        if (!okScheme || !okHost || !okPath) {
+            TacticalTabletMod.LOGGER.warn("Discord webhook URL is invalid or not allowed");
+            return null;
+        }
+
+        return uri;
     }
 
     private static String appendQuery(String webhookUrl, String query) {

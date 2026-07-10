@@ -20,6 +20,13 @@ build
 # other
 eclipse
 run
+backups/
+*.zip
+config/tacticaltablet_discord.json
+config/tacticaltablet_online_webhook.json
+tacticaltablet_data/
+map_rotation/state.json
+map_rotation/*.flag
 
 # Files from Forge MDK
 forge*changelog.txt

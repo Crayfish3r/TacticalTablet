@@ -36,6 +36,9 @@ public class ClanJoinRequestPacket {
 
     private static String message(ClanManager.Result result) {
         return switch (result) {
+            case RATE_LIMITED -> "[WAR] Подождите несколько секунд перед следующей заявкой.";
+            case PENDING_LIMIT_REACHED -> "[WAR] У вас слишком много активных заявок в кланы.";
+            case CLAN_PENDING_FULL -> "[WAR] В этом клане слишком много неразобранных заявок.";
             case SUCCESS -> "[WAR] Заявка отправлена.";
             case ALREADY_PENDING -> "[WAR] Заявка уже отправлена.";
             case ALREADY_IN_CLAN -> "[WAR] Вы уже состоите в клане.";

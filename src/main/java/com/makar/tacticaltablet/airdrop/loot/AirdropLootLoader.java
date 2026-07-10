@@ -37,6 +37,9 @@ public final class AirdropLootLoader {
 
     private static final int DEFAULT_MIN_STACKS = 4;
     private static final int DEFAULT_MAX_STACKS = 10;
+    private static final int MAX_NBT_LENGTH = 2048;
+    private static final int MIN_CHEST_SLOT = 0;
+    private static final int MAX_CHEST_SLOT = 26;
 
     private static AirdropLootConfig cachedConfig = AirdropLootConfig.empty();
 
@@ -232,8 +235,18 @@ public final class AirdropLootLoader {
             return false;
         }
 
+        if (entry.slot != null && (entry.slot < MIN_CHEST_SLOT || entry.slot > MAX_CHEST_SLOT)) {
+            TacticalTabletMod.LOGGER.warn("Skipped AirDrop loot entry with invalid slot in set '{}': {}", setName, entry.item);
+            return false;
+        }
+
         if (entry.count <= 0 && (entry.min <= 0 || entry.max <= 0 || entry.max < entry.min)) {
             TacticalTabletMod.LOGGER.warn("Skipped AirDrop loot entry with invalid count in set '{}': {}", setName, entry.item);
+            return false;
+        }
+
+        if (entry.nbt != null && entry.nbt.length() > MAX_NBT_LENGTH) {
+            TacticalTabletMod.LOGGER.warn("Skipped AirDrop loot entry with oversized NBT in set '{}': {}", setName, entry.item);
             return false;
         }
 
@@ -245,8 +258,16 @@ public final class AirdropLootLoader {
         if (entry.nbt != null && entry.nbt.isBlank()) {
             entry.nbt = null;
         }
+        // TODO: min/max ranges and per-entry weights are parsed for config compatibility,
+        // but generation still places explicit entries to preserve current loot balance.
         if (entry.count <= 0) {
             entry.count = entry.min;
+        }
+        Item item = ForgeRegistries.ITEMS.getValue(new ResourceLocation(entry.item));
+        int maxStackSize = item == null ? 1 : Math.max(1, item.getMaxStackSize());
+        if (entry.count > maxStackSize) {
+            TacticalTabletMod.LOGGER.warn("Clamped AirDrop loot count for {} to max stack size {}.", entry.item, maxStackSize);
+            entry.count = maxStackSize;
         }
         if (entry.weight <= 0) {
             entry.weight = 1;

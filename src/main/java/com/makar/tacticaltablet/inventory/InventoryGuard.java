@@ -12,6 +12,7 @@ import com.makar.tacticaltablet.game.clanwar.ClanWarManager;
 import com.makar.tacticaltablet.game.extraction.ExtractionCompassHelper;
 import com.makar.tacticaltablet.game.extraction.ExtractionPointManager;
 import com.makar.tacticaltablet.game.lives.LivesManager;
+import com.makar.tacticaltablet.moderation.ModerModeManager;
 import com.makar.tacticaltablet.tablet.PlayerTabletState;
 
 import net.minecraft.server.MinecraftServer;
@@ -39,6 +40,8 @@ public class InventoryGuard {
     }
 
     private static void check(ServerPlayer player) {
+        if (ModerModeManager.isInModerMode(player)) return;
+
         Set<String> tags = player.getTags();
 
         boolean inLobby = GameStateManager.isInLobby(player) || tags.contains("in_lobby");

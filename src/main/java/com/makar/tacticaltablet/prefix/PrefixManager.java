@@ -2,6 +2,7 @@ package com.makar.tacticaltablet.prefix;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -27,11 +28,13 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 public final class PrefixManager {
@@ -42,10 +45,13 @@ public final class PrefixManager {
             .create();
     private static final String DATA_DIRECTORY = "tacticaltabletdata";
     private static final String PREFIXES_FILE = "prefixes.json";
+    private static final String CONFIG_FILE = "prefix_config.json";
     private static final DateTimeFormatter BROKEN_TIMESTAMP = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
 
     private static final Map<UUID, PrefixPlayerData> players = new HashMap<>();
+    private static final Set<UUID> ownerUuids = new HashSet<>();
     private static Path prefixesFile;
+    private static Path configFile;
     private static MinecraftServer loadedServer;
     private static boolean loaded;
 
@@ -57,9 +63,11 @@ public final class PrefixManager {
 
         initPath(server);
         players.clear();
+        ownerUuids.clear();
 
         try {
             Files.createDirectories(prefixesFile.getParent());
+            readOrCreateConfig();
             if (!Files.exists(prefixesFile)) {
                 saveAtomic();
                 loaded = true;
@@ -113,12 +121,18 @@ public final class PrefixManager {
 
     public static synchronized void clearRuntime() {
         players.clear();
+        ownerUuids.clear();
         prefixesFile = null;
+        configFile = null;
         loadedServer = null;
         loaded = false;
     }
 
     public static synchronized PrefixRole getRole(UUID uuid) {
+        if (uuid != null && ownerUuids.contains(uuid)) {
+            return PrefixRole.OWNER;
+        }
+
         PrefixPlayerData data = getData(uuid);
         return data == null ? PrefixRole.NONE : data.effectiveRole();
     }
@@ -240,12 +254,12 @@ public final class PrefixManager {
 
     public static synchronized Component buildDisplayName(ServerPlayer player) {
         if (player == null) return Component.empty();
-        return PrefixDisplayHelper.appendSuffix(player.getDisplayName(), getRole(player));
+        return PrefixDisplayHelper.appendSuffix(cleanPlayerName(player), getRole(player));
     }
 
     public static synchronized Component buildChatName(ServerPlayer player) {
         if (player == null) return Component.empty();
-        return PrefixDisplayHelper.appendSuffix(player.getDisplayName(), getRole(player));
+        return PrefixDisplayHelper.appendSuffix(cleanPlayerName(player), getRole(player));
     }
 
     public static synchronized List<PrefixPlayerData> getAssignedPlayers() {
@@ -338,6 +352,48 @@ public final class PrefixManager {
         return root;
     }
 
+    private static void readOrCreateConfig() throws IOException {
+        if (configFile == null) return;
+
+        if (!Files.exists(configFile)) {
+            writeDefaultConfig();
+            return;
+        }
+
+        try (Reader reader = Files.newBufferedReader(configFile, StandardCharsets.UTF_8)) {
+            JsonObject root = JsonParser.parseReader(reader).getAsJsonObject();
+            ownerUuids.clear();
+
+            if (root != null && root.has("ownerUuids") && root.get("ownerUuids").isJsonArray()) {
+                JsonArray owners = root.getAsJsonArray("ownerUuids");
+                for (JsonElement element : owners) {
+                    if (element == null || element.isJsonNull()) continue;
+                    UUID uuid = parseUuid(element.getAsString());
+                    if (uuid != null) {
+                        ownerUuids.add(uuid);
+                    }
+                }
+            }
+        } catch (JsonSyntaxException | IllegalStateException exception) {
+            backupBrokenFile(configFile, "prefix_config");
+            ownerUuids.clear();
+            writeDefaultConfig();
+        }
+    }
+
+    private static void writeDefaultConfig() throws IOException {
+        if (configFile == null) return;
+
+        JsonObject root = new JsonObject();
+        root.add("ownerUuids", new JsonArray());
+
+        Path tmp = configFile.resolveSibling(CONFIG_FILE + ".tmp");
+        try (Writer writer = Files.newBufferedWriter(tmp, StandardCharsets.UTF_8)) {
+            GSON.toJson(root, writer);
+        }
+        moveReplace(tmp, configFile);
+    }
+
     private static void initPath(MinecraftServer server) {
         Path worldRoot = server.getWorldPath(LevelResource.ROOT).toAbsolutePath().normalize();
         Path serverRoot = worldRoot.getParent();
@@ -345,7 +401,9 @@ public final class PrefixManager {
             serverRoot = worldRoot;
         }
 
-        prefixesFile = serverRoot.resolve(DATA_DIRECTORY).resolve(PREFIXES_FILE);
+        Path dataRoot = serverRoot.resolve(DATA_DIRECTORY);
+        prefixesFile = dataRoot.resolve(PREFIXES_FILE);
+        configFile = dataRoot.resolve(CONFIG_FILE);
     }
 
     private static void moveReplace(Path source, Path target) throws IOException {
@@ -359,14 +417,24 @@ public final class PrefixManager {
     private static void backupBrokenFile() {
         if (prefixesFile == null || !Files.exists(prefixesFile)) return;
 
+        backupBrokenFile(prefixesFile, "prefixes");
+    }
+
+    private static void backupBrokenFile(Path file, String filePrefix) {
+        if (file == null || !Files.exists(file)) return;
+
         String timestamp = BROKEN_TIMESTAMP.format(LocalDateTime.now());
-        Path broken = prefixesFile.resolveSibling("prefixes.broken." + timestamp + ".json");
+        Path broken = file.resolveSibling(filePrefix + ".broken." + timestamp + ".json");
         try {
-            Files.move(prefixesFile, broken, StandardCopyOption.REPLACE_EXISTING);
+            Files.move(file, broken, StandardCopyOption.REPLACE_EXISTING);
             TacticalTabletMod.LOGGER.warn("Moved broken Tactical Tablet prefixes file to {}", broken);
         } catch (IOException exception) {
-            TacticalTabletMod.LOGGER.error("Failed to move broken Tactical Tablet prefixes file {}", prefixesFile, exception);
+            TacticalTabletMod.LOGGER.error("Failed to move broken Tactical Tablet prefixes file {}", file, exception);
         }
+    }
+
+    private static Component cleanPlayerName(ServerPlayer player) {
+        return Component.literal(player.getGameProfile().getName());
     }
 
     private static String getString(JsonObject object, String key, String fallback) {

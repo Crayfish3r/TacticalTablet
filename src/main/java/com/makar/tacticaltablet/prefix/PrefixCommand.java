@@ -12,6 +12,7 @@ import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.SharedSuggestionProvider;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 
 import java.time.Instant;
@@ -83,6 +84,7 @@ public final class PrefixCommand {
         PrefixManager.setRole(target.uuid(), target.name(), role, 0L);
         PrefixManager.syncAll(source.getServer());
         PrefixManager.updateTabNames(source.getServer());
+        refreshCommands(source.getServer(), PlayerLookup.getOnline(source.getServer(), target));
 
         source.sendSuccess(
                 () -> Component.literal(target.online()
@@ -105,6 +107,7 @@ public final class PrefixCommand {
         PrefixManager.clearRole(target.uuid());
         PrefixManager.syncAll(source.getServer());
         PrefixManager.updateTabNames(source.getServer());
+        refreshCommands(source.getServer(), PlayerLookup.getOnline(source.getServer(), target));
 
         source.sendSuccess(
                 () -> Component.literal(target.online()
@@ -170,13 +173,14 @@ public final class PrefixCommand {
         PrefixManager.cleanupExpired();
         PrefixManager.syncAll(source.getServer());
         PrefixManager.updateTabNames(source.getServer());
+        refreshCommands(source.getServer());
 
         source.sendSuccess(() -> Component.literal("[Prefix] Префиксы перезагружены."), true);
         return 1;
     }
 
     private static boolean canManage(CommandSourceStack source) {
-        if (source.hasPermission(2)) return true;
+        if (source.getEntity() == null) return true;
         return source.getEntity() instanceof ServerPlayer player
                 && PrefixManager.hasPermission(player, PrefixPermission.PREFIX_MANAGE);
     }
@@ -190,10 +194,29 @@ public final class PrefixCommand {
             ids.add(role.id());
         }
         ids.add("clear");
+        ids.add("creator");
+        ids.add("moderator");
         ids.add("создатель");
+        ids.add("модератор");
+        ids.add("модер");
+        ids.add("строитель");
         ids.add("элита");
         ids.add("про");
         ids.add("нет");
         return SharedSuggestionProvider.suggest(ids, builder);
+    }
+
+    private static void refreshCommands(MinecraftServer server) {
+        if (server == null) return;
+
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            refreshCommands(server, player);
+        }
+    }
+
+    private static void refreshCommands(MinecraftServer server, ServerPlayer player) {
+        if (server != null && player != null) {
+            server.getCommands().sendCommands(player);
+        }
     }
 }

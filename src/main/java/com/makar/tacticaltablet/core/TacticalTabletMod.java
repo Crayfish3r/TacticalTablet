@@ -18,6 +18,7 @@ import com.makar.tacticaltablet.command.SadTromboneCommand;
 import com.makar.tacticaltablet.command.TestModeCommand;
 import com.makar.tacticaltablet.command.XpBoostCommand;
 import com.makar.tacticaltablet.game.ServerEvents;
+import com.makar.tacticaltablet.moderation.ModerationCommand;
 import com.makar.tacticaltablet.prefix.PrefixCommand;
 import com.makar.tacticaltablet.tablet.net.PacketHandler;
 
@@ -86,5 +87,6 @@ public class TacticalTabletMod {
         XpBoostCommand.register(event.getDispatcher());
         SadTromboneCommand.register(event.getDispatcher());
         PrefixCommand.register(event.getDispatcher());
+        ModerationCommand.register(event.getDispatcher());
     }
 }

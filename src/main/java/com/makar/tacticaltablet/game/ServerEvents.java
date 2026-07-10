@@ -28,6 +28,9 @@ import com.makar.tacticaltablet.inventory.InventoryGuard;
 import com.makar.tacticaltablet.inventory.InventoryManager;
 import com.makar.tacticaltablet.inventory.InventoryLockEvents;
 import com.makar.tacticaltablet.map.MapRotationManager;
+import com.makar.tacticaltablet.moderation.ModerModeManager;
+import com.makar.tacticaltablet.moderation.PunishmentManager;
+import com.makar.tacticaltablet.moderation.PunishmentRecord;
 import com.makar.tacticaltablet.prefix.PrefixManager;
 import com.makar.tacticaltablet.progression.ClassCooldownManager;
 import com.makar.tacticaltablet.progression.ClassXPManager;
@@ -71,6 +74,16 @@ public class ServerEvents {
     @SubscribeEvent
     public static void onPlayerJoin(PlayerEvent.PlayerLoggedInEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
+            PunishmentRecord tempBan = PunishmentManager.getTempBan(player.getUUID());
+            if (tempBan != null) {
+                player.connection.disconnect(Component.literal(
+                        "[Moderation] Temporarily banned until "
+                                + PunishmentManager.formatExpiresAt(tempBan.expiresAt())
+                                + ". Reason: " + tempBan.reason()
+                ));
+                return;
+            }
+
             PlayerProgressManager.loadPlayer(player);
             PrefixManager.updateLastKnownName(player.getUUID(), player.getGameProfile().getName());
             TeamMatchManager.rememberPlayer(player);
@@ -248,6 +261,7 @@ public class ServerEvents {
             utilityTickCounter = 0;
             LobbyManager.keepLobbyWeatherClear(event.getServer());
             NameTagManager.applyToAll(event.getServer());
+            PunishmentManager.cleanupExpired();
         }
     }
 
@@ -262,6 +276,7 @@ public class ServerEvents {
             DeathTransitionManager.clear(player);
             ContractManager.onPlayerDisconnect(player);
             ExtractionPointManager.onPlayerDeathOrLogout(player);
+            ModerModeManager.clear(player);
 
             if (runningMatchParticipant) {
                 LivesManager.handleDeath(player);
@@ -401,6 +416,7 @@ public class ServerEvents {
         MapRotationManager.onServerStarted(event.getServer());
         KitRotationManager.onServerStarted(event.getServer());
         MapSetManager.onServerStarted(event.getServer());
+        PunishmentManager.load(event.getServer());
         DiscordLeaderboardService.init(event.getServer());
         LeaderboardScheduler.onServerStarted(event.getServer());
         OnlineWebhookService.onServerStarted(event.getServer());
@@ -418,6 +434,8 @@ public class ServerEvents {
         MapSetManager.onServerStopped();
         KitRotationManager.resetRuntime();
         MapRotationManager.resetRuntime();
+        PunishmentManager.resetRuntime();
+        ModerModeManager.resetAll();
         OnlineWebhookService.onServerStopped();
         LeaderboardScheduler.reset();
         DiscordLeaderboardService.resetMatch();
@@ -446,12 +464,25 @@ public class ServerEvents {
     public static void onServerStopping(ServerStoppingEvent event) {
         PlayerProgressManager.saveAll();
         PrefixManager.save();
+        PunishmentManager.saveAtomic();
     }
 
     @SubscribeEvent
     public static void onServerChat(ServerChatEvent event) {
         ServerPlayer player = event.getPlayer();
         if (player == null) return;
+
+        PunishmentRecord mute = PunishmentManager.getMute(player.getUUID());
+        if (mute != null) {
+            event.setCanceled(true);
+            player.sendSystemMessage(Component.literal(
+                    "[Moderation] You are muted for "
+                            + PunishmentManager.formatRemaining(mute.expiresAt())
+                            + ". Reason: " + mute.reason()
+            ));
+            return;
+        }
+
         if (!PrefixManager.getRole(player).visible()) return;
 
         Component formatted = Component.literal("")

@@ -8,6 +8,7 @@ import com.makar.tacticaltablet.core.TacticalTabletMod;
 import com.makar.tacticaltablet.game.GameStateManager;
 import com.makar.tacticaltablet.game.lives.LivesManager;
 import com.makar.tacticaltablet.game.team.TeamMatchManager;
+import com.makar.tacticaltablet.moderation.ModerModeManager;
 import com.makar.tacticaltablet.tablet.PlayerTabletState;
 
 import net.minecraft.network.chat.Component;
@@ -41,6 +42,7 @@ public class InventoryLockEvents {
     @SubscribeEvent
     public static void onItemToss(ItemTossEvent event) {
         if (!(event.getPlayer() instanceof ServerPlayer player)) return;
+        if (ModerModeManager.isInModerMode(player)) return;
 
         if (isLobbyOrBattle(player) && !canUseDroppedItems(player)) {
             event.setCanceled(true);
@@ -61,6 +63,7 @@ public class InventoryLockEvents {
     @SubscribeEvent
     public static void onRightClickBlock(PlayerInteractEvent.RightClickBlock event) {
         if (!(event.getEntity() instanceof ServerPlayer player)) return;
+        if (ModerModeManager.isInModerMode(player)) return;
 
         boolean inLobby = GameStateManager.isInLobby(player)
                 || player.getTags().contains("in_lobby");
@@ -102,6 +105,7 @@ public class InventoryLockEvents {
     @SubscribeEvent
     public static void onItemPickup(EntityItemPickupEvent event) {
         if (!(event.getEntity() instanceof ServerPlayer player)) return;
+        if (ModerModeManager.isInModerMode(player)) return;
 
         if (!isLobbyOrBattle(player)) return;
 

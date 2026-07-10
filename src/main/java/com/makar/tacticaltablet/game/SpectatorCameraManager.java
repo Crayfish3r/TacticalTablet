@@ -4,6 +4,7 @@ import com.makar.tacticaltablet.game.clanwar.ClanWarManager;
 import com.makar.tacticaltablet.game.lives.LivesManager;
 import com.makar.tacticaltablet.game.team.TeamId;
 import com.makar.tacticaltablet.game.team.TeamMatchManager;
+import com.makar.tacticaltablet.moderation.ModerModeManager;
 import com.makar.tacticaltablet.tablet.net.PacketHandler;
 import com.makar.tacticaltablet.tablet.net.SpectatorCameraLockStatePacket;
 
@@ -353,6 +354,8 @@ public final class SpectatorCameraManager {
     }
 
     private static boolean shouldLockSpectator(ServerPlayer player) {
+        if (ModerModeManager.isInModerMode(player)) return false;
+
         return player != null
                 && isActiveMatch(player.server)
                 && isStrictSpectatorCameraMatch()
