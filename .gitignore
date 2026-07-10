@@ -30,3 +30,13 @@ map_rotation/*.flag
 
 # Files from Forge MDK
 forge*changelog.txt
+logs/
+*.log
+*.log.gz
+backups/
+*.zip
+logs/
+*.log
+*.log.gz
+backups/
+*.zip
