@@ -1,304 +1,449 @@
-# Match lifecycle: фактическое состояние и план state machine
+# Match lifecycle state machine
 
-## Scope и границы
+This document records the current `GameStateManager` behavior and the staged plan
+for replacing the implicit static lifecycle with an explicit finite state machine.
 
-Этот документ описывает только lifecycle матча. На момент его создания
-production-код не менялся. Цель — вынести orchestration из статического
-`GameStateManager`, не переписывая одновременно `airdrop`, contracts,
-extraction или packet protocol.
+Current implementation status:
 
-Новая машина отвечает за жизненный цикл активного матча. Существующие
-предматчевые UI-фазы (`WAITING`, `VOTING`, `TEAM_SELECT`, `MAP_VOTING`,
-`RESTARTING`) временно остаются compatibility-данными facade и сохраняются в
-`MatchContext.phaseSpecificState`; они не являются новыми core states.
+- Phase 1 implemented: pure lifecycle model, transition policy, typed results,
+  read-only snapshots, stale match-id protection, and characterization tests.
+- Production side effects still remain in `GameStateManager` in their existing
+  order. This is intentional for the first safe patch.
+- The static `GameStateManager` remains the compatibility facade.
 
-## 1. Текущее фактическое состояние
+## 1. Current factual state
 
-### Mutable static state в `GameStateManager`
+### Mutable static fields in `GameStateManager`
 
-| Field | Назначение | Риск |
+| Field | Current role | Risk |
 |---|---|---|
-| `matchHadEnoughPlayers` | Для solo определяет, был ли достигнут минимум игроков. | Может расходиться с lives/scoreboard после reset или crash. |
-| `matchStartingParticipants` | Количество alive участников после start. | Используется для условия окончания, но не связан с идентификатором матча. |
-| `tickCounter` | Делает lifecycle-tick раз в секунду. | Не выражает состояние. |
-| `startCountdown` | Countdown перед start; `-1` означает отсутствие countdown. | Смешан с `MatchPhase.STARTING`. |
-| `postGameDelay` | Задержка после finish. | Смешан с `MatchPhase.POST_GAME`. |
-| `matchPhase` | UI/flow фаза: waiting, vote, team select, starting, running, post-game, map vote, restart. | Одновременно используется как API для пакетов и часть lifecycle. |
-| `currentMode` | Выбранный `MatchMode`. | Изменяется на start, cleanup, vote и debug-командами. |
+| `matchHadEnoughPlayers` | Solo end-condition flag after the match reached the required player count. | Can diverge from lives/scoreboard after forced reset or partial start failure. |
+| `matchStartingParticipants` | Alive participant count captured after `startGame`. | Used in end detection but not tied to a durable match id. |
+| `tickCounter` | Runs lifecycle logic once per second. | Timing state is mixed with lifecycle state. |
+| `startCountdown` | Countdown before match start; `-1` means no countdown. | Duplicates `MatchPhase.STARTING`. |
+| `postGameDelay` | Delay before cleanup after `endGame`. | Duplicates `MatchPhase.POST_GAME`/`ENDING`. |
+| `matchPhase` | UI and flow phase: waiting, voting, team select, starting, running, post-game, map voting, restarting. | Used both as public API and internal lifecycle state. |
+| `currentMode` | Current `MatchMode`. | Mutated by voting, start, debug commands, clan war, and cleanup. |
 
-Также persistent scoreboard objective `gameState` и score `#state` хранят
-`WAITING=0`/`RUNNING=1`. Это второй источник истины: runtime phase и
-scoreboard сейчас могут кратковременно расходиться.
+There is also persistent scoreboard state:
 
-### Публичный API facade
+- objective: `gameState`;
+- score holder: `#state`;
+- values: `WAITING=0`, `RUNNING=1`.
 
-`GameStateManager` публикует:
+The scoreboard and `matchPhase` are two separate sources of truth today.
 
-- scoreboard/runtime queries: `getGameState`, `setGameState`, `isRunning`,
-  `getMatchPhase`, `getCurrentMode`, `getLivesPerPlayer`;
-- world/player helpers: `isTabletAvailableInLobby`, `isInLobby`,
-  `getLobbyLevel`, `getOverworld`, `onlinePlayers`, `playingPlayers`;
-- orchestration: `onServerTick`, `checkForMatchEnd`, `startGame`,
-  `endGame` (two overloads), `resetRuntime`, `forceStopMatch`;
-- validation/debug flow: `validateRuntimeRequirements`, `forceStartVoting`,
-  `forceStartMapVoting`, `forceStartTeamSelect`, `forceStartClanWar`.
+### Public `GameStateManager` API
 
-Callers include `ServerEvents`, `TestModeCommand`, vote/team packets,
-`MapSetManager`, `LobbyManager`, `LivesManager`, airdrop, extraction,
-contracts, spectator/voice managers, anti-cheat and tablet sync. This is why
-the static class must remain a compatibility facade during migration.
+- Scoreboard/runtime queries: `getGameState`, `setGameState`, `isRunning`,
+  `getMatchPhase`, `getCurrentMode`, `getLivesPerPlayer`.
+- World/player helpers: `isTabletAvailableInLobby`, `isInLobby`,
+  `getLobbyLevel`, `getOverworld`, `onlinePlayers`, `playingPlayers`.
+- Lifecycle/orchestration: `onServerTick`, `checkForMatchEnd`, `startGame`,
+  `endGame`, `resetRuntime`, `forceStopMatch`.
+- Validation/debug/admin flow: `validateRuntimeRequirements`,
+  `forceStartVoting`, `forceStartMapVoting`, `forceStartTeamSelect`,
+  `forceStartClanWar`.
 
-### Текущий start order (`startGame`)
+Main call-site groups:
 
-1. Проверка overworld, lobby dimension и обеих datapack functions.
-2. Сброс RTP, passive XP, respawn-control и lives.
-3. Немедленно установить scoreboard `RUNNING` и `MatchPhase.RUNNING`.
-4. Настроить clan-war teams, обычные teams либо reset teams.
-5. Сбросить airdrop scheduler; начать Discord match и contracts.
-6. Сбросить counters; выполнить `function war:start_game` без проверки
-   command result; объявить старт, применить gamerules, запустить zone.
-7. Подготовить SafeTeleport pool.
-8. Для каждого online player: lives, match count, tags, lobby teleport,
-   contract tracker, tablet sync.
-9. Запустить voice team match; зафиксировать participant count; начать
-   extraction; sync всех; broadcast.
+- `ServerEvents`: server tick, start/stop, join/logout/death, combat, respawn.
+- `TestModeCommand`: direct admin start/stop/vote/team/clan-war control.
+- C2S packets: vote mode/map, team join, map-set flags, contract actions,
+  tablet actions.
+- Match subsystems: lobby, lives, teams, voice chat, spectator camera, contracts,
+  extraction, airdrop, anti-cheat, name tags, class XP, clan locks.
+- Diagnostics and integrations: Discord leaderboard and integration checks.
 
-Следствие: ошибка datapack/zone/player step после пункта 3 оставляет матч
-объявленным RUNNING без компенсирующего cleanup.
+### Current start order
 
-### Текущий end и cleanup order
+`startGame(server)` currently performs these steps synchronously on the server
+thread:
 
-`endGame` сначала ставит `POST_GAME`, score `WAITING`, задержку 3 секунды,
-вызывает spectator/voice end, cooldowns, contracts finish, extraction reset,
-map-set completion, Discord leaderboard и награды победителям. После delay
-`onServerTick` вызывает `cleanupMatchRuntime`, затем переходит в map vote либо
-`MatchPhase.WAITING`.
+1. Validate overworld, lobby dimension, `war:start_game`, and `war:reset`.
+2. Clear RTP timers, passive XP, respawn control, and lives.
+3. Set scoreboard state to `RUNNING`.
+4. Set `matchPhase = MatchPhase.RUNNING`.
+5. Configure clan-war teams, ordinary teams, or reset teams.
+6. Reset airdrop scheduler.
+7. Start Discord match tracking.
+8. Start contracts.
+9. Reset match counters.
+10. Execute datapack function `war:start_game`.
+11. Announce game start through `MapSetManager`.
+12. Enforce game rules.
+13. Start zone management.
+14. Prepare safe teleport pool.
+15. For each online player: initialize lives, increment match count, change tags,
+    move to lobby, give contract tracker, sync class XP.
+16. Start voice team match.
+17. Capture `matchStartingParticipants` and `matchHadEnoughPlayers`.
+18. Start extraction points.
+19. Sync all class XP.
+20. Broadcast match-start message.
 
-`cleanupMatchRuntime` выполняет: scoreboard WAITING; spectator и voice end;
-team scoreboard cleanup; airdrop scheduler reset/cancel; contracts/extraction,
-zone, respawn, passive XP, RTP и teleport pool reset; clan-war reset; world
-dropped-item cleanup; `function war:reset`; gamerules; lives reset; player tags
-и lobby teleport; sync; mode/vote/team reset.
+Important current behavior: scoreboard and phase become `RUNNING` before the
+datapack function and player/subsystem steps complete. Phase 1 does not change
+that order.
 
-`forceStopMatch` очищает counters/phase и вызывает тот же cleanup. `resetRuntime`
-сбрасывает только часть subsystem runtime (clan-war, vote, spectator, voice,
-teams, extraction) и scoreboard.
+### Current end and cleanup order
 
-### Внешние side effects и вызываемые managers
+`endGame` currently:
 
-| Категория | Наблюдаемые side effects |
+1. Clears enough-player and participant counters.
+2. Clears start countdown.
+3. Sets `postGameDelay = 3`.
+4. Sets `matchPhase = POST_GAME`.
+5. Sets scoreboard state to `WAITING`.
+6. Ends spectator camera and voice match.
+7. Applies selected class cooldowns.
+8. Finishes contracts and resets extraction.
+9. Advances map-set state.
+10. Sends Discord leaderboard.
+11. Awards competitive-set coins if applicable.
+12. Awards winners wins, coins, XP, saves player progress, and syncs XP.
+13. Shows winner title.
+
+Actual cleanup is delayed. On a later tick, `cleanupMatchRuntime`:
+
+1. Sets scoreboard state to `WAITING`.
+2. Ends spectator camera and voice match.
+3. Cleans team scoreboard teams.
+4. Resets/cancels airdrops.
+5. Resets contracts and extraction.
+6. Resets zone, respawn control, passive XP, RTP timers, safe teleport pool, and
+   clan-war runtime.
+7. Clears dropped items through `WorldCleanupManager`.
+8. Executes datapack function `war:reset`.
+9. Enforces game rules.
+10. Resets lives.
+11. For each online player: removes match tags, moves to lobby, syncs class XP.
+12. Resets mode to `SOLO`, vote state, and team state.
+
+`forceStopMatch` clears counters/phase and calls `cleanupMatchRuntime`.
+`resetRuntime` clears a smaller set of runtime managers and sets scoreboard
+`WAITING`.
+
+### External side effects
+
+| Area | Side effects |
 |---|---|
-| Datapack | `function war:start_game`, `function war:reset`; сейчас результат command execution не проверяется. |
-| Scoreboard | `gameState/#state`; lives objective; создаваемые/удаляемые `TeamMatchManager` scoreboard teams. |
-| Players | tags, game mode/teleport через lobby, lives, inventory/tablet/XP sync, title/chat, class cooldowns, match/win/coin progression. |
-| Match subsystems | `LivesManager`, `TeamMatchManager`, `VoteManager`, `ClanWarManager`, `ZoneManager`, `RespawnControlManager`, `RtpTimerManager`, `SafeTeleport`, `PassiveClassXPManager`, `ClassCooldownManager`. |
-| Game features | `AirdropManager`, `ContractManager`, `ExtractionPointManager`, `SpectatorCameraManager`, `VoiceChatTeamManager`, `DiscordLeaderboardService`, `MapSetManager`, `WorldCleanupManager`. |
-| World/server | gamerules via `DropControlManager`; map voting arms `MapRotationManager`, затем `server.halt(false)`. |
+| Datapack | Executes `function war:start_game` and `function war:reset`. Command execution result is not currently modeled as a typed transition result. |
+| Scoreboard | Creates/updates `gameState/#state`; team scoreboard setup and cleanup through `TeamMatchManager`. |
+| Players | Tags, lobby teleports, lives, inventory/tablet state, class XP sync, titles, chat, selected-class cooldowns, progression rewards. |
+| Match subsystems | Lives, teams, vote, clan war, zone, respawn, RTP, safe teleport, passive/class XP. |
+| Game features | Airdrop, contracts, extraction, spectator camera, voice chat, Discord leaderboard, map set, world cleanup. |
+| Server lifecycle | Gamerules, map rotation/set startup, server halt during map restart. |
 
-### Server lifecycle, disconnect и restart
+### Server lifecycle, disconnect, restart
 
-- `ServerEvents.onServerStarted` применяет gamerules, вызывает
-  `GameStateManager.resetRuntime`, validation, map rotation/set init и reset
-  zone/extraction. Поэтому restart не должен восстанавливать static match как
-  RUNNING: новый service всегда создаётся в `IDLE` и facade записывает WAITING.
-- `onServerStopping` сохраняет persistence; `onServerStopped` вновь вызывает
-  `resetRuntime` и отдельно reset-ит voice, airdrop, contracts, extraction,
-  timers, player/tablet state и другие runtime managers.
-- `MapSetManager.tickRestart` сохраняет player progress и вызывает
-  `server.halt(false)`. Это должен быть явный `server-restart` event, который
-  переводит active lifecycle в cleanup до остановки, насколько позволяет
-  порядок Forge events.
-- На disconnect `ServerEvents` сохраняет progress, уведомляет contracts и
-  extraction; если игрок — alive RUNNING participant, вызывает
-  `LivesManager.handleDeath`, затем откладывает `checkForMatchEnd` на server
-  thread. Во время `STARTING` новый lifecycle должен отменить start до
-  irreversible player steps, если preconditions больше не выполняются.
+- `ServerEvents.onServerStarted` calls `GameStateManager.resetRuntime`, validates
+  runtime requirements, loads map/kit/punishment/clan-related state, and resets
+  zone/extraction runtime. A restart should not reconstruct an active match from
+  damaged static runtime state.
+- `ServerEvents.onServerStopping` flushes persistence. It does not currently run
+  an explicit match lifecycle shutdown transition.
+- `ServerEvents.onServerStopped` calls `resetRuntime` and then resets many
+  subsystems directly.
+- Player logout during a running match can turn an alive participant into a
+  death, then schedules `checkForMatchEnd` on the server thread.
+- Disconnect during `STARTING` is currently handled indirectly by the countdown
+  checks; the future service should model this as precondition re-evaluation
+  before irreversible start steps.
 
-## 2. Предлагаемые core states
+## 2. Proposed states
 
-| State | Значение |
+| State | Meaning |
 |---|---|
-| `IDLE` | Нет активного `MatchContext`; scoreboard WAITING. Lobby/voting UI может существовать как compatibility phase. |
-| `PREPARING` | Preconditions проверены, создаётся context и immutable список участников. Side effects ещё не должны означать RUNNING. |
-| `STARTING` | Выполняются обратимые/идемпотентные start steps; completed steps фиксируются в context. |
-| `RUNNING` | Все обязательные start steps успешно завершены; scoreboard RUNNING и gameplay разрешён. |
-| `ENDING` | Зафиксирован исход матча; выполняются награды/показ результата и post-game delay. |
-| `CLEANING` | Идёт best-effort cleanup всех зарегистрированных subsystems. |
-| `FAILED` | Start/cleanup не достигли требуемого инварианта; context хранит failure stage и diagnostics. Переход разрешён только в CLEANING либо IDLE после доказанного clean state. |
+| `IDLE` | No active match context. Voting/team-select/map-voting remain compatibility UI phases until migrated. |
+| `PREPARING` | Preconditions passed and a match context exists, but irreversible start side effects have not begun. |
+| `STARTING` | Start side effects are executing. Completed steps are tracked. |
+| `RUNNING` | Required start steps completed; gameplay is active. |
+| `ENDING` | Winner/end processing is executing or post-game delay is active. |
+| `CLEANING` | Cleanup side effects are executing. |
+| `FAILED` | A start/end/cleanup stage failed and diagnostic state is retained. |
 
-Дополнительные core states не нужны: countdown/vote/map restart остаются
-phase-specific compatibility state, чтобы не менять packet protocol и
-`MatchPhase` одним diff.
+No additional core states are needed for Phase 1. Existing UI phases
+`VOTING`, `TEAM_SELECT`, `MAP_VOTING`, and `RESTARTING` remain outside the core
+match lifecycle for now.
 
-## 3. Разрешённые переходы
+## 3. Allowed transitions
 
-| Source | Event | Destination | Preconditions | Side effects | Rollback / idempotency |
-|---|---|---|---|---|---|
-| IDLE | `requestStart` | PREPARING | runtime valid, datapack functions present, map/mode valid, players satisfy rules | создать `MatchContext` с UUID и participant snapshot | повторный request возвращает typed result с current state, ничего не запускает |
-| PREPARING | preflight complete | STARTING | context существует, participants не пусты, если solo debug не включён | начать ordered start steps | до первого step cleanup — no-op |
-| PREPARING/STARTING | disconnect меняет preconditions | CLEANING | start ещё не committed RUNNING | пометить diagnostic `participants_changed` | cleanup только completed steps; затем IDLE |
-| STARTING | all required steps complete | RUNNING | datapack start, teams, world systems, players и required sync завершены | scoreboard RUNNING, legacy `MatchPhase.RUNNING`, announce | повторный completion no-op |
-| STARTING | step failure/exception | FAILED → CLEANING | failure stage зафиксирован | выполнить compensating cleanup | ошибки cleanup агрегируются; не скрывают исходный failure |
-| RUNNING | natural winner/no winner | ENDING | context matchId current; не ending/cleaning | freeze outcome, scoreboard WAITING, spectator/voice end, rewards, post-game clock | повторный end возвращает current state, не выдаёт награды повторно |
-| RUNNING/PREPARING/STARTING/ENDING/FAILED | force stop, server stopping, restart | CLEANING | context may be partial | отменить active work и cleanup | cleanup steps idempotent; каждый запускается не более одного раза на context |
-| ENDING | post-game clock elapsed | CLEANING | outcome already recorded | cleanup | повторный tick no-op |
-| CLEANING | all cleanup steps successful | IDLE | scoreboard WAITING, active context detached | legacy lobby/map-vote continuation | repeated cleanup returns success/no-op |
-| CLEANING | one or more cleanup failures | FAILED | diagnostics recorded, remaining steps attempted | retain context for diagnostics | later `retryCleanup` or startup reset reaches IDLE |
-| FAILED | `retryCleanup` / startup reset | CLEANING or IDLE | no gameplay may run | execute remaining cleanup or prove no active runtime | never infer RUNNING from stale static/scoreboard state |
+| Source | Event | Destination | Preconditions | Side effects in final architecture | Rollback/compensation | Idempotency behavior |
+|---|---|---|---|---|---|---|
+| `IDLE` | start request accepted | `PREPARING` | No active context; validation can run before side effects. | Create `MatchContext`. | Drop context if no side effects occurred. | Repeated request while active returns `NO_OP`. |
+| `PREPARING` | begin start steps | `STARTING` | Expected match id matches active context. | None in pure model; future facade starts ordered side effects. | `CLEANING` is safe because no or few side effects exist. | Repeated same transition returns `NO_OP`. |
+| `STARTING` | all required start steps durable/successful | `RUNNING` | Expected match id; required steps completed. | Future facade may set scoreboard/phase only after mandatory steps. | Failed stage goes to `FAILED`, then `CLEANING`. | Repeated same transition returns `NO_OP`. |
+| `RUNNING` | natural or forced end | `ENDING` | Expected match id; active running context. | Winner, rewards, cooldowns, post-game processing. | Cleanup continues even if one end subsystem fails. | Repeated stop returns `NO_OP`. |
+| `RUNNING` | forced cleanup/reset | `CLEANING` | Expected match id or admin reset policy. | Full cleanup. | Cleanup steps are idempotent or guarded. | Repeated cleanup returns `NO_OP`. |
+| `ENDING` | post-game delay elapsed | `CLEANING` | Expected match id. | Full cleanup. | Continue remaining cleanup steps. | Repeated cleanup returns `NO_OP`. |
+| `CLEANING` | cleanup complete | `IDLE` | All required cleanup steps attempted. | Clear context. | If cleanup failed, stay `FAILED` with diagnostics. | Repeated idle marker is `NO_OP`. |
+| `PREPARING`, `STARTING`, `RUNNING`, `ENDING`, `CLEANING` | failure | `FAILED` | Expected match id. | Record diagnostic. | Follow with `CLEANING` where possible. | Repeated failure is `NO_OP` unless diagnostics policy changes. |
+| `FAILED` | recover/cleanup | `CLEANING` | Expected match id. | Best-effort cleanup. | Cleanup continues through subsystem failures. | Repeated cleanup returns `NO_OP`. |
+| `FAILED` | no side effects need cleanup | `IDLE` | Explicit recovery decision. | Clear context. | None. | Repeated idle marker is `NO_OP`. |
 
-## 4. Инварианты
+Invalid examples:
 
-1. В service одновременно существует максимум один active `MatchContext`.
-2. `RUNNING` достижимо только после успешных обязательных start steps и
-   `DatapackGateway.start`.
-3. Каждая cleanup операция выполняется как минимум безопасно повторяемо; context
-   отмечает completed cleanup steps, поэтому retry не выдаёт награды и не
-   повторяет destructive world operation без необходимости.
-4. Ошибка datapack function не оставляет RUNNING scoreboard/partial match:
-   state становится `FAILED`, затем `CLEANING`.
-5. `FAILED` имеет явный route в `CLEANING` либо `IDLE`; facade не маскирует его
-   как RUNNING.
-6. На server start static runtime не считается доказательством активного матча:
-   создаётся IDLE и записывается WAITING, затем выполняется idempotent reset.
-7. Все transition и gateway вызовы выполняются на server thread; фоновые потоки
-   для lifecycle не вводятся.
+- `IDLE -> RUNNING`;
+- `IDLE -> CLEANING` as a real transition;
+- `RUNNING -> STARTING`;
+- stale match id mutating the active context.
+
+## 4. Invariants
+
+- At most one active `MatchContext` exists.
+- `RUNNING` is reachable only through `PREPARING -> STARTING -> RUNNING`.
+- Cleanup can be requested repeatedly without duplicating cleanup effects.
+- Start failure must not leave the match reported as successfully running in the
+  final architecture.
+- `FAILED` always has a path to `CLEANING` or `IDLE`.
+- Server restart must initialize lifecycle state as `IDLE`; damaged runtime
+  static state must not be interpreted as an active match.
+- Stale match ids cannot mutate a newer active context.
+- Client-facing success should be sent only after the relevant transition and
+  required side effects have completed.
 
 ## 5. MatchContext
 
-```java
-record MatchContext(
-    UUID matchId,
-    MatchState state,
-    String selectedMap,
-    MatchMode mode,
-    long createdAtTick,
-    long stateChangedAtTick,
-    List<UUID> participantIds,
-    LegacyPhaseState phaseSpecificState,
-    EnumSet<StartStep> completedStartSteps,
-    EnumSet<CleanupStep> completedCleanupSteps,
-    MatchOutcome outcome,
-    FailureInfo failure
-) {}
-```
+Phase 1 `MatchContext` contains:
 
-`participantIds` — immutable UUID snapshot, а не `ServerPlayer`. `selectedMap`
-может быть пустым до map rotation; он не должен заменять persistent
-`MapSetManager` state. `FailureInfo` содержит stage, diagnostic и
-исключение/его class+message для logger, но не secrets.
+- `matchId`;
+- explicit `state`;
+- selected `mapId`;
+- selected `modeId`;
+- `startReason`;
+- initiating admin UUID if any;
+- participant UUID snapshot;
+- completed lifecycle steps;
+- `createdAt`;
+- `stateEnteredAt`;
+- optional `MatchFailure`;
+- monotonic `revision`.
 
-## 6. Предлагаемые interfaces side effects
+The context does not contain Minecraft runtime objects (`MinecraftServer`,
+`ServerPlayer`, `Level`, `Entity`, `ItemStack`) and is suitable for ordinary
+unit tests.
 
-```java
-interface DatapackGateway {
-    GatewayResult validateRequiredFunctions();
-    GatewayResult runStart();
-    GatewayResult runReset();
-}
+## 6. Interfaces for Phase 2 side effects
 
-interface ScoreboardGateway {
-    GatewayResult setMatchRunning(boolean running);
-    GatewayResult applyTeams(MatchContext context);
-    GatewayResult cleanupTeams(MatchContext context);
-}
+These interfaces should be introduced when production orchestration starts
+moving out of `GameStateManager`:
 
-interface MatchPlayerService {
-    List<UUID> snapshotEligibleParticipants();
-    GatewayResult preparePlayers(MatchContext context);
-    GatewayResult cleanupPlayers(MatchContext context);
-    GatewayResult awardOutcome(MatchContext context);
-}
-
-interface MatchSubsystemCoordinator {
-    GatewayResult startStep(StartStep step, MatchContext context);
-    GatewayResult cleanupStep(CleanupStep step, MatchContext context);
-}
-
-interface MatchClock {
-    long currentTick();
-    boolean postGameDelayElapsed(MatchContext context);
-}
-
-record TransitionResult(
-    boolean success,
-    MatchState currentState,
-    String failureStage,
-    String diagnostic,
-    Optional<Throwable> cause
-) {}
-```
-
-Production adapters may hold `MinecraftServer` only on the server thread.
-Tests replace all gateways with plain fakes.
+- `DatapackGateway`: validate and execute `war:start_game` / `war:reset` with a
+  typed result.
+- `ScoreboardGateway`: create/update `gameState` and manage match scoreboard
+  effects.
+- `MatchPlayerService`: apply player tags, lives, lobby movement, inventory and
+  sync operations.
+- `MatchSubsystemCoordinator`: call lives, teams, clan war, airdrop, contracts,
+  extraction, spectator, voice, zone, cooldown, RTP, teleport and cleanup
+  subsystems in a controlled order.
+- `MatchClock`: isolate tick/time decisions from Minecraft server tick logic.
 
 ## 7. Compatibility strategy
 
-1. Add `MatchState`, `MatchContext`, `MatchLifecycleService` and gateways
-   without changing existing public static signatures.
-2. `GameStateManager` owns one server-thread service instance and delegates
-   `startGame`, `endGame`, `forceStopMatch`, `resetRuntime`, tick and state
-   queries. Existing callers still receive legacy return types.
-3. Map lifecycle state to legacy API: only `RUNNING` maps to scoreboard RUNNING;
-   all other core states map to WAITING. `MatchPhase` remains projected from
-   context/legacy lobby flow until packets and callers are migrated.
-4. Migrate internal callers incrementally to typed `TransitionResult`; retain
-   facade until all call sites no longer need static globals.
+`GameStateManager` remains the public static facade until all call sites are
+migrated. The first implementation patch adds:
 
-## 8. Start steps and compensation
+- `MatchState`;
+- `MatchContext`;
+- `MatchLifecycleService`;
+- typed `MatchTransitionResult`;
+- transition policy;
+- read-only snapshot;
+- legacy-state mapper for tests.
 
-| Start step | Completion evidence | Compensation / idempotency |
-|---|---|---|
-| Clear RTP/passive XP/respawn/lives | `START_RUNTIME_RESET` | Same reset operations in cleanup; idempotent. |
-| Configure team/clan-war assignments | `TEAMS_ASSIGNED` | `TeamMatchManager.reset` + `cleanupScoreboardTeams`; safe repeatedly. |
-| Apply scoreboard teams | `SCOREBOARD_TEAMS_APPLIED` | `cleanupScoreboardTeams`; restore remembered original teams. |
-| Reset airdrop/Discord/contracts | individual step IDs | airdrop cancel/reset; Discord reset match; `ContractManager.reset`. |
-| `war:start_game` | `DATAPACK_STARTED` only on successful gateway result | `war:reset`; if missing/fails, do not publish RUNNING. |
-| Gamerules/zone/teleport pool | individual IDs | enforce gamerules; `ZoneManager.reset`; `SafeTeleport.clearPool`. |
-| Prepare players/lives/tags/lobby | `PLAYERS_PREPARED` | cleanup player tags/lives/lobby reset; repeat-safe per player. |
-| Voice/extraction | individual IDs | `VoiceChatTeamManager.endMatch`; `ExtractionPointManager.reset`. |
-| Publish RUNNING and announcement | `RUNNING_PUBLISHED` | set scoreboard WAITING during cleanup; announcement has no rollback and must occur last. |
+The facade still owns existing side effects. Future patches may let the facade
+delegate transition decisions to `MatchLifecycleService` while keeping the same
+public method names.
 
-Rewards and `MapSetManager.onGameCompleted` are ENDING steps, not start steps;
-they need their own completion markers to prevent duplicate awards on repeated
-`endGame`.
+## 8. Rollback and compensating actions
+
+| Start step | Compensation or idempotency rule |
+|---|---|
+| Clear timers/XP/respawn/lives | Reset operations are idempotent and repeated during cleanup. |
+| Set scoreboard `RUNNING` | Set scoreboard back to `WAITING`. |
+| Set `matchPhase = RUNNING` | Set phase to `WAITING` or `POST_GAME` according to end path. |
+| Configure teams | `TeamMatchManager.cleanupScoreboardTeams` and `TeamMatchManager.reset`. |
+| Clan-war start/teams | `ClanWarManager.resetRuntime` plus team reset. |
+| Airdrop scheduler | `AirdropManager.resetAutoScheduler` and cancel active airdrop in overworld. |
+| Discord match start | Reset current match/leaderboard state if start fails before running. |
+| Contracts start | `ContractManager.reset`. |
+| Datapack `war:start_game` | Execute `war:reset`; if reset fails, remain `FAILED` with diagnostics. |
+| Zone start | `ZoneManager.reset`. |
+| Safe teleport pool | `SafeTeleport.clearPool`. |
+| Per-player tags/lives/lobby movement | Cleanup removes tags, resets lives, moves players to lobby, syncs XP. |
+| Voice team match | `VoiceChatTeamManager.endMatch`. |
+| Extraction start | `ExtractionPointManager.reset`. |
 
 ## 9. Characterization tests before behavior changes
 
-Create pure/unit tests around fakes before migration:
+Phase 1 includes:
 
-- public facade projection: legacy scoreboard/phase for IDLE, RUNNING and
-  post-game;
-- normal `IDLE → RUNNING`; repeat start is no-op/typed rejection;
-- empty participant list and insufficient player precondition;
-- each start step failure, including missing `war:start_game`; verify completed
-  prior steps are cleaned in reverse dependency order;
-- datapack start failure does not publish RUNNING;
-- normal stop; repeated stop; `FAILED → CLEANING` retry;
-- one cleanup failure does not stop later cleanup steps and result aggregates
-  diagnostics;
-- disconnect while STARTING cancels before player preparation or cleans completed
-  steps;
-- no duplicate rewards/map completion on repeated end;
-- facade observes the service's current state consistently;
-- `MatchContext` participant snapshot contains UUIDs only, never Minecraft
-  runtime objects;
-- Server-start reset always projects IDLE even when a stale `gameState/#state`
-  existed.
+- public API inventory test for `GameStateManager` using reflection without
+  initializing Minecraft statics;
+- legacy scoreboard/phase to shadow lifecycle mapping test;
+- lifecycle transition policy tests;
+- normal `IDLE -> PREPARING -> STARTING -> RUNNING -> ENDING -> CLEANING -> IDLE`;
+- repeated start and repeated transitions;
+- invalid transitions;
+- stale match id rejection;
+- failure-to-cleanup path;
+- completed-step idempotency;
+- snapshot immutability;
+- lifecycle package type-boundary test for no Minecraft/Forge exposed types.
 
-## 10. Small implementation patches (5B)
+Further characterization tests before moving side effects:
 
-1. **State model and tests.** Add `MatchState`, immutable context, typed
-   result, pure transition table and fake-gateway characterization tests. No
-   caller migration.
-2. **Facade delegation.** Instantiate service behind `GameStateManager`; route
-   queries and `resetRuntime` while preserving `MatchPhase`/scoreboard API.
-3. **Start transition.** Add `DatapackGateway`, ordered start steps, completion
-   markers and rollback; migrate `startGame` and all start entry points.
-4. **End/cleanup transition.** Migrate end, force stop, post-game delay,
-   disconnect/start cancellation and server shutdown; aggregate cleanup errors.
-5. **Remove old state.** After all callers use facade/service projections,
-   delete duplicate static counters and direct orchestration, retaining only
-   compatibility projections until packet callers are migrated.
+- current `startGame` side-effect order using fakes/gateways;
+- current `endGame` reward and post-game delay behavior;
+- forced stop cleanup order;
+- cleanup continues through independent subsystem failures;
+- server start/stopping reset behavior;
+- disconnect during `STARTING` and `RUNNING`;
+- missing datapack function handling.
 
-No full rewrite is proposed. Airdrop, contracts, extraction and other managers
-remain unchanged internally; only their lifecycle calls are wrapped by adapters.
+## 10. Failure matrix
+
+| Boundary | Current behavior | Target behavior |
+|---|---|---|
+| Before context creation | No explicit context; operation can simply return. | Stay `IDLE`; no side effects. |
+| After `PREPARING` | Not represented today. | Context can be discarded or moved to `CLEANING`; no player-visible success. |
+| After scoreboard `RUNNING` | Match may appear running even if later start step fails. | Scoreboard changes become a recorded start step with compensation. |
+| During datapack `war:start_game` | Command result is not typed in lifecycle. | Failure records `FAILED`, executes cleanup/reset, returns diagnostic. |
+| During player setup | Partial tags/lives/teleports possible if exception escapes. | Completed player step tracked; cleanup removes/normalizes state. |
+| After `RUNNING` | Normal gameplay. | Same, but with match id and revision. |
+| During `endGame` rewards | Some rewards/progress may be applied before later end step failure. | End steps produce typed results; partial failures are reported and cleanup still runs. |
+| During post-game delay | Cleanup deferred by tick. | `ENDING` models the delay explicitly. |
+| During cleanup | One exception could interrupt later cleanup if not caught at boundary. | Cleanup coordinator attempts all steps and aggregates errors. |
+| During shutdown | Runtime reset is split across events/managers. | Shutdown requests bounded cleanup and leaves diagnostics if incomplete. |
+
+## 11. Implementation breakdown
+
+## 11. Phase 2 implemented start flow
+
+Phase 2 integrates only the start transition:
+
+`IDLE -> PREPARING -> STARTING -> RUNNING`.
+
+Normal `RUNNING -> ENDING -> CLEANING -> IDLE` orchestration is still deferred.
+The existing `endGame`, post-game delay, winner processing, and
+`cleanupMatchRuntime` side effects remain in `GameStateManager`.
+
+### Source of truth
+
+- `MatchLifecycleService` is the source of truth for whether a start attempt is
+  accepted, starting, committed, failed, or rolled back.
+- Legacy scoreboard `gameState/#state` remains the gameplay compatibility signal
+  for existing callers of `GameStateManager.isRunning`.
+- During start, legacy `RUNNING` is written only at the final commit step
+  `SET_LEGACY_RUNNING`.
+- Existing cleanup/reset boundaries clear the lifecycle context after the old
+  cleanup path completes, so future matches can start without migrating normal
+  end flow in this patch.
+
+### Production start order
+
+| Order | Step ID | Side effect | Commit classification |
+|---:|---|---|---|
+| 1 | `RESET_TRANSIENT_RUNTIME` | Clear RTP, passive XP, respawn control, lives; set phase `STARTING`. | Reversible preparation |
+| 2 | `CONFIGURE_TEAMS` | Clan-war start/team assignment, team auto-balance, or team reset. | Commit-critical |
+| 3 | `RESET_AIRDROP_SCHEDULER` | Reset airdrop scheduler. | Reversible preparation |
+| 4 | `START_DISCORD_TRACKING` | Initialize in-memory Discord match stats. | Best-effort reversible |
+| 5 | `START_CONTRACTS` | Initialize contract selection runtime. | Reversible |
+| 6 | `RESET_MATCH_COUNTERS` | Clear match counters. | Reversible |
+| 7 | `EXECUTE_START_DATAPACK` | Execute `function war:start_game`. | Commit-critical |
+| 8 | `ANNOUNCE_MAP_START` | Send map-set title announcement. | Notification; rollback is no-op |
+| 9 | `ENFORCE_GAME_RULES` | Apply game rules. | Idempotent |
+| 10 | `START_ZONE` | Start zone manager. | Reversible |
+| 11 | `PREPARE_SAFE_TELEPORT` | Prepare safe teleport pool. | Reversible |
+| 12 | `INITIALIZE_PLAYERS` | Lives, match-played progression, tags, lobby move, contract tracker, XP sync. | Commit-critical, partially reversible |
+| 13 | `START_VOICE_MATCH` | Start voice team match. | Reversible |
+| 14 | `CAPTURE_PARTICIPANTS` | Capture alive participant count/enough-player flag. | Reversible |
+| 15 | `START_EXTRACTION` | Initialize extraction runtime. | Reversible |
+| 16 | `SYNC_CLASS_XP` | Sync all class XP. | Idempotent |
+| 17 | `SET_LEGACY_RUNNING` | Set scoreboard `RUNNING` and phase `RUNNING`. | Commit point |
+
+Final chat broadcast is post-commit. If it fails, the match remains `RUNNING`
+and the warning is returned in `MatchStartResult`.
+
+### Preflight
+
+Preflight runs before `beginPreparation` and before start side effects. It
+checks:
+
+- lifecycle is `IDLE`;
+- server exists;
+- current mode is valid;
+- required player count is available according to `TestModeManager`;
+- overworld and lobby dimensions exist;
+- `war:start_game` and `war:reset` functions exist.
+
+Rejected preflight leaves lifecycle `IDLE`, does not apply gateway steps, and
+does not increment lifecycle revision.
+
+### Rollback order and compensation
+
+Rollback runs completed steps in exact reverse apply order. The failed step is
+not recorded as completed and is not rolled back by the coordinator.
+
+| Step | Compensation |
+|---|---|
+| `SET_LEGACY_RUNNING` | Set scoreboard `WAITING`, phase `WAITING`. |
+| `SYNC_CLASS_XP` | No-op; sync is idempotent. |
+| `START_EXTRACTION` | `ExtractionPointManager.reset`. |
+| `CAPTURE_PARTICIPANTS` | Clear participant counters. |
+| `START_VOICE_MATCH` | `VoiceChatTeamManager.endMatch`. |
+| `INITIALIZE_PLAYERS` | Remove match lobby tags, move players to lobby, sync XP. Match-played progression is not fully reversible. |
+| `PREPARE_SAFE_TELEPORT` | `SafeTeleport.clearPool`. |
+| `START_ZONE` | `ZoneManager.reset`. |
+| `ENFORCE_GAME_RULES` | Re-apply game rules; idempotent. |
+| `ANNOUNCE_MAP_START` | No-op; title/chat notification cannot be withdrawn. |
+| `EXECUTE_START_DATAPACK` | Execute `function war:reset`. |
+| `RESET_MATCH_COUNTERS` | Clear counters. |
+| `START_CONTRACTS` | `ContractManager.reset`. |
+| `START_DISCORD_TRACKING` | `DiscordLeaderboardService.resetMatch`. |
+| `RESET_AIRDROP_SCHEDULER` | Reset scheduler and cancel active airdrop if present. |
+| `CONFIGURE_TEAMS` | Reset clan-war runtime and team state; mode resets to `SOLO`. |
+| `RESET_TRANSIENT_RUNTIME` | Reset phase/countdowns, respawn, lives, passive XP, RTP. |
+
+If every compensation succeeds, lifecycle moves from `FAILED` to `IDLE` and a
+new start is allowed. If any compensation fails, lifecycle remains `FAILED` and
+new start requests are rejected until an explicit cleanup/reset path clears it.
+
+### Failure table
+
+| Failure point | Already applied | Successful rollback result | Failed rollback result |
+|---|---|---|---|
+| Before first step | Context `PREPARING/STARTING`, no side effect. | `IDLE`; no legacy running state. | `FAILED`; diagnostic retained. |
+| Any start step apply | All previous completed steps only. | Previous steps rolled back in reverse order; `IDLE`. | `FAILED`; rollback failures retained. |
+| `SET_LEGACY_RUNNING` apply | All previous gameplay setup completed; legacy running may be partial only if the step throws internally. | Best-effort previous-step rollback; `IDLE` if clean. | `FAILED`; manual cleanup required. |
+| `markRunning` after steps | All steps completed including legacy `RUNNING`. | `SET_LEGACY_RUNNING` and previous steps rolled back; `IDLE`. | `FAILED`; legacy state may require manual cleanup. |
+| Post-commit broadcast | Lifecycle and legacy state already `RUNNING`. | No rollback. | Not applicable; warning only. |
+
+### Deferred Phase 3
+
+Not included in this patch:
+
+- normal end transition;
+- post-game delay state migration;
+- winner processing;
+- cleanup of a running match as lifecycle-owned orchestration;
+- server shutdown cleanup;
+- player disconnect cleanup;
+- restart recovery for `FAILED` lifecycle after process restart.
+
+Maximum three production patches after Phase 1:
+
+1. **Facade delegation without side-effect reorder.**
+   Wire `GameStateManager` to a singleton `MatchLifecycleService` for shadow
+   transitions and diagnostics while preserving existing start/end/cleanup
+   order.
+2. **Start transition migration.**
+   Introduce `DatapackGateway`, `ScoreboardGateway`, `MatchPlayerService`, and
+   `MatchSubsystemCoordinator`; move `startGame` orchestration behind typed
+   steps and compensation.
+3. **End/cleanup migration and old-state removal.**
+   Move `endGame`, `forceStopMatch`, server shutdown cleanup, and post-game
+   delay into lifecycle service. Then remove obsolete mutable static fields when
+   all call sites use the explicit snapshot/API.

@@ -54,7 +54,9 @@ public class LobbyManager {
         relaxLobbyBorder(lobby);
 
         RtpTimerManager.cancel(player);
-        boolean preserveTeamMatchState = GameStateManager.isRunning(player.server)
+        boolean matchRunningOrStarting = GameStateManager.isRunning(player.server)
+                || GameStateManager.isStartTransitionPlayerSetup();
+        boolean preserveTeamMatchState = matchRunningOrStarting
                 && GameStateManager.getCurrentMode().isTeamMode()
                 && TeamMatchManager.getTeam(player) != null
                 && LivesManager.canContinueMatch(player);
@@ -66,7 +68,7 @@ public class LobbyManager {
         player.removeTag("war.playing");
         InventoryManager.clearInventory(player);
 
-        boolean matchRunning = GameStateManager.isRunning(player.server);
+        boolean matchRunning = matchRunningOrStarting;
         boolean canUseTabletNow = GameStateManager.isTabletAvailableInLobby(player.server)
                 && LivesManager.canContinueMatch(player);
 

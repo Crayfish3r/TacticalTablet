@@ -524,7 +524,7 @@ public final class ContractManager {
         return player != null
                 && selectionActive
                 && selectionSecondsLeft > 0
-                && GameStateManager.isRunning(player.server)
+                && (GameStateManager.isRunning(player.server) || GameStateManager.isStartTransitionPlayerSetup())
                 && LivesManager.canContinueMatch(player)
                 && !contractsByOwner.containsKey(player.getUUID());
     }

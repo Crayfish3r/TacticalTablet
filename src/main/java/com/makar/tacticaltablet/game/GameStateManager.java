@@ -9,6 +9,18 @@ import com.makar.tacticaltablet.game.lives.LivesManager;
 import com.makar.tacticaltablet.game.lobby.LobbyManager;
 import com.makar.tacticaltablet.game.contract.ContractManager;
 import com.makar.tacticaltablet.game.extraction.ExtractionPointManager;
+import com.makar.tacticaltablet.game.lifecycle.LegacyMatchStateMapper;
+import com.makar.tacticaltablet.game.lifecycle.MatchLifecycleService;
+import com.makar.tacticaltablet.game.lifecycle.MatchLifecycleSnapshot;
+import com.makar.tacticaltablet.game.lifecycle.MatchStartRequest;
+import com.makar.tacticaltablet.game.lifecycle.MatchStartStep;
+import com.makar.tacticaltablet.game.lifecycle.MatchState;
+import com.makar.tacticaltablet.game.lifecycle.integration.MatchStartCoordinator;
+import com.makar.tacticaltablet.game.lifecycle.integration.MatchStartGateway;
+import com.makar.tacticaltablet.game.lifecycle.integration.MatchStartPreflightResult;
+import com.makar.tacticaltablet.game.lifecycle.integration.MatchStartRejectionReason;
+import com.makar.tacticaltablet.game.lifecycle.integration.MatchStartResult;
+import com.makar.tacticaltablet.game.lifecycle.integration.MatchStartStatus;
 import com.makar.tacticaltablet.game.respawn.RespawnControlManager;
 import com.makar.tacticaltablet.game.respawn.RtpTimerManager;
 import com.makar.tacticaltablet.game.teleport.SafeTeleport;
@@ -41,8 +53,12 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.scores.Objective;
 import net.minecraft.world.scores.Scoreboard;
 
+import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.UUID;
 
 public class GameStateManager {
 
@@ -69,6 +85,10 @@ public class GameStateManager {
     private static int postGameDelay = 0;
     private static MatchPhase matchPhase = MatchPhase.WAITING;
     private static MatchMode currentMode = MatchMode.SOLO;
+    private static boolean startTransitionPlayerSetup = false;
+    private static final MatchLifecycleService MATCH_LIFECYCLE = new MatchLifecycleService();
+    private static final MatchStartCoordinator MATCH_START_COORDINATOR =
+            new MatchStartCoordinator(MATCH_LIFECYCLE, new GameStateMatchStartGateway());
 
     public static int getGameState(MinecraftServer server) {
         if (server == null) return WAITING;
@@ -112,8 +132,20 @@ public class GameStateManager {
         return getGameState(server) == RUNNING;
     }
 
+    public static MatchLifecycleSnapshot getLifecycleSnapshot() {
+        return MATCH_START_COORDINATOR.snapshot();
+    }
+
+    public static boolean isStartTransitionPlayerSetup() {
+        return startTransitionPlayerSetup;
+    }
+
     public static MatchPhase getMatchPhase() {
         return matchPhase;
+    }
+
+    static MatchState lifecycleStateForLegacyState(int gameState, MatchPhase phase) {
+        return LegacyMatchStateMapper.fromLegacyState(RUNNING, gameState, phase);
     }
 
     public static MatchMode getCurrentMode() {
@@ -128,6 +160,7 @@ public class GameStateManager {
     public static boolean isTabletAvailableInLobby(MinecraftServer server) {
         if (server == null) return false;
         return isRunning(server)
+                || startTransitionPlayerSetup
                 || (MapSetManager.isClanWarSet() && matchPhase == MatchPhase.WAITING)
                 || matchPhase == MatchPhase.VOTING
                 || matchPhase == MatchPhase.TEAM_SELECT;
@@ -244,6 +277,7 @@ public class GameStateManager {
 
     public static void startGame(MinecraftServer server) {
         if (server == null) return;
+        if (startGameThroughCoordinator(server)) return;
 
         if (!validateRuntimeRequirements(server)) {
             setGameState(server, WAITING);
@@ -251,57 +285,37 @@ public class GameStateManager {
             return;
         }
 
-        RtpTimerManager.clearAll();
-        PassiveClassXPManager.clearAll();
-        RespawnControlManager.reset(server);
-        LivesManager.resetAll(server);
-        setGameState(server, RUNNING);
-        matchPhase = MatchPhase.RUNNING;
-        if (MapSetManager.isClanWarSet()) {
-            ClanWarManager.startMatch(server);
-            currentMode = MatchMode.SQUADS;
-            TeamMatchManager.assignClanWarTeams(server);
-            TeamMatchManager.applyScoreboardTeams(server);
-        } else if (currentMode.isTeamMode()) {
-            TeamMatchManager.autoBalance(server, currentMode);
-            TeamMatchManager.applyScoreboardTeams(server);
-        } else {
-            TeamMatchManager.reset(server);
-        }
-        AirdropManager.resetAutoScheduler();
-        DiscordLeaderboardService.startMatch(server);
-        ContractManager.onMatchStart(server);
-        matchHadEnoughPlayers = false;
-        matchStartingParticipants = 0;
-
-        CommandSourceStack source = server.createCommandSourceStack().withSuppressedOutput();
-        server.getCommands().performPrefixedCommand(source, "function " + START_GAME_FUNCTION);
-        MapSetManager.announceGameStart(server);
-        DropControlManager.enforceGameRules(server);
-        ZoneManager.start(server);
-
-        SafeTeleport.preparePool(server);
-
-        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-            LivesManager.ensureStarted(player);
-            PlayerProgressManager.addMatchPlayed(player);
-            player.removeTag("war.eliminated");
-            player.removeTag("war.playing");
-            player.addTag("in_lobby");
-            LobbyManager.moveToLobby(player);
-            ContractManager.giveSelectionTrackerIfAvailable(player);
-            ClassXPManager.sync(player);
-        }
-
-        VoiceChatTeamManager.startTeamMatch(server);
-
-        matchStartingParticipants = playingPlayers(server);
-        matchHadEnoughPlayers = matchStartingParticipants >= TestModeManager.getRequiredPlayers(MIN_PLAYERS);
-        ExtractionPointManager.onMatchStart(server);
-
-        ClassXPManager.syncAll(server);
-
         broadcast(server, "[WAR] Матч начался. Выбери класс и используй RTP.");
+    }
+
+    private static boolean startGameThroughCoordinator(MinecraftServer server) {
+        MatchStartResult result = MATCH_START_COORDINATOR.start(server);
+        if (result.started()) {
+            return true;
+        }
+
+        if (result.status() == MatchStartStatus.REJECTED
+                && result.rejectionReason() == MatchStartRejectionReason.RUNTIME_REQUIREMENTS_FAILED) {
+            broadcast(server, "[WAR] Match start cancelled: server setup is incomplete. Check the log.");
+            return true;
+        }
+
+        if (result.status() == MatchStartStatus.FAILED_REQUIRES_CLEANUP) {
+            broadcast(server, "[WAR] Match start failed. Cleanup is required; check the log.");
+            return true;
+        }
+
+        if (result.status() == MatchStartStatus.REJECTED
+                && result.rejectionReason() == MatchStartRejectionReason.RUNTIME_REQUIREMENTS_FAILED) {
+            broadcast(server, "[WAR] РЎС‚Р°СЂС‚ РјР°С‚С‡Р° РѕС‚РјРµРЅС‘РЅ: СЃРµСЂРІРµСЂ РЅР°СЃС‚СЂРѕРµРЅ РЅРµ РїРѕР»РЅРѕСЃС‚СЊСЋ. РџСЂРѕРІРµСЂСЊ Р»РѕРі.");
+            return true;
+        }
+
+        if (result.status() == MatchStartStatus.FAILED_REQUIRES_CLEANUP) {
+            broadcast(server, "[WAR] РЎС‚Р°СЂС‚ РјР°С‚С‡Р° РїСЂРµСЂРІР°РЅ. РўСЂРµР±СѓРµС‚СЃСЏ cleanup; РїСЂРѕРІРµСЂСЊ Р»РѕРі.");
+        }
+
+        return true;
     }
 
     private static String clanWarWinnerLabel(ServerPlayer winner) {
@@ -413,6 +427,7 @@ public class GameStateManager {
         if (server != null) {
             setGameState(server, WAITING);
         }
+        MATCH_START_COORDINATOR.clearAfterLegacyCleanup();
     }
 
     public static boolean forceStopMatch(MinecraftServer server) {
@@ -477,6 +492,7 @@ public class GameStateManager {
         currentMode = MatchMode.SOLO;
         VoteManager.reset();
         TeamMatchManager.reset(server);
+        MATCH_START_COORDINATOR.clearAfterLegacyCleanup();
     }
 
     public static boolean validateRuntimeRequirements(MinecraftServer server) {
@@ -506,6 +522,29 @@ public class GameStateManager {
 
     private static boolean hasFunction(MinecraftServer server, ResourceLocation id) {
         return server.getFunctions().get(id).isPresent();
+    }
+
+    private static boolean validateStartRuntimeRequirements(MinecraftServer server) {
+        if (server == null) return false;
+
+        boolean valid = true;
+        if (getOverworld(server) == null) {
+            TacticalTabletMod.LOGGER.error("Tactical Tablet setup error: overworld dimension is unavailable.");
+            valid = false;
+        }
+        if (getLobbyLevel(server) == null) {
+            TacticalTabletMod.LOGGER.error("Tactical Tablet setup error: lobby:lobby dimension is unavailable.");
+            valid = false;
+        }
+        if (!hasFunction(server, START_GAME_FUNCTION)) {
+            TacticalTabletMod.LOGGER.error("Tactical Tablet setup error: datapack function {} is missing.", START_GAME_FUNCTION);
+            valid = false;
+        }
+        if (!hasFunction(server, RESET_GAME_FUNCTION)) {
+            TacticalTabletMod.LOGGER.error("Tactical Tablet setup error: datapack function {} is missing.", RESET_GAME_FUNCTION);
+            valid = false;
+        }
+        return valid;
     }
 
     public static boolean forceStartVoting(MinecraftServer server) {
@@ -778,6 +817,207 @@ public class GameStateManager {
                 .map(MatchMode::displayName)
                 .reduce((left, right) -> left + " / " + right)
                 .orElse(MatchMode.SOLO.displayName());
+    }
+
+    private static final class GameStateMatchStartGateway implements MatchStartGateway {
+        @Override
+        public MatchStartPreflightResult preflight(MinecraftServer server, MatchLifecycleSnapshot lifecycleSnapshot) {
+            if (server == null) {
+                return MatchStartPreflightResult.rejected(
+                        MatchStartRejectionReason.SERVER_UNAVAILABLE,
+                        "server is unavailable"
+                );
+            }
+            if (lifecycleSnapshot.state() != MatchState.IDLE) {
+                return MatchStartPreflightResult.rejected(
+                        MatchStartRejectionReason.LIFECYCLE_NOT_IDLE,
+                        "lifecycle is " + lifecycleSnapshot.state()
+                );
+            }
+            if (currentMode == null) {
+                return MatchStartPreflightResult.rejected(
+                        MatchStartRejectionReason.INVALID_MODE,
+                        "current mode is null"
+                );
+            }
+            if (onlinePlayers(server) < TestModeManager.getRequiredPlayers(MIN_PLAYERS)) {
+                return MatchStartPreflightResult.rejected(
+                        MatchStartRejectionReason.INSUFFICIENT_PLAYERS,
+                        "not enough players"
+                );
+            }
+            if (!validateStartRuntimeRequirements(server)) {
+                return MatchStartPreflightResult.rejected(
+                        MatchStartRejectionReason.RUNTIME_REQUIREMENTS_FAILED,
+                        "runtime requirements failed"
+                );
+            }
+            return MatchStartPreflightResult.acceptedResult();
+        }
+
+        @Override
+        public MatchStartRequest createRequest(MinecraftServer server) {
+            Set<UUID> participants = new LinkedHashSet<>();
+            if (server != null) {
+                for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+                    participants.add(player.getUUID());
+                }
+            }
+            ResourceLocation mapId = server == null || getOverworld(server) == null
+                    ? Level.OVERWORLD.location()
+                    : getOverworld(server).dimension().location();
+            return new MatchStartRequest(
+                    mapId.toString(),
+                    currentMode.name(),
+                    MapSetManager.isClanWarSet() ? "clan-war" : "standard",
+                    null,
+                    participants,
+                    Instant.now()
+            );
+        }
+
+        @Override
+        public void apply(MinecraftServer server, MatchStartStep step) {
+            switch (step) {
+                case RESET_TRANSIENT_RUNTIME -> {
+                    startCountdown = -1;
+                    postGameDelay = 0;
+                    matchPhase = MatchPhase.STARTING;
+                    RtpTimerManager.clearAll();
+                    PassiveClassXPManager.clearAll();
+                    RespawnControlManager.reset(server);
+                    LivesManager.resetAll(server);
+                }
+                case CONFIGURE_TEAMS -> {
+                    if (MapSetManager.isClanWarSet()) {
+                        ClanWarManager.startMatch(server);
+                        currentMode = MatchMode.SQUADS;
+                        TeamMatchManager.assignClanWarTeams(server);
+                        TeamMatchManager.applyScoreboardTeams(server);
+                    } else if (currentMode.isTeamMode()) {
+                        TeamMatchManager.autoBalance(server, currentMode);
+                        TeamMatchManager.applyScoreboardTeams(server);
+                    } else {
+                        TeamMatchManager.reset(server);
+                    }
+                }
+                case RESET_AIRDROP_SCHEDULER -> AirdropManager.resetAutoScheduler();
+                case START_DISCORD_TRACKING -> DiscordLeaderboardService.startMatch(server);
+                case START_CONTRACTS -> ContractManager.onMatchStart(server);
+                case RESET_MATCH_COUNTERS -> {
+                    matchHadEnoughPlayers = false;
+                    matchStartingParticipants = 0;
+                }
+                case EXECUTE_START_DATAPACK -> {
+                    CommandSourceStack source = server.createCommandSourceStack().withSuppressedOutput();
+                    server.getCommands().performPrefixedCommand(source, "function " + START_GAME_FUNCTION);
+                }
+                case ANNOUNCE_MAP_START -> MapSetManager.announceGameStart(server);
+                case ENFORCE_GAME_RULES -> DropControlManager.enforceGameRules(server);
+                case START_ZONE -> ZoneManager.start(server);
+                case PREPARE_SAFE_TELEPORT -> SafeTeleport.preparePool(server);
+                case INITIALIZE_PLAYERS -> initializePlayers(server);
+                case START_VOICE_MATCH -> VoiceChatTeamManager.startTeamMatch(server);
+                case CAPTURE_PARTICIPANTS -> {
+                    matchStartingParticipants = playingPlayers(server);
+                    matchHadEnoughPlayers = matchStartingParticipants >= TestModeManager.getRequiredPlayers(MIN_PLAYERS);
+                }
+                case START_EXTRACTION -> ExtractionPointManager.onMatchStart(server);
+                case SYNC_CLASS_XP -> ClassXPManager.syncAll(server);
+                case SET_LEGACY_RUNNING -> {
+                    setGameState(server, RUNNING);
+                    matchPhase = MatchPhase.RUNNING;
+                }
+            }
+        }
+
+        @Override
+        public void rollback(MinecraftServer server, MatchStartStep step) {
+            switch (step) {
+                case SET_LEGACY_RUNNING -> {
+                    setGameState(server, WAITING);
+                    matchPhase = MatchPhase.WAITING;
+                }
+                case SYNC_CLASS_XP -> {
+                }
+                case START_EXTRACTION -> ExtractionPointManager.reset(server);
+                case CAPTURE_PARTICIPANTS -> {
+                    matchStartingParticipants = 0;
+                    matchHadEnoughPlayers = false;
+                }
+                case START_VOICE_MATCH -> VoiceChatTeamManager.endMatch(server);
+                case INITIALIZE_PLAYERS -> rollbackPlayers(server);
+                case PREPARE_SAFE_TELEPORT -> SafeTeleport.clearPool();
+                case START_ZONE -> ZoneManager.reset(server);
+                case ENFORCE_GAME_RULES -> DropControlManager.enforceGameRules(server);
+                case ANNOUNCE_MAP_START -> {
+                }
+                case EXECUTE_START_DATAPACK -> {
+                    CommandSourceStack source = server.createCommandSourceStack().withSuppressedOutput();
+                    server.getCommands().performPrefixedCommand(source, "function " + RESET_GAME_FUNCTION);
+                }
+                case RESET_MATCH_COUNTERS -> {
+                    matchStartingParticipants = 0;
+                    matchHadEnoughPlayers = false;
+                }
+                case START_CONTRACTS -> ContractManager.reset(server);
+                case START_DISCORD_TRACKING -> DiscordLeaderboardService.resetMatch();
+                case RESET_AIRDROP_SCHEDULER -> {
+                    AirdropManager.resetAutoScheduler();
+                    ServerLevel activeAirdropLevel = getOverworld(server);
+                    if (activeAirdropLevel != null) {
+                        AirdropManager.cancel(activeAirdropLevel);
+                    }
+                }
+                case CONFIGURE_TEAMS -> {
+                    ClanWarManager.resetRuntime();
+                    TeamMatchManager.reset(server);
+                    currentMode = MatchMode.SOLO;
+                }
+                case RESET_TRANSIENT_RUNTIME -> {
+                    matchPhase = MatchPhase.WAITING;
+                    startCountdown = -1;
+                    postGameDelay = 0;
+                    RespawnControlManager.reset(server);
+                    LivesManager.resetAll(server);
+                    PassiveClassXPManager.clearAll();
+                    RtpTimerManager.clearAll();
+                }
+            }
+        }
+
+        @Override
+        public void postCommit(MinecraftServer server) {
+            broadcast(server, "[WAR] РњР°С‚С‡ РЅР°С‡Р°Р»СЃСЏ. Р’С‹Р±РµСЂРё РєР»Р°СЃСЃ Рё РёСЃРїРѕР»СЊР·СѓР№ RTP.");
+        }
+
+        private void initializePlayers(MinecraftServer server) {
+            startTransitionPlayerSetup = true;
+            try {
+                for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+                    LivesManager.ensureStarted(player);
+                    PlayerProgressManager.addMatchPlayed(player);
+                    player.removeTag("war.eliminated");
+                    player.removeTag("war.playing");
+                    player.addTag("in_lobby");
+                    LobbyManager.moveToLobby(player);
+                    ContractManager.giveSelectionTrackerIfAvailable(player);
+                    ClassXPManager.sync(player);
+                }
+            } finally {
+                startTransitionPlayerSetup = false;
+            }
+        }
+
+        private void rollbackPlayers(MinecraftServer server) {
+            startTransitionPlayerSetup = false;
+            for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+                player.removeTag("war.playing");
+                player.removeTag("in_lobby");
+                LobbyManager.moveToLobby(player);
+                ClassXPManager.sync(player);
+            }
+        }
     }
 }
 
