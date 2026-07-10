@@ -9,6 +9,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 
 /**
@@ -38,13 +39,19 @@ public final class ModPersistenceExecutor implements AutoCloseable {
     public record SubmitResult(SubmitStatus status, Path target, long revision, String diagnostic) {
     }
 
+    private record Ticket(Path target, long revision, CompletableFuture<DurableSaveResult> future) implements SaveTicket {
+        @Override public java.util.concurrent.CompletionStage<DurableSaveResult> completion() { return future; }
+    }
+
+    private record PendingWrite(WriteTask task, Ticket ticket) { }
+
     public record Health(boolean degraded, String diagnostic) {
     }
 
     private final ExecutorService worker;
     private final int maxPendingTargets;
     private final Consumer<String> logger;
-    private final Map<Path, WriteTask> pending = new HashMap<>();
+    private final Map<Path, PendingWrite> pending = new HashMap<>();
     private final Map<Path, Long> latestAcceptedRevision = new HashMap<>();
     private final Map<Path, Long> completedRevision = new HashMap<>();
     private final Map<Path, Health> health = new HashMap<>();
@@ -72,34 +79,60 @@ public final class ModPersistenceExecutor implements AutoCloseable {
         return submit(task, false);
     }
 
+    public synchronized SaveTicket enqueueSnapshot(WriteTask task) {
+        return enqueue(task, false);
+    }
+
+    public synchronized SaveTicket enqueueFinalSnapshot(WriteTask task) {
+        return enqueue(task, true);
+    }
+
     /** Accepts only the caller's final snapshots after normal intake has been closed. */
     public synchronized SubmitResult submitFinal(WriteTask task) {
         return submit(task, true);
     }
 
     private SubmitResult submit(WriteTask task, boolean finalSnapshot) {
+        SaveTicket ticket = enqueue(task, finalSnapshot);
+        DurableSaveResult immediate = ticket.completion().toCompletableFuture().getNow(null);
+        if (immediate != null) {
+            return switch (immediate.status()) {
+                case STALE_REJECTED -> new SubmitResult(SubmitStatus.STALE, immediate.target(), immediate.revision(), immediate.diagnostic());
+                case QUEUE_REJECTED -> new SubmitResult(SubmitStatus.BACKPRESSURED, immediate.target(), immediate.revision(), immediate.diagnostic());
+                case EXECUTOR_STOPPED -> new SubmitResult(SubmitStatus.CLOSED, immediate.target(), immediate.revision(), immediate.diagnostic());
+                default -> new SubmitResult(SubmitStatus.ACCEPTED, immediate.target(), immediate.revision(), immediate.diagnostic());
+            };
+        }
+        return new SubmitResult(SubmitStatus.ACCEPTED, ticket.target(), ticket.revision(), "");
+    }
+
+    private Ticket enqueue(WriteTask task, boolean finalSnapshot) {
         Objects.requireNonNull(task, "task");
         Path target = Objects.requireNonNull(task.target(), "task.target").toAbsolutePath().normalize();
+        Ticket ticket = new Ticket(target, task.revision(), new CompletableFuture<>());
         if (!accepting && !finalSnapshot) {
-            return new SubmitResult(SubmitStatus.CLOSED, target, task.revision(), "Persistence executor is shutting down");
+            ticket.future.complete(DurableSaveResult.of(DurableSaveResult.Status.EXECUTOR_STOPPED, target, task.revision(), "Persistence executor is shutting down", null));
+            return ticket;
         }
 
         long accepted = latestAcceptedRevision.getOrDefault(target, Long.MIN_VALUE);
         if (task.revision() <= accepted) {
-            return new SubmitResult(SubmitStatus.STALE, target, task.revision(), "A newer snapshot is already queued or saved");
+            ticket.future.complete(DurableSaveResult.of(DurableSaveResult.Status.STALE_REJECTED, target, task.revision(), "A newer snapshot is already queued or saved", null));
+            return ticket;
         }
 
-        WriteTask previous = pending.get(target);
+        PendingWrite previous = pending.get(target);
         if (previous == null && pending.size() >= maxPendingTargets) {
             logBackpressure(target);
-            return new SubmitResult(SubmitStatus.BACKPRESSURED, target, task.revision(), "Bounded persistence queue is full");
+            ticket.future.complete(DurableSaveResult.of(DurableSaveResult.Status.QUEUE_REJECTED, target, task.revision(), "Bounded persistence queue is full", null));
+            return ticket;
         }
 
-        pending.put(target, task);
+        pending.put(target, new PendingWrite(task, ticket));
+        if (previous != null) previous.ticket.future.complete(DurableSaveResult.of(DurableSaveResult.Status.SUPERSEDED, target, previous.ticket.revision(), "Superseded by revision " + task.revision(), null));
         latestAcceptedRevision.put(target, task.revision());
         scheduleDrain();
-        return new SubmitResult(previous == null ? SubmitStatus.ACCEPTED : SubmitStatus.COALESCED,
-                target, task.revision(), "");
+        return ticket;
     }
 
     public synchronized int pendingTargets() {
@@ -138,6 +171,15 @@ public final class ModPersistenceExecutor implements AutoCloseable {
     @Override
     public void close() {
         stopAccepting();
+        synchronized (this) {
+            for (PendingWrite pendingWrite : pending.values()) {
+                pendingWrite.ticket().future().complete(DurableSaveResult.of(
+                        DurableSaveResult.Status.EXECUTOR_STOPPED, pendingWrite.ticket().target(),
+                        pendingWrite.ticket().revision(), "Persistence executor stopped before write", null));
+            }
+            pending.clear();
+            notifyAll();
+        }
         worker.shutdown();
     }
 
@@ -150,15 +192,19 @@ public final class ModPersistenceExecutor implements AutoCloseable {
     private void drain() {
         while (true) {
             WriteTask task;
+            Ticket inFlightTicket;
             synchronized (this) {
                 if (pending.isEmpty()) {
                     drainScheduled = false;
                     notifyAll();
                     return;
                 }
-                Map.Entry<Path, WriteTask> entry = pending.entrySet().iterator().next();
-                task = entry.getValue();
+                Map.Entry<Path, PendingWrite> entry = pending.entrySet().iterator().next();
+                PendingWrite pendingWrite = entry.getValue();
+                task = pendingWrite.task();
                 pending.remove(entry.getKey());
+                // The ticket follows this concrete task even after it leaves the coalescing map.
+                inFlightTicket = pendingWrite.ticket();
             }
 
             try {
@@ -168,9 +214,11 @@ public final class ModPersistenceExecutor implements AutoCloseable {
                         Path target = task.target().toAbsolutePath().normalize();
                         completedRevision.merge(target, task.revision(), Math::max);
                         health.remove(target);
+                        inFlightTicket.future.complete(DurableSaveResult.of(DurableSaveResult.Status.WRITTEN, target, task.revision(), "", null));
                     } else {
                         health.put(task.target().toAbsolutePath().normalize(), new Health(true, result.diagnostic()));
                         logger.accept("Persistence write failed for " + task.target() + ": " + result.diagnostic());
+                        inFlightTicket.future.complete(DurableSaveResult.of(DurableSaveResult.Status.FAILED, task.target(), task.revision(), result.diagnostic(), result.exception().orElse(null)));
                     }
                 }
             } catch (Throwable exception) {
@@ -178,6 +226,7 @@ public final class ModPersistenceExecutor implements AutoCloseable {
                     health.put(task.target().toAbsolutePath().normalize(), new Health(true, exception.getMessage()));
                 }
                 logger.accept("Persistence worker crashed a write for " + task.target() + ": " + exception);
+                inFlightTicket.future.complete(DurableSaveResult.of(DurableSaveResult.Status.FAILED, task.target(), task.revision(), exception.getMessage(), exception));
             }
         }
     }

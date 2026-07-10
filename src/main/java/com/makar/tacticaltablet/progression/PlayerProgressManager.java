@@ -6,6 +6,8 @@ import com.makar.tacticaltablet.storage.AtomicFileStore;
 import com.makar.tacticaltablet.storage.BackupCoordinator;
 import com.makar.tacticaltablet.storage.FileSaveResult;
 import com.makar.tacticaltablet.storage.ModPersistenceExecutor;
+import com.makar.tacticaltablet.storage.SaveTicket;
+import com.makar.tacticaltablet.storage.DurableSaveResult;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -35,6 +37,9 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.stream.Stream;
 
 public class PlayerProgressManager {
@@ -1303,39 +1308,42 @@ public class PlayerProgressManager {
         }
     }
 
-    private static void enqueueSnapshot(String key, PlayerProgress progress) {
-        enqueueSnapshot(key, progress, snapshot(key, progress, ++nextSnapshotRevision), false);
+    private static SaveTicket enqueueSnapshot(String key, PlayerProgress progress) {
+        return enqueueSnapshot(key, progress, snapshot(key, progress, ++nextSnapshotRevision), false);
     }
 
-    private static void enqueueSnapshot(String key, PlayerProgress progress, PlayerProgressSnapshot snapshot) {
-        enqueueSnapshot(key, progress, snapshot, false);
+    private static SaveTicket enqueueSnapshot(String key, PlayerProgress progress, PlayerProgressSnapshot snapshot) {
+        return enqueueSnapshot(key, progress, snapshot, false);
     }
 
-    private static void enqueueSnapshot(String key, PlayerProgress progress, boolean finalSnapshot) {
-        enqueueSnapshot(key, progress, snapshot(key, progress, ++nextSnapshotRevision), finalSnapshot);
+    private static SaveTicket enqueueSnapshot(String key, PlayerProgress progress, boolean finalSnapshot) {
+        return enqueueSnapshot(key, progress, snapshot(key, progress, ++nextSnapshotRevision), finalSnapshot);
     }
 
-    private static void enqueueSnapshot(String key, PlayerProgress progress, PlayerProgressSnapshot snapshot, boolean finalSnapshot) {
+    private static SaveTicket enqueueSnapshot(String key, PlayerProgress progress, PlayerProgressSnapshot snapshot, boolean finalSnapshot) {
         if (persistenceExecutor == null || playersRoot == null) {
             markDirty(key);
-            return;
+            return null;
         }
         Path target = getPlayerFile(key);
-        ModPersistenceExecutor.SubmitResult result = finalSnapshot
-                ? persistenceExecutor.submitFinal(new PlayerWriteTask(target, snapshot))
-                : persistenceExecutor.submit(new PlayerWriteTask(target, snapshot));
-        switch (result.status()) {
-            case ACCEPTED, COALESCED -> {
-                snapshotRevisions.put(key, snapshot.revision());
-                markDirty(key);
-            }
-            case STALE -> { }
-            case BACKPRESSURED -> markDirty(key);
-            case CLOSED -> {
-                markDirty(key);
-                TacticalTabletMod.LOGGER.warn("Could not queue Tactical Tablet progress save for {}: {}", key, result.diagnostic());
-            }
+        SaveTicket ticket = finalSnapshot
+                ? persistenceExecutor.enqueueFinalSnapshot(new PlayerWriteTask(target, snapshot))
+                : persistenceExecutor.enqueueSnapshot(new PlayerWriteTask(target, snapshot));
+        DurableSaveResult immediate = ticket.completion().toCompletableFuture().getNow(null);
+        if (immediate == null || immediate.status() == DurableSaveResult.Status.WRITTEN) {
+            snapshotRevisions.put(key, snapshot.revision());
+            markDirty(key);
+            return ticket;
         }
+        switch (immediate.status()) {
+            case STALE_REJECTED, SUPERSEDED -> { }
+            case QUEUE_REJECTED, EXECUTOR_STOPPED, FAILED -> {
+                markDirty(key);
+                TacticalTabletMod.LOGGER.warn("Could not queue Tactical Tablet progress save for {}: {}", key, immediate.diagnostic());
+            }
+            case WRITTEN -> { }
+        }
+        return ticket;
     }
 
     private static void reconcileCompletedWrites() {
@@ -1567,9 +1575,8 @@ public class PlayerProgressManager {
         }
 
         PlayerProgressSnapshot snapshot = snapshot(key, progress, ++nextSnapshotRevision);
-        enqueueSnapshot(key, progress, snapshot);
-        boolean flushed = persistenceExecutor.flush(SHUTDOWN_FLUSH_TIMEOUT);
-        boolean saved = flushed && persistenceExecutor.completedRevision(getPlayerFile(key)) >= snapshot.revision();
+        SaveTicket ticket = enqueueSnapshot(key, progress, snapshot);
+        boolean saved = awaitTicket(ticket, key);
         if (saved) {
             dirty.remove(key);
             cache.put(key, progress);
@@ -1577,6 +1584,21 @@ public class PlayerProgressManager {
         }
         TacticalTabletMod.LOGGER.error("Failed to durably flush Tactical Tablet progress for {}", key);
         markDirty(key);
+        return false;
+    }
+
+    private static boolean awaitTicket(SaveTicket ticket, String key) {
+        if (ticket == null) return false;
+        try {
+            DurableSaveResult result = ticket.completion().toCompletableFuture()
+                    .get(SHUTDOWN_FLUSH_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+            if (result.status() == DurableSaveResult.Status.WRITTEN) return true;
+            TacticalTabletMod.LOGGER.error("Durable player save {} revision {} ended as {}: {}", key, ticket.revision(), result.status(), result.diagnostic());
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+        } catch (ExecutionException | TimeoutException exception) {
+            TacticalTabletMod.LOGGER.error("Timed out or failed waiting for player save {} revision {}", key, ticket.revision(), exception);
+        }
         return false;
     }
 
@@ -1813,6 +1835,9 @@ public class PlayerProgressManager {
             Files.copy(season, temporary.resolve(SEASON_FILE), StandardCopyOption.REPLACE_EXISTING);
             files.add(SEASON_FILE);
         }
+        copyBackupFile(snapshot.dataRoot().resolve("clans.json"), temporary.resolve("clans.json"), "clans.json", files);
+        copyBackupTree(snapshot.dataRoot().resolve("transactions"), temporary.resolve("transactions"), "transactions", files);
+        copyBackupTree(snapshot.dataRoot().resolve("migrations"), temporary.resolve("migrations"), "migrations", files);
         try (DirectoryStream<Path> stream = Files.newDirectoryStream(temporaryPlayers, "*.json")) {
             for (Path file : stream) {
                 String entry = PLAYERS_DIRECTORY + "/" + file.getFileName();
@@ -1821,8 +1846,12 @@ public class PlayerProgressManager {
         }
         Map<String, Object> manifest = new HashMap<>();
         manifest.put("schemaVersion", DATA_VERSION);
+        manifest.put("generationId", snapshot.revision());
         manifest.put("timestamp", snapshot.timestamp());
         manifest.put("files", List.copyOf(files));
+        Map<String, Long> sizes = new HashMap<>();
+        for (String file : files) sizes.put(file, Files.size(temporary.resolve(file)));
+        manifest.put("sizes", Map.copyOf(sizes));
         FileSaveResult manifestWrite = FILE_STORE.write(temporary.resolve("manifest.json"), writer -> GSON.toJson(manifest, writer));
         if (manifestWrite.status() != FileSaveResult.Status.SUCCESS) {
             throw new IOException(manifestWrite.diagnostic(), manifestWrite.exception().orElse(null));
@@ -1833,6 +1862,35 @@ public class PlayerProgressManager {
             Files.move(temporary, completed);
         }
         cleanOldBackups();
+    }
+
+    private static void copyBackupFile(Path source, Path target, String relative, List<String> files) throws IOException {
+        if (!Files.isRegularFile(source, java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                || Files.isSymbolicLink(source) || excludedBackupFile(source)) return;
+        Files.createDirectories(target.getParent());
+        Files.copy(source, target, StandardCopyOption.REPLACE_EXISTING);
+        files.add(relative);
+    }
+
+    private static void copyBackupTree(Path sourceRoot, Path targetRoot, String prefix, List<String> files) throws IOException {
+        if (!Files.isDirectory(sourceRoot, java.nio.file.LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(sourceRoot)) return;
+        try (Stream<Path> stream = Files.walk(sourceRoot)) {
+            for (Path source : stream.filter(path -> !path.equals(sourceRoot)).toList()) {
+                if (!Files.isRegularFile(source, java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                        || Files.isSymbolicLink(source) || excludedBackupFile(source)) continue;
+                Path relative = sourceRoot.relativize(source);
+                Path target = targetRoot.resolve(relative).normalize();
+                if (!target.startsWith(targetRoot)) continue;
+                Files.createDirectories(target.getParent());
+                Files.copy(source, target, StandardCopyOption.REPLACE_EXISTING);
+                files.add(prefix + "/" + relative.toString().replace('\\', '/'));
+            }
+        }
+    }
+
+    private static boolean excludedBackupFile(Path file) {
+        String name = file.getFileName().toString();
+        return name.endsWith(".tmp") || name.contains(".incomplete");
     }
 
     private static final class PlayerProgress {

@@ -114,6 +114,33 @@ class ModPersistenceExecutorTest {
         assertTrue(coordinator.tryStart());
     }
 
+    @Test
+    void ticketsCompleteForWrittenSupersededAndQueueRejectedSnapshots() throws Exception {
+        Path target = temporaryDirectory.resolve("player.json");
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        try (ModPersistenceExecutor executor = new ModPersistenceExecutor("test-persistence", 1, ignored -> { })) {
+            executor.submit(task(temporaryDirectory.resolve("blocking.json"), 1, () -> {
+                started.countDown();
+                await(release);
+            }));
+            assertTrue(started.await(2, TimeUnit.SECONDS));
+
+            SaveTicket first = executor.enqueueSnapshot(task(target, 1, () -> Files.writeString(target, "old")));
+            SaveTicket second = executor.enqueueSnapshot(task(target, 2, () -> Files.writeString(target, "new")));
+            SaveTicket rejected = executor.enqueueSnapshot(task(temporaryDirectory.resolve("overflow.json"), 1, () -> { }));
+
+            assertEquals(DurableSaveResult.Status.SUPERSEDED,
+                    first.completion().toCompletableFuture().get(2, TimeUnit.SECONDS).status());
+            assertEquals(DurableSaveResult.Status.QUEUE_REJECTED,
+                    rejected.completion().toCompletableFuture().get(2, TimeUnit.SECONDS).status());
+            release.countDown();
+            assertEquals(DurableSaveResult.Status.WRITTEN,
+                    second.completion().toCompletableFuture().get(2, TimeUnit.SECONDS).status());
+            assertEquals("new", Files.readString(target));
+        }
+    }
+
     private static ModPersistenceExecutor.WriteTask task(Path target, long revision, IoAction action) {
         return new ModPersistenceExecutor.WriteTask() {
             @Override public Path target() { return target; }
