@@ -2,7 +2,10 @@ package com.makar.tacticaltablet.clan.transaction;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
+import com.google.gson.JsonParser;
 import com.makar.tacticaltablet.storage.AtomicFileStore;
 import com.makar.tacticaltablet.storage.FileSaveResult;
 import com.makar.tacticaltablet.storage.TacticalTabletStoragePaths;
@@ -12,12 +15,12 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
 
 /** JSON WAL implementation for create-clan transactions. */
 public final class FileTransactionJournal implements TransactionJournal {
@@ -34,6 +37,11 @@ public final class FileTransactionJournal implements TransactionJournal {
 
     @Override
     public JournalResult prepare(CreateClanTransaction transaction) {
+        try {
+            validate(transaction);
+        } catch (InvalidJournalException exception) {
+            return JournalResult.failure("Invalid transaction journal: " + exception.getMessage(), exception);
+        }
         if (transaction.state() != TransactionState.PREPARED) {
             return JournalResult.failure("Initial journal state must be PREPARED", null);
         }
@@ -49,9 +57,15 @@ public final class FileTransactionJournal implements TransactionJournal {
         Path file = transactionPath(transaction);
         CreateClanTransaction persisted;
         try {
-            persisted = read(file);
-        } catch (IOException | JsonParseException | IllegalStateException exception) {
+            validate(transaction);
+            persisted = readValidated(file);
+        } catch (IOException | InvalidJournalException exception) {
             return JournalResult.failure("Cannot read transaction journal " + transaction.transactionId(), exception);
+        }
+        try {
+            validateIdentity(persisted, transaction);
+        } catch (InvalidJournalException exception) {
+            return JournalResult.failure("Transaction identity mismatch for " + transaction.transactionId(), exception);
         }
         if (persisted.state() == targetState) {
             return JournalResult.success();
@@ -66,20 +80,38 @@ public final class FileTransactionJournal implements TransactionJournal {
     public JournalLoadResult loadPending() {
         Path root = paths.transactionsDirectory();
         List<CreateClanTransaction> transactions = new ArrayList<>();
+        List<CreateClanTransaction> rollbackRequired = new ArrayList<>();
+        List<CreateClanTransaction> committed = new ArrayList<>();
         List<String> diagnostics = new ArrayList<>();
+        int quarantined = 0;
+        int archived = 0;
+        int archiveFailures = 0;
         try {
             Files.createDirectories(root);
             try (DirectoryStream<Path> files = Files.newDirectoryStream(root, "*.json")) {
                 for (Path file : files) {
                     try {
-                        CreateClanTransaction transaction = read(file);
-                        validate(transaction);
-                        if (!transaction.state().isTerminal()) {
+                        CreateClanTransaction transaction = readValidated(file);
+                        if (transaction.state().isAutoRecoverable()) {
                             transactions.add(transaction);
+                        } else if (transaction.state().requiresManualRecovery()) {
+                            rollbackRequired.add(transaction);
+                            diagnostics.add("Clan transaction requires manual recovery: " + transaction.transactionId());
+                        } else if (transaction.state().isCommitted()) {
+                            committed.add(transaction);
+                            JournalResult archivedResult = archiveCommitted(transaction);
+                            if (archivedResult.status() == JournalResult.Status.SUCCESS) {
+                                archived++;
+                            } else {
+                                archiveFailures++;
+                                diagnostics.add("Could not archive committed clan transaction "
+                                        + transaction.transactionId() + ": " + archivedResult.diagnostic());
+                            }
                         }
-                    } catch (IOException | JsonParseException | IllegalArgumentException exception) {
-                        String diagnostic = "Corrupt clan transaction journal isolated: " + file.getFileName();
-                        diagnostics.add(diagnostic);
+                    } catch (IOException | InvalidJournalException exception) {
+                        quarantined++;
+                        diagnostics.add("Corrupt clan transaction journal isolated: " + file.getFileName()
+                                + " (" + exception.getMessage() + ")");
                         isolateCorrupt(file, exception, diagnostics);
                     }
                 }
@@ -88,7 +120,32 @@ public final class FileTransactionJournal implements TransactionJournal {
             diagnostics.add("Cannot list clan transaction journals: " + exception.getMessage());
         }
         transactions.sort(Comparator.comparing(transaction -> transaction.transactionId().toString()));
-        return new JournalLoadResult(transactions, diagnostics);
+        rollbackRequired.sort(Comparator.comparing(transaction -> transaction.transactionId().toString()));
+        committed.sort(Comparator.comparing(transaction -> transaction.transactionId().toString()));
+        return new JournalLoadResult(transactions, rollbackRequired, committed, quarantined, archived, archiveFailures, diagnostics);
+    }
+
+    @Override
+    public JournalResult archiveCommitted(CreateClanTransaction transaction) {
+        try {
+            validate(transaction);
+            if (!transaction.state().isCommitted()) {
+                return JournalResult.failure("Only COMMITTED journals can be archived", null);
+            }
+            Path source = transactionPath(transaction);
+            Path archive = uniquePath(paths.transactionsDirectory().resolve("archive").resolve(source.getFileName()));
+            Path canonicalArchive = paths.transactionsDirectory().resolve("archive").resolve(source.getFileName());
+            if (!Files.exists(source)) {
+                return Files.exists(canonicalArchive)
+                        ? JournalResult.success()
+                        : JournalResult.failure("Committed journal is missing: " + transaction.transactionId(), null);
+            }
+            Files.createDirectories(archive.getParent());
+            Files.move(source, archive);
+            return JournalResult.success();
+        } catch (IOException | InvalidJournalException exception) {
+            return JournalResult.failure("Archive committed journal failed: " + exception.getMessage(), exception);
+        }
     }
 
     private JournalResult write(Path file, CreateClanTransaction transaction) {
@@ -99,23 +156,46 @@ public final class FileTransactionJournal implements TransactionJournal {
         return JournalResult.failure(result.diagnostic(), result.exception().orElse(null));
     }
 
-    private CreateClanTransaction read(Path file) throws IOException {
-        try (var reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
-            CreateClanTransaction transaction = GSON.fromJson(reader, CreateClanTransaction.class);
-            if (transaction == null) throw new IllegalStateException("Journal is empty");
+    CreateClanTransaction readValidated(Path file) throws IOException, InvalidJournalException {
+        String json = Files.readString(file, StandardCharsets.UTF_8);
+        if (json.isBlank()) {
+            throw new InvalidJournalException("Journal is empty");
+        }
+        JsonElement element;
+        try {
+            element = JsonParser.parseString(json);
+        } catch (JsonParseException exception) {
+            throw new InvalidJournalException("Journal JSON is malformed", exception);
+        }
+        if (element == null || element.isJsonNull() || !element.isJsonObject()) {
+            throw new InvalidJournalException("Journal root must be an object");
+        }
+        validateJsonObject(element.getAsJsonObject());
+        try {
+            CreateClanTransaction transaction = GSON.fromJson(element, CreateClanTransaction.class);
+            validate(transaction);
             return transaction;
+        } catch (JsonParseException | IllegalArgumentException | NullPointerException exception) {
+            throw new InvalidJournalException("Journal object is invalid: " + exception.getMessage(), exception);
         }
     }
 
     private void isolateCorrupt(Path source, Exception exception, List<String> diagnostics) {
-        Path backup = paths.backupsDirectory().resolve("transactions")
-                .resolve("corrupt_" + Instant.now().toEpochMilli() + "_" + source.getFileName());
-        Path quarantine = paths.transactionsDirectory().resolve("quarantine").resolve(source.getFileName());
+        String evidenceName = "corrupt_" + Instant.now().toEpochMilli() + "_" + source.getFileName();
+        Path backup = uniquePath(paths.backupsDirectory().resolve("transactions").resolve(evidenceName));
+        Path quarantine = uniquePath(paths.transactionsDirectory().resolve("quarantine").resolve(evidenceName));
         try {
             Files.createDirectories(backup.getParent());
             Files.createDirectories(quarantine.getParent());
-            Files.copy(source, backup, StandardCopyOption.REPLACE_EXISTING);
-            Files.move(source, quarantine, StandardCopyOption.REPLACE_EXISTING);
+            Files.copy(source, backup);
+            Files.move(source, quarantine);
+            Files.writeString(quarantine.resolveSibling(quarantine.getFileName() + ".reason.txt"),
+                    "source=" + source.getFileName() + System.lineSeparator()
+                            + "category=" + exception.getClass().getSimpleName() + System.lineSeparator()
+                            + "message=" + safeDiagnostic(exception.getMessage()) + System.lineSeparator()
+                            + "backup=" + backup.getFileName() + System.lineSeparator()
+                            + "quarantine=" + quarantine.getFileName() + System.lineSeparator(),
+                    StandardCharsets.UTF_8);
         } catch (IOException isolationFailure) {
             exception.addSuppressed(isolationFailure);
             diagnostics.add("Could not isolate corrupt journal " + source.getFileName() + ": " + isolationFailure.getMessage());
@@ -127,27 +207,153 @@ public final class FileTransactionJournal implements TransactionJournal {
     }
 
     private static boolean isAllowedTransition(TransactionState from, TransactionState to) {
-        if (to == TransactionState.ROLLBACK_REQUIRED) return !from.isTerminal();
+        if (to == TransactionState.ROLLBACK_REQUIRED) return from.isAutoRecoverable();
         return (from == TransactionState.PREPARED && to == TransactionState.PLAYER_APPLIED)
                 || (from == TransactionState.PLAYER_APPLIED && to == TransactionState.CLAN_APPLIED)
                 || (from == TransactionState.CLAN_APPLIED && to == TransactionState.COMMITTED);
     }
 
-    private static void validate(CreateClanTransaction transaction) {
+    private static void validate(CreateClanTransaction transaction) throws InvalidJournalException {
+        if (transaction == null) {
+            throw new InvalidJournalException("Journal transaction is missing");
+        }
         if (transaction.schemaVersion() != CreateClanTransaction.SCHEMA_VERSION) {
-            throw new IllegalStateException("Unsupported journal schema " + transaction.schemaVersion());
+            throw new InvalidJournalException("Unsupported journal schema " + transaction.schemaVersion());
         }
         if (!CreateClanTransaction.OPERATION_TYPE.equals(transaction.operationType())) {
-            throw new IllegalStateException("Unsupported operation " + transaction.operationType());
+            throw new InvalidJournalException("Unsupported operation " + transaction.operationType());
+        }
+        if (transaction.transactionId() == null || transaction.playerUuid() == null || transaction.state() == null) {
+            throw new InvalidJournalException("Journal identity fields are required");
+        }
+        if (transaction.playerName() == null || transaction.playerName().isBlank() || transaction.playerName().length() > 64) {
+            throw new InvalidJournalException("Journal player name is invalid");
+        }
+        if (transaction.clanId() == null || transaction.clanId().isBlank() || transaction.clanId().length() > 128) {
+            throw new InvalidJournalException("Journal clan ID is invalid");
+        }
+        if (transaction.clanPayload() == null) {
+            throw new InvalidJournalException("Journal clan payload is required");
+        }
+        ClanCreationPayload payload = transaction.clanPayload();
+        if (payload.clanId() == null || payload.clanId().isBlank()
+                || payload.name() == null || payload.name().isBlank() || payload.name().length() > 64
+                || payload.tag() == null || payload.tag().isBlank() || payload.tag().length() > 16
+                || payload.ownerUuid() == null
+                || payload.ownerName() == null || payload.ownerName().isBlank() || payload.ownerName().length() > 64) {
+            throw new InvalidJournalException("Journal clan payload fields are invalid");
         }
         if (!transaction.clanId().equals(transaction.clanPayload().clanId())) {
-            throw new IllegalStateException("Journal clan ID does not match payload");
+            throw new InvalidJournalException("Journal clan ID does not match payload");
         }
         if (!transaction.payloadHash().equals(CreateClanTransaction.payloadHash(transaction.clanPayload()))) {
-            throw new IllegalStateException("Journal payload hash does not match payload");
+            throw new InvalidJournalException("Journal payload hash does not match payload");
         }
-        if (transaction.expectedOldBalance() < transaction.newBalance() || transaction.newBalance() < 0) {
-            throw new IllegalStateException("Invalid journal balance transition");
+        if (transaction.expectedOldBalance() < 0 || transaction.newBalance() < 0
+                || transaction.expectedOldBalance() < transaction.newBalance()) {
+            throw new InvalidJournalException("Invalid journal balance transition");
         }
+        if (transaction.createdAt() <= 0 || transaction.updatedAt() <= 0 || transaction.updatedAt() < transaction.createdAt()) {
+            throw new InvalidJournalException("Invalid journal timestamps");
+        }
+        if (transaction.diagnostic() != null && transaction.diagnostic().length() > 512) {
+            throw new InvalidJournalException("Journal diagnostic is too long");
+        }
+    }
+
+    private static void validateIdentity(CreateClanTransaction persisted, CreateClanTransaction requested)
+            throws InvalidJournalException {
+        if (!Objects.equals(persisted.transactionId(), requested.transactionId())
+                || !Objects.equals(persisted.operationType(), requested.operationType())
+                || !Objects.equals(persisted.playerUuid(), requested.playerUuid())
+                || !Objects.equals(persisted.clanId(), requested.clanId())
+                || !Objects.equals(persisted.payloadHash(), requested.payloadHash())
+                || persisted.expectedOldBalance() != requested.expectedOldBalance()
+                || persisted.newBalance() != requested.newBalance()) {
+            throw new InvalidJournalException("Persisted journal identity differs from requested transition");
+        }
+    }
+
+    private static void validateJsonObject(JsonObject object) throws InvalidJournalException {
+        requireInt(object, "schemaVersion");
+        requireUuid(object, "transactionId");
+        requireString(object, "operationType", 64);
+        requireUuid(object, "playerUuid");
+        requireString(object, "playerName", 64);
+        requireString(object, "clanId", 128);
+        requireInt(object, "expectedOldBalance");
+        requireInt(object, "newBalance");
+        requireString(object, "payloadHash", 128);
+        requireString(object, "state", 32);
+        requireLong(object, "createdAt");
+        requireLong(object, "updatedAt");
+        if (!object.has("clanPayload") || !object.get("clanPayload").isJsonObject()) {
+            throw new InvalidJournalException("Missing object field clanPayload");
+        }
+        JsonObject payload = object.getAsJsonObject("clanPayload");
+        requireString(payload, "clanId", 128);
+        requireString(payload, "name", 64);
+        requireString(payload, "tag", 16);
+        requireInt(payload, "color");
+        requireUuid(payload, "ownerUuid");
+        requireString(payload, "ownerName", 64);
+        try {
+            TransactionState.valueOf(object.get("state").getAsString());
+        } catch (IllegalArgumentException exception) {
+            throw new InvalidJournalException("Unknown journal state", exception);
+        }
+    }
+
+    private static String requireString(JsonObject object, String name, int maxLength) throws InvalidJournalException {
+        if (!object.has(name) || object.get(name).isJsonNull() || !object.get(name).isJsonPrimitive()) {
+            throw new InvalidJournalException("Missing string field " + name);
+        }
+        String value = object.get(name).getAsString();
+        if (value == null || value.isBlank() || value.length() > maxLength) {
+            throw new InvalidJournalException("Invalid string field " + name);
+        }
+        return value;
+    }
+
+    private static void requireUuid(JsonObject object, String name) throws InvalidJournalException {
+        try {
+            UUID.fromString(requireString(object, name, 64));
+        } catch (IllegalArgumentException exception) {
+            throw new InvalidJournalException("Invalid UUID field " + name, exception);
+        }
+    }
+
+    private static void requireInt(JsonObject object, String name) throws InvalidJournalException {
+        try {
+            if (!object.has(name) || object.get(name).isJsonNull()) throw new NumberFormatException(name);
+            object.get(name).getAsInt();
+        } catch (ClassCastException | IllegalStateException | NumberFormatException exception) {
+            throw new InvalidJournalException("Invalid int field " + name, exception);
+        }
+    }
+
+    private static void requireLong(JsonObject object, String name) throws InvalidJournalException {
+        try {
+            if (!object.has(name) || object.get(name).isJsonNull()) throw new NumberFormatException(name);
+            object.get(name).getAsLong();
+        } catch (ClassCastException | IllegalStateException | NumberFormatException exception) {
+            throw new InvalidJournalException("Invalid long field " + name, exception);
+        }
+    }
+
+    private static Path uniquePath(Path preferred) {
+        if (!Files.exists(preferred)) return preferred;
+        String fileName = preferred.getFileName().toString();
+        Path parent = preferred.getParent();
+        for (int index = 1; index < 10_000; index++) {
+            Path candidate = parent.resolve(fileName + "." + index);
+            if (!Files.exists(candidate)) return candidate;
+        }
+        throw new IllegalStateException("Cannot allocate unique journal evidence path for " + preferred);
+    }
+
+    private static String safeDiagnostic(String message) {
+        if (message == null || message.isBlank()) return "";
+        return message.length() <= 256 ? message : message.substring(0, 256);
     }
 }

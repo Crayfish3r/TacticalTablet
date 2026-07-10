@@ -119,27 +119,55 @@ public final class ClanEconomyService {
 
     public RecoveryReport recoverPendingTransactions() {
         TransactionJournal.JournalLoadResult loaded = journal.loadPending();
-        int committed = 0;
+        int recoveredCommitted = 0;
         int blocked = 0;
         for (CreateClanTransaction transaction : loaded.transactions()) {
-            if (transaction.state().isTerminal()) continue;
+            if (!transaction.state().isAutoRecoverable()) continue;
             TransactionResult result = applyAndCommit(transaction);
             if (result.status() == TransactionResult.Status.SUCCESS) {
-                committed++;
+                recoveredCommitted++;
             } else {
                 blocked++;
             }
         }
-        return new RecoveryReport(committed, blocked, loaded.diagnostics());
+        return new RecoveryReport(
+                recoveredCommitted,
+                blocked,
+                loaded.rollbackRequired().size(),
+                loaded.quarantined(),
+                loaded.committed().size(),
+                loaded.archived(),
+                loaded.archiveFailures(),
+                loaded.diagnostics()
+        );
     }
 
-    public record RecoveryReport(int committed, int blocked, java.util.List<String> diagnostics) {
+    public record RecoveryReport(
+            int recoveredCommitted,
+            int blocked,
+            int rollbackRequired,
+            int quarantined,
+            int alreadyCommitted,
+            int archived,
+            int archiveFailures,
+            java.util.List<String> diagnostics
+    ) {
         public RecoveryReport {
             diagnostics = diagnostics == null ? java.util.List.of() : java.util.List.copyOf(diagnostics);
+        }
+
+        public int committed() {
+            return recoveredCommitted;
         }
     }
 
     private TransactionResult applyAndCommit(CreateClanTransaction transaction) {
+        if (transaction.state().isCommitted()) {
+            return TransactionResult.success(transaction.transactionId());
+        }
+        if (transaction.state().requiresManualRecovery()) {
+            return TransactionResult.recoveryRequired(transaction.transactionId(), "Transaction already requires manual recovery");
+        }
         if (!CreateClanTransaction.OPERATION_TYPE.equals(transaction.operationType())
                 || transaction.schemaVersion() != CreateClanTransaction.SCHEMA_VERSION) {
             return markRollbackRequired(transaction, "Unsupported transaction schema or operation");

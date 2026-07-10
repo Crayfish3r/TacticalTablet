@@ -35,6 +35,7 @@ class ClanEconomyServiceTest {
 
         assertEquals(TransactionResult.Status.SUCCESS, result.status());
         assertEquals(150, player.balance);
+        assertEquals(1, player.receipts.size());
         assertNotNull(clans.created);
         assertEquals(1, player.appliedCount);
         assertEquals(1, clans.appliedCount);
@@ -120,6 +121,7 @@ class ClanEconomyServiceTest {
 
         assertEquals(1, recovery.committed());
         assertEquals(150, player.balance);
+        assertEquals(1, player.receipts.size());
         assertEquals(1, player.appliedCount);
         assertEquals(1, clans.appliedCount);
         assertEquals(TransactionState.COMMITTED, journal.onlyTransaction().state());
@@ -151,6 +153,9 @@ class ClanEconomyServiceTest {
             FakePlayerRepository player = new FakePlayerRepository(state == TransactionState.PREPARED ? 250 : 150);
             FakeClanRepository clans = new FakeClanRepository();
             CreateClanTransaction transaction = transaction(state);
+            if (state != TransactionState.PREPARED) {
+                player.addReceipt(transaction);
+            }
             if (state == TransactionState.CLAN_APPLIED) {
                 clans.created = transaction.clanPayload();
                 clans.appliedCount = 1;
@@ -182,6 +187,49 @@ class ClanEconomyServiceTest {
         assertEquals(0, second.committed());
         assertEquals(1, player.appliedCount);
         assertEquals(1, clans.appliedCount);
+    }
+
+    @Test
+    void balanceAtNewValueWithoutReceiptIsConflict() {
+        FakePlayerRepository player = new FakePlayerRepository(150);
+        FakeJournal journal = new FakeJournal();
+        CreateClanTransaction prepared = transaction(TransactionState.PREPARED);
+        journal.transactions.put(prepared.transactionId(), prepared);
+
+        ClanEconomyService.RecoveryReport recovery = service(player, new FakeClanRepository(), journal, () -> { })
+                .recoverPendingTransactions();
+
+        assertEquals(0, recovery.committed());
+        assertEquals(1, recovery.blocked());
+        assertEquals(TransactionState.ROLLBACK_REQUIRED, journal.onlyTransaction().state());
+    }
+
+    @Test
+    void matchingReceiptPreventsSecondDebit() {
+        FakePlayerRepository player = new FakePlayerRepository(150);
+        CreateClanTransaction transaction = transaction(TransactionState.PLAYER_APPLIED);
+        player.addReceipt(transaction);
+
+        assertEquals(RepositoryResult.Status.ALREADY_APPLIED, player.applyDebit(transaction).status());
+        assertEquals(150, player.balance);
+        assertEquals(0, player.appliedCount);
+    }
+
+    @Test
+    void rollbackRequiredIsReportedAndNotAutoRecovered() {
+        FakePlayerRepository player = new FakePlayerRepository(250);
+        FakeClanRepository clans = new FakeClanRepository();
+        FakeJournal journal = new FakeJournal();
+        journal.transactions.put(transaction(TransactionState.ROLLBACK_REQUIRED).transactionId(),
+                transaction(TransactionState.ROLLBACK_REQUIRED));
+
+        ClanEconomyService.RecoveryReport recovery = service(player, clans, journal, () -> { }).recoverPendingTransactions();
+
+        assertEquals(0, recovery.committed());
+        assertEquals(0, recovery.blocked());
+        assertEquals(1, recovery.rollbackRequired());
+        assertEquals(250, player.balance);
+        assertEquals(0, clans.appliedCount);
     }
 
     @Test
@@ -257,6 +305,7 @@ class ClanEconomyServiceTest {
         private int balance;
         private int appliedCount;
         private boolean failApply;
+        private final Map<UUID, Receipt> receipts = new HashMap<>();
 
         private FakePlayerRepository(int balance) {
             this.balance = balance;
@@ -270,17 +319,46 @@ class ClanEconomyServiceTest {
         @Override
         public RepositoryResult applyDebit(CreateClanTransaction transaction) {
             if (failApply) return RepositoryResult.failed("player write failed", null);
-            if (balance == transaction.newBalance()) return RepositoryResult.alreadyApplied();
+            Receipt receipt = receipts.get(transaction.transactionId());
+            if (receipt != null) {
+                return receipt.matches(transaction) && balance == transaction.newBalance()
+                        ? RepositoryResult.alreadyApplied()
+                        : RepositoryResult.conflict("receipt conflict");
+            }
+            if (balance == transaction.newBalance()) {
+                return RepositoryResult.conflict("balance has new value without receipt");
+            }
             if (balance != transaction.expectedOldBalance()) return RepositoryResult.conflict("unexpected balance");
             balance = transaction.newBalance();
+            addReceipt(transaction);
             appliedCount++;
             return RepositoryResult.applied();
         }
 
         @Override
         public RepositoryResult verifyDebit(CreateClanTransaction transaction) {
-            return balance == transaction.newBalance() ? RepositoryResult.alreadyApplied()
-                    : RepositoryResult.conflict("player balance was not updated");
+            Receipt receipt = receipts.get(transaction.transactionId());
+            return receipt != null && receipt.matches(transaction) && balance == transaction.newBalance()
+                    ? RepositoryResult.alreadyApplied()
+                    : RepositoryResult.conflict("player balance or receipt was not updated");
+        }
+
+        private void addReceipt(CreateClanTransaction transaction) {
+            receipts.put(transaction.transactionId(), new Receipt(
+                    transaction.operationType(),
+                    transaction.expectedOldBalance(),
+                    transaction.newBalance(),
+                    transaction.payloadHash()
+            ));
+        }
+    }
+
+    private record Receipt(String operationType, int expectedOldBalance, int newBalance, String payloadHash) {
+        private boolean matches(CreateClanTransaction transaction) {
+            return operationType.equals(transaction.operationType())
+                    && expectedOldBalance == transaction.expectedOldBalance()
+                    && newBalance == transaction.newBalance()
+                    && payloadHash.equals(transaction.payloadHash());
         }
     }
 
@@ -341,7 +419,19 @@ class ClanEconomyServiceTest {
 
         @Override
         public JournalLoadResult loadPending() {
-            return new JournalLoadResult(new ArrayList<>(transactions.values()), List.of());
+            List<CreateClanTransaction> pending = new ArrayList<>();
+            List<CreateClanTransaction> rollback = new ArrayList<>();
+            List<CreateClanTransaction> committed = new ArrayList<>();
+            for (CreateClanTransaction transaction : transactions.values()) {
+                if (transaction.state().isAutoRecoverable()) {
+                    pending.add(transaction);
+                } else if (transaction.state().requiresManualRecovery()) {
+                    rollback.add(transaction);
+                } else if (transaction.state().isCommitted()) {
+                    committed.add(transaction);
+                }
+            }
+            return new JournalLoadResult(pending, rollback, committed, 0, 0, 0, List.of());
         }
 
         private CreateClanTransaction onlyTransaction() {

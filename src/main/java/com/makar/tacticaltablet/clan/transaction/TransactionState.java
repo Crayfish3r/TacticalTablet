@@ -10,4 +10,16 @@ public enum TransactionState {
     public boolean isTerminal() {
         return this == COMMITTED || this == ROLLBACK_REQUIRED;
     }
+
+    public boolean isCommitted() {
+        return this == COMMITTED;
+    }
+
+    public boolean requiresManualRecovery() {
+        return this == ROLLBACK_REQUIRED;
+    }
+
+    public boolean isAutoRecoverable() {
+        return this == PREPARED || this == PLAYER_APPLIED || this == CLAN_APPLIED;
+    }
 }

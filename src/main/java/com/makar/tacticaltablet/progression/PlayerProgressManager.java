@@ -1,6 +1,8 @@
 package com.makar.tacticaltablet.progression;
 
 import com.makar.tacticaltablet.core.TacticalTabletMod;
+import com.makar.tacticaltablet.clan.transaction.CreateClanTransaction;
+import com.makar.tacticaltablet.clan.transaction.RepositoryResult;
 import com.makar.tacticaltablet.game.MapSetManager;
 import com.makar.tacticaltablet.storage.AtomicFileStore;
 import com.makar.tacticaltablet.storage.BackupCoordinator;
@@ -54,7 +56,7 @@ public class PlayerProgressManager {
     private static final String BACKUPS_DIRECTORY = "backups";
     private static final String SEASON_FILE = "season.json";
 
-    private static final int DATA_VERSION = 9;
+    private static final int DATA_VERSION = 10;
     public static final int STANDARD_TIER = 0;
     public static final int EPIC_TIER = 1;
     public static final int LEGEND_TIER = 2;
@@ -611,6 +613,62 @@ public class PlayerProgressManager {
         PlayerProgress progress = getOrLoad(server, uuid, lastKnownName);
         progress.coins = Math.max(0, amount);
         return saveOffline(uuid, progress);
+    }
+
+    public static synchronized RepositoryResult applyTransactionDebit(
+            MinecraftServer server,
+            CreateClanTransaction transaction
+    ) {
+        if (server == null || transaction == null || transaction.playerUuid() == null) {
+            return RepositoryResult.failed("Missing player transaction context", null);
+        }
+
+        PlayerProgress progress = getOrLoad(server, transaction.playerUuid(), transaction.playerName());
+        normalize(progress);
+        AppliedTransactionReceipt receipt = findReceipt(progress, transaction.transactionId().toString());
+        if (receipt != null) {
+            return receiptMatches(receipt, transaction) && progress.coins == transaction.newBalance()
+                    ? RepositoryResult.alreadyApplied()
+                    : RepositoryResult.conflict("Player debit receipt conflicts with transaction");
+        }
+        if (progress.coins == transaction.newBalance()) {
+            return RepositoryResult.conflict("Player balance matches debit result without transaction receipt");
+        }
+        if (progress.coins != transaction.expectedOldBalance()) {
+            return RepositoryResult.conflict("Player balance does not match transaction precondition");
+        }
+
+        int previousCoins = progress.coins;
+        List<AppliedTransactionReceipt> previousReceipts = new ArrayList<>(progress.appliedTransactionReceipts);
+        progress.coins = transaction.newBalance();
+        progress.appliedTransactionReceipts.add(receiptFor(transaction));
+        if (saveOffline(transaction.playerUuid(), progress)) {
+            return RepositoryResult.applied();
+        }
+        progress.coins = previousCoins;
+        progress.appliedTransactionReceipts = previousReceipts;
+        return RepositoryResult.failed("Failed to persist player progress debit receipt", null);
+    }
+
+    public static synchronized RepositoryResult verifyTransactionDebit(
+            MinecraftServer server,
+            CreateClanTransaction transaction
+    ) {
+        if (server == null || transaction == null || transaction.playerUuid() == null) {
+            return RepositoryResult.failed("Missing player transaction context", null);
+        }
+        PlayerProgress progress = getOrLoad(server, transaction.playerUuid(), transaction.playerName());
+        normalize(progress);
+        AppliedTransactionReceipt receipt = findReceipt(progress, transaction.transactionId().toString());
+        if (receipt == null) {
+            return RepositoryResult.conflict("Player debit receipt is missing");
+        }
+        if (!receiptMatches(receipt, transaction)) {
+            return RepositoryResult.conflict("Player debit receipt does not match transaction");
+        }
+        return progress.coins == transaction.newBalance()
+                ? RepositoryResult.alreadyApplied()
+                : RepositoryResult.conflict("Player balance does not match debit receipt");
     }
 
     public static synchronized void updateLastKnownName(MinecraftServer server, UUID uuid, String name) {
@@ -1376,6 +1434,7 @@ public class PlayerProgressManager {
                 Map.copyOf(progress.purchasedClasses),
                 Map.copyOf(progress.donations),
                 Map.copyOf(progress.stats),
+                List.copyOf(progress.appliedTransactionReceipts),
                 progress.firstSeen,
                 progress.lastSeen
         ));
@@ -1424,6 +1483,7 @@ public class PlayerProgressManager {
         progress.purchasedClasses = normalizeIntegerMap(progress.purchasedClasses);
         progress.donations = normalizeIntegerMap(progress.donations);
         progress.stats = normalizeIntegerMap(progress.stats);
+        progress.appliedTransactionReceipts = normalizeReceipts(progress.appliedTransactionReceipts);
 
         for (String clazz : INITIAL_BASE_CLASSES) {
             progress.unlockedBaseClasses.put(normalizeClass(clazz), 1);
@@ -1717,6 +1777,51 @@ public class PlayerProgressManager {
         return current + amount;
     }
 
+    private static List<AppliedTransactionReceipt> normalizeReceipts(List<AppliedTransactionReceipt> receipts) {
+        if (receipts == null || receipts.isEmpty()) return new ArrayList<>();
+        List<AppliedTransactionReceipt> normalized = new ArrayList<>();
+        Set<String> seen = new java.util.HashSet<>();
+        for (AppliedTransactionReceipt receipt : receipts) {
+            if (receipt == null || receipt.transactionId == null || receipt.transactionId.isBlank()) continue;
+            if (receipt.operationType == null || receipt.operationType.isBlank()) continue;
+            if (receipt.expectedOldBalance < 0 || receipt.newBalance < 0) continue;
+            if (seen.add(receipt.transactionId)) {
+                normalized.add(receipt);
+            }
+        }
+        return normalized;
+    }
+
+    private static AppliedTransactionReceipt findReceipt(PlayerProgress progress, String transactionId) {
+        if (progress.appliedTransactionReceipts == null || transactionId == null) return null;
+        for (AppliedTransactionReceipt receipt : progress.appliedTransactionReceipts) {
+            if (receipt != null && transactionId.equals(receipt.transactionId)) {
+                return receipt;
+            }
+        }
+        return null;
+    }
+
+    private static AppliedTransactionReceipt receiptFor(CreateClanTransaction transaction) {
+        AppliedTransactionReceipt receipt = new AppliedTransactionReceipt();
+        receipt.transactionId = transaction.transactionId().toString();
+        receipt.operationType = transaction.operationType();
+        receipt.appliedAt = Instant.now().toEpochMilli();
+        receipt.expectedOldBalance = transaction.expectedOldBalance();
+        receipt.newBalance = transaction.newBalance();
+        receipt.payloadHash = transaction.payloadHash();
+        return receipt;
+    }
+
+    private static boolean receiptMatches(AppliedTransactionReceipt receipt, CreateClanTransaction transaction) {
+        return receipt != null
+                && Objects.equals(receipt.transactionId, transaction.transactionId().toString())
+                && Objects.equals(receipt.operationType, transaction.operationType())
+                && receipt.expectedOldBalance == transaction.expectedOldBalance()
+                && receipt.newBalance == transaction.newBalance()
+                && Objects.equals(receipt.payloadHash, transaction.payloadHash());
+    }
+
     /** Immutable, Minecraft-free payload handed to the persistence thread. */
     static record PlayerProgressSnapshot(String key, long revision, PlayerProgressData data) {
         PlayerProgressSnapshot {
@@ -1732,6 +1837,7 @@ public class PlayerProgressManager {
             int wins, int kills, int deaths, int matchesPlayed, int coins, int battlePassXp,
             boolean xpBoost, boolean sadTromboneKills,
             Map<String, Integer> purchasedClasses, Map<String, Integer> donations, Map<String, Integer> stats,
+            List<AppliedTransactionReceipt> appliedTransactionReceipts,
             long firstSeen, long lastSeen
     ) {
         PlayerProgressData {
@@ -1741,6 +1847,7 @@ public class PlayerProgressManager {
             purchasedClasses = Map.copyOf(purchasedClasses);
             donations = Map.copyOf(donations);
             stats = Map.copyOf(stats);
+            appliedTransactionReceipts = List.copyOf(appliedTransactionReceipts);
         }
     }
 
@@ -1911,8 +2018,18 @@ public class PlayerProgressManager {
         private Map<String, Integer> purchasedClasses = new HashMap<>();
         private Map<String, Integer> donations = new HashMap<>();
         private Map<String, Integer> stats = new HashMap<>();
+        private List<AppliedTransactionReceipt> appliedTransactionReceipts = new ArrayList<>();
         private long firstSeen;
         private long lastSeen;
+    }
+
+    private static final class AppliedTransactionReceipt {
+        private String transactionId = "";
+        private String operationType = "";
+        private long appliedAt;
+        private int expectedOldBalance;
+        private int newBalance;
+        private String payloadHash = "";
     }
 
     private record LoadedProgress(String key, PlayerProgress progress) {

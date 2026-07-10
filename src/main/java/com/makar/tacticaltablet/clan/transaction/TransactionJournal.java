@@ -10,6 +10,10 @@ public interface TransactionJournal {
 
     JournalLoadResult loadPending();
 
+    default JournalResult archiveCommitted(CreateClanTransaction transaction) {
+        return JournalResult.success();
+    }
+
     record JournalResult(Status status, String diagnostic, Throwable exception) {
         public enum Status {
             SUCCESS,
@@ -25,9 +29,23 @@ public interface TransactionJournal {
         }
     }
 
-    record JournalLoadResult(List<CreateClanTransaction> transactions, List<String> diagnostics) {
+    record JournalLoadResult(
+            List<CreateClanTransaction> transactions,
+            List<CreateClanTransaction> rollbackRequired,
+            List<CreateClanTransaction> committed,
+            int quarantined,
+            int archived,
+            int archiveFailures,
+            List<String> diagnostics
+    ) {
+        public JournalLoadResult(List<CreateClanTransaction> transactions, List<String> diagnostics) {
+            this(transactions, List.of(), List.of(), 0, 0, 0, diagnostics);
+        }
+
         public JournalLoadResult {
             transactions = transactions == null ? List.of() : List.copyOf(transactions);
+            rollbackRequired = rollbackRequired == null ? List.of() : List.copyOf(rollbackRequired);
+            committed = committed == null ? List.of() : List.copyOf(committed);
             diagnostics = diagnostics == null ? List.of() : List.copyOf(diagnostics);
         }
     }

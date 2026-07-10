@@ -117,10 +117,25 @@ public class ClanManager {
         }
         ClanEconomyService.RecoveryReport report = createEconomyService(server, paths, () -> { })
                 .recoverPendingTransactions();
+        for (String diagnostic : report.diagnostics()) {
+            TacticalTabletMod.LOGGER.warn("Clan transaction recovery diagnostic: {}", diagnostic);
+        }
+        if (report.rollbackRequired() > 0) {
+            TacticalTabletMod.LOGGER.error("Clan transaction recovery found {} rollback-required record(s)",
+                    report.rollbackRequired());
+        }
+        if (report.quarantined() > 0) {
+            TacticalTabletMod.LOGGER.error("Clan transaction recovery quarantined {} corrupt record(s)",
+                    report.quarantined());
+        }
+        if (report.archiveFailures() > 0) {
+            TacticalTabletMod.LOGGER.error("Clan transaction recovery failed to archive {} committed record(s)",
+                    report.archiveFailures());
+        }
         if (report.blocked() > 0) {
             TacticalTabletMod.LOGGER.error("Clan transaction recovery blocked {} record(s): {}",
                     report.blocked(), report.diagnostics());
-        } else if (report.committed() > 0) {
+        } else if (report.recoveredCommitted() > 0) {
             TacticalTabletMod.LOGGER.info("Recovered {} pending clan creation transaction(s)", report.committed());
         }
     }
@@ -637,27 +652,12 @@ public class ClanManager {
 
         @Override
         public RepositoryResult applyDebit(CreateClanTransaction transaction) {
-            int current = PlayerProgressManager.getCoins(server, transaction.playerUuid(), transaction.playerName());
-            if (current == transaction.newBalance()) {
-                return RepositoryResult.alreadyApplied();
-            }
-            if (current != transaction.expectedOldBalance()) {
-                return RepositoryResult.conflict("Player balance does not match transaction precondition");
-            }
-            return PlayerProgressManager.setCoins(
-                    server,
-                    transaction.playerUuid(),
-                    transaction.playerName(),
-                    transaction.newBalance()
-            ) ? RepositoryResult.applied() : RepositoryResult.failed("Failed to persist player progress", null);
+            return PlayerProgressManager.applyTransactionDebit(server, transaction);
         }
 
         @Override
         public RepositoryResult verifyDebit(CreateClanTransaction transaction) {
-            return PlayerProgressManager.getCoins(server, transaction.playerUuid(), transaction.playerName())
-                    == transaction.newBalance()
-                    ? RepositoryResult.alreadyApplied()
-                    : RepositoryResult.conflict("Player balance was not durably updated");
+            return PlayerProgressManager.verifyTransactionDebit(server, transaction);
         }
     }
 
