@@ -79,11 +79,13 @@ class MatchStartCoordinatorTest {
 
         assertEquals(MatchStartStatus.STARTED, coordinator.start(null).status());
         gateway.applied.clear();
+        int postCommitCalls = gateway.postCommitCalls;
 
         MatchStartResult duplicate = coordinator.start(null);
 
         assertEquals(MatchStartStatus.ALREADY_RUNNING, duplicate.status());
         assertTrue(gateway.applied.isEmpty());
+        assertEquals(postCommitCalls, gateway.postCommitCalls);
         assertEquals(MatchState.RUNNING, lifecycle.snapshot().state());
     }
 
@@ -100,6 +102,7 @@ class MatchStartCoordinatorTest {
             List<MatchStartStep> expectedAppliedBeforeFailure = stepsBefore(failedStep);
             List<MatchStartStep> expectedRollback = new ArrayList<>(expectedAppliedBeforeFailure);
             java.util.Collections.reverse(expectedRollback);
+            expectedRollback.add(0, failedStep);
             assertEquals(MatchStartStatus.FAILED_ROLLED_BACK, result.status(), failedStep.name());
             assertEquals(MatchState.IDLE, lifecycle.snapshot().state(), failedStep.name());
             assertEquals(failedStep, result.failedStep().orElseThrow(), failedStep.name());
@@ -122,7 +125,7 @@ class MatchStartCoordinatorTest {
         assertEquals(MatchStartStatus.FAILED_REQUIRES_CLEANUP, failed.status());
         assertEquals(MatchState.FAILED, lifecycle.snapshot().state());
         assertFalse(failed.rollbackFailures().isEmpty());
-        assertEquals(MatchStartStatus.ALREADY_RUNNING, second.status());
+        assertEquals(MatchStartStatus.BLOCKED_REQUIRES_CLEANUP, second.status());
         assertEquals(MatchState.FAILED, lifecycle.snapshot().state());
     }
 
@@ -160,6 +163,22 @@ class MatchStartCoordinatorTest {
         assertTrue(gateway.rolledBack.isEmpty());
     }
 
+    @Test
+    void cleanupStateBlocksStartWithCleanupStatus() {
+        MatchLifecycleService lifecycle = lifecycle(MATCH_ID);
+        FakeGateway gateway = new FakeGateway();
+        MatchStartCoordinator coordinator = new MatchStartCoordinator(lifecycle, gateway);
+
+        assertEquals(MatchStartStatus.STARTED, coordinator.start(null).status());
+        lifecycle.beginCleanup(MATCH_ID);
+        gateway.applied.clear();
+
+        MatchStartResult result = coordinator.start(null);
+
+        assertEquals(MatchStartStatus.BLOCKED_REQUIRES_CLEANUP, result.status());
+        assertTrue(gateway.applied.isEmpty());
+    }
+
     private static MatchLifecycleService lifecycle(UUID... ids) {
         List<UUID> sequence = List.of(ids);
         java.util.concurrent.atomic.AtomicInteger index = new java.util.concurrent.atomic.AtomicInteger();
@@ -187,6 +206,7 @@ class MatchStartCoordinatorTest {
         private MatchStartStep failApplyAt;
         private MatchStartStep failRollbackAt;
         private boolean failPostCommit;
+        private int postCommitCalls;
         private java.util.function.Consumer<MatchStartStep> onApply = ignored -> {
         };
         private Runnable onPostCommit = () -> {
@@ -230,6 +250,7 @@ class MatchStartCoordinatorTest {
 
         @Override
         public void postCommit(MinecraftServer server) throws Exception {
+            postCommitCalls++;
             onPostCommit.run();
             if (failPostCommit) {
                 throw new IllegalStateException("post commit failed");

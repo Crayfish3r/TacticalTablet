@@ -277,45 +277,38 @@ public class GameStateManager {
 
     public static void startGame(MinecraftServer server) {
         if (server == null) return;
-        if (startGameThroughCoordinator(server)) return;
-
-        if (!validateRuntimeRequirements(server)) {
-            setGameState(server, WAITING);
-            broadcast(server, "[WAR] Старт матча отменён: сервер настроен не полностью. Проверь лог.");
-            return;
-        }
-
-        broadcast(server, "[WAR] Матч начался. Выбери класс и используй RTP.");
+        handleStartResult(server, MATCH_START_COORDINATOR.start(server));
     }
 
-    private static boolean startGameThroughCoordinator(MinecraftServer server) {
-        MatchStartResult result = MATCH_START_COORDINATOR.start(server);
-        if (result.started()) {
-            return true;
+    private static void handleStartResult(MinecraftServer server, MatchStartResult result) {
+        switch (result.status()) {
+            case STARTED -> {
+            }
+            case REJECTED -> handleRejectedStart(server, result);
+            case ALREADY_STARTING -> broadcast(server, "[WAR] Match start is already in progress.");
+            case ALREADY_RUNNING -> broadcast(server, "[WAR] Match is already running.");
+            case BLOCKED_REQUIRES_CLEANUP -> broadcast(server,
+                    "[WAR] New match start blocked: previous start attempt requires cleanup.");
+            case FAILED_ROLLED_BACK -> broadcast(server,
+                    "[WAR] Match start failed and was rolled back. Check the log.");
+            case FAILED_REQUIRES_CLEANUP -> broadcast(server,
+                    "[WAR] Match start failed. Cleanup is required; check the log.");
+            case STALE_OPERATION -> TacticalTabletMod.LOGGER.warn(
+                    "Stale match start operation rejected: {}", result.diagnostic());
         }
+    }
 
-        if (result.status() == MatchStartStatus.REJECTED
-                && result.rejectionReason() == MatchStartRejectionReason.RUNTIME_REQUIREMENTS_FAILED) {
+    private static void handleRejectedStart(MinecraftServer server, MatchStartResult result) {
+        if (result.rejectionReason() == MatchStartRejectionReason.RUNTIME_REQUIREMENTS_FAILED) {
             broadcast(server, "[WAR] Match start cancelled: server setup is incomplete. Check the log.");
-            return true;
+            return;
         }
-
-        if (result.status() == MatchStartStatus.FAILED_REQUIRES_CLEANUP) {
-            broadcast(server, "[WAR] Match start failed. Cleanup is required; check the log.");
-            return true;
+        if (result.rejectionReason() == MatchStartRejectionReason.INSUFFICIENT_PLAYERS) {
+            broadcast(server, "[WAR] Match start cancelled: not enough players.");
+            return;
         }
-
-        if (result.status() == MatchStartStatus.REJECTED
-                && result.rejectionReason() == MatchStartRejectionReason.RUNTIME_REQUIREMENTS_FAILED) {
-            broadcast(server, "[WAR] РЎС‚Р°СЂС‚ РјР°С‚С‡Р° РѕС‚РјРµРЅС‘РЅ: СЃРµСЂРІРµСЂ РЅР°СЃС‚СЂРѕРµРЅ РЅРµ РїРѕР»РЅРѕСЃС‚СЊСЋ. РџСЂРѕРІРµСЂСЊ Р»РѕРі.");
-            return true;
-        }
-
-        if (result.status() == MatchStartStatus.FAILED_REQUIRES_CLEANUP) {
-            broadcast(server, "[WAR] РЎС‚Р°СЂС‚ РјР°С‚С‡Р° РїСЂРµСЂРІР°РЅ. РўСЂРµР±СѓРµС‚СЃСЏ cleanup; РїСЂРѕРІРµСЂСЊ Р»РѕРі.");
-        }
-
-        return true;
+        TacticalTabletMod.LOGGER.warn("Match start rejected reason={} diagnostic={}",
+                result.rejectionReason(), result.diagnostic());
     }
 
     private static String clanWarWinnerLabel(ServerPlayer winner) {
@@ -910,7 +903,8 @@ public class GameStateManager {
                 }
                 case EXECUTE_START_DATAPACK -> {
                     CommandSourceStack source = server.createCommandSourceStack().withSuppressedOutput();
-                    server.getCommands().performPrefixedCommand(source, "function " + START_GAME_FUNCTION);
+                    int result = server.getCommands().performPrefixedCommand(source, "function " + START_GAME_FUNCTION);
+                    requireDatapackCommandSuccess(START_GAME_FUNCTION, result);
                 }
                 case ANNOUNCE_MAP_START -> MapSetManager.announceGameStart(server);
                 case ENFORCE_GAME_RULES -> DropControlManager.enforceGameRules(server);
@@ -926,6 +920,9 @@ public class GameStateManager {
                 case SYNC_CLASS_XP -> ClassXPManager.syncAll(server);
                 case SET_LEGACY_RUNNING -> {
                     setGameState(server, RUNNING);
+                    if (getGameState(server) != RUNNING) {
+                        throw new IllegalStateException("legacy scoreboard did not commit RUNNING state");
+                    }
                     matchPhase = MatchPhase.RUNNING;
                 }
             }
@@ -936,6 +933,9 @@ public class GameStateManager {
             switch (step) {
                 case SET_LEGACY_RUNNING -> {
                     setGameState(server, WAITING);
+                    if (getGameState(server) != WAITING) {
+                        throw new IllegalStateException("legacy scoreboard did not rollback to WAITING state");
+                    }
                     matchPhase = MatchPhase.WAITING;
                 }
                 case SYNC_CLASS_XP -> {
@@ -954,7 +954,8 @@ public class GameStateManager {
                 }
                 case EXECUTE_START_DATAPACK -> {
                     CommandSourceStack source = server.createCommandSourceStack().withSuppressedOutput();
-                    server.getCommands().performPrefixedCommand(source, "function " + RESET_GAME_FUNCTION);
+                    int result = server.getCommands().performPrefixedCommand(source, "function " + RESET_GAME_FUNCTION);
+                    requireDatapackCommandSuccess(RESET_GAME_FUNCTION, result);
                 }
                 case RESET_MATCH_COUNTERS -> {
                     matchStartingParticipants = 0;
@@ -987,8 +988,13 @@ public class GameStateManager {
         }
 
         @Override
-        public void postCommit(MinecraftServer server) {
-            broadcast(server, "[WAR] РњР°С‚С‡ РЅР°С‡Р°Р»СЃСЏ. Р’С‹Р±РµСЂРё РєР»Р°СЃСЃ Рё РёСЃРїРѕР»СЊР·СѓР№ RTP.");
+        public void postCommit(MinecraftServer server) throws Exception {
+            List<String> matchProgressFailures = recordMatchesPlayedAfterCommit(server);
+            broadcast(server, "[WAR] Match started. Choose a class and use RTP.");
+            if (!matchProgressFailures.isEmpty()) {
+                throw new IllegalStateException("matchesPlayed post-commit update failed for "
+                        + matchProgressFailures.size() + " player(s)");
+            }
         }
 
         private void initializePlayers(MinecraftServer server) {
@@ -996,7 +1002,6 @@ public class GameStateManager {
             try {
                 for (ServerPlayer player : server.getPlayerList().getPlayers()) {
                     LivesManager.ensureStarted(player);
-                    PlayerProgressManager.addMatchPlayed(player);
                     player.removeTag("war.eliminated");
                     player.removeTag("war.playing");
                     player.addTag("in_lobby");
@@ -1016,6 +1021,27 @@ public class GameStateManager {
                 player.removeTag("in_lobby");
                 LobbyManager.moveToLobby(player);
                 ClassXPManager.sync(player);
+            }
+        }
+
+        private List<String> recordMatchesPlayedAfterCommit(MinecraftServer server) {
+            List<String> failures = new ArrayList<>();
+            for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+                try {
+                    PlayerProgressManager.addMatchPlayed(player);
+                } catch (Exception exception) {
+                    String playerLabel = player.getGameProfile().getName() + " (" + player.getUUID() + ")";
+                    failures.add(playerLabel + ": " + exception.getClass().getSimpleName());
+                    TacticalTabletMod.LOGGER.warn("Failed to record post-commit matchesPlayed for {}",
+                            playerLabel, exception);
+                }
+            }
+            return failures;
+        }
+
+        private void requireDatapackCommandSuccess(ResourceLocation functionId, int result) {
+            if (result <= 0) {
+                throw new IllegalStateException("datapack function " + functionId + " returned " + result);
             }
         }
     }

@@ -66,22 +66,26 @@ public final class MatchStartCoordinator {
 
         UUID matchId = prepared.matchId().orElseThrow();
         MatchTransitionResult starting = lifecycleService.markStarting(matchId);
-        if (starting.status() != MatchTransitionStatus.APPLIED) {
-            lifecycleService.markFailed(matchId, MatchFailure.of(
+        if (!transitionReached(starting, MatchState.STARTING)) {
+            List<String> cleanupFailures = new ArrayList<>();
+            MatchTransitionResult failed = lifecycleService.markFailed(matchId, MatchFailure.of(
                     MatchFailureStage.PREPARATION,
                     starting.diagnostic().orElse("failed to enter STARTING")
             ));
-            lifecycleService.markIdle(matchId);
+            collectUnexpectedTransition(cleanupFailures, "markFailed", failed, MatchState.FAILED);
+            cleanupFailures.addAll(transitionToIdleAfterRollback(matchId));
             return new MatchStartResult(
-                    MatchStartStatus.FAILED_ROLLED_BACK,
+                    cleanupFailures.isEmpty()
+                            ? MatchStartStatus.FAILED_ROLLED_BACK
+                            : MatchStartStatus.FAILED_REQUIRES_CLEANUP,
                     Optional.of(matchId),
                     initialSnapshot.state(),
                     lifecycleService.snapshot().state(),
                     Optional.empty(),
                     MatchStartRejectionReason.UNKNOWN,
-                    starting.diagnostic().orElse("failed to enter STARTING"),
+                    transitionDiagnostic("markStarting", starting),
                     List.of(),
-                    List.of()
+                    cleanupFailures
             );
         }
 
@@ -90,16 +94,18 @@ public final class MatchStartCoordinator {
         try {
             for (MatchStartStep step : START_STEPS) {
                 gateway.apply(server, step);
-                completed.add(step);
                 MatchTransitionResult recorded = lifecycleService.recordCompletedStep(matchId, step.name());
-                if (recorded.status() == MatchTransitionStatus.REJECTED || recorded.status() == MatchTransitionStatus.FAILED) {
-                    throw new MatchStartFailure(step, recorded.diagnostic().orElse("failed to record completed step"));
+                if (recorded.status() != MatchTransitionStatus.APPLIED
+                        || recorded.currentState() != MatchState.STARTING) {
+                    throw new MatchStartFailure(step, transitionDiagnostic("recordCompletedStep " + step.name(), recorded));
                 }
+                completed.add(step);
             }
 
             MatchTransitionResult running = lifecycleService.markRunning(matchId);
-            if (running.status() != MatchTransitionStatus.APPLIED && running.status() != MatchTransitionStatus.NO_OP) {
-                throw new MatchStartFailure(null, running.diagnostic().orElse("failed to enter RUNNING"));
+            if (!transitionReached(running, MatchState.RUNNING)
+                    || running.status() != MatchTransitionStatus.APPLIED) {
+                throw new MatchStartFailure(null, transitionDiagnostic("markRunning", running));
             }
 
             try {
@@ -127,11 +133,18 @@ public final class MatchStartCoordinator {
                     : nextFailedStep(completed);
             String failureDiagnostic = diagnostic(failedStep == null ? "markRunning" : failedStep.name(), exception);
             TacticalTabletMod.LOGGER.error("Match start failed matchId={} step={}: {}", matchId, failedStep, failureDiagnostic, exception);
-            lifecycleService.markFailed(matchId, MatchFailure.from(MatchFailureStage.STARTING, exception));
+            List<String> lifecycleFailures = new ArrayList<>();
+            MatchTransitionResult failed = lifecycleService.markFailed(matchId, MatchFailure.from(MatchFailureStage.STARTING, exception));
+            collectUnexpectedTransition(lifecycleFailures, "markFailed", failed, MatchState.FAILED);
 
-            List<String> rollbackFailures = rollback(server, completed);
+            List<String> rollbackFailures = rollback(server, completed, failedStep);
             if (rollbackFailures.isEmpty()) {
-                lifecycleService.markIdle(matchId);
+                lifecycleFailures.addAll(transitionToIdleAfterRollback(matchId));
+            }
+
+            List<String> failures = new ArrayList<>(lifecycleFailures);
+            failures.addAll(rollbackFailures);
+            if (failures.isEmpty()) {
                 return new MatchStartResult(
                         MatchStartStatus.FAILED_ROLLED_BACK,
                         Optional.of(matchId),
@@ -141,7 +154,7 @@ public final class MatchStartCoordinator {
                         MatchStartRejectionReason.NONE,
                         failureDiagnostic,
                         warnings,
-                        rollbackFailures
+                        failures
                 );
             }
 
@@ -154,7 +167,7 @@ public final class MatchStartCoordinator {
                     MatchStartRejectionReason.NONE,
                     failureDiagnostic,
                     warnings,
-                    rollbackFailures
+                    failures
             );
         }
     }
@@ -170,9 +183,18 @@ public final class MatchStartCoordinator {
         }
         UUID matchId = snapshot.matchId().orElseThrow();
         if (snapshot.state() != MatchState.CLEANING) {
-            lifecycleService.beginCleanup(matchId);
+            MatchTransitionResult cleanup = lifecycleService.beginCleanup(matchId);
+            if (!transitionReached(cleanup, MatchState.CLEANING)) {
+                TacticalTabletMod.LOGGER.warn("Match lifecycle cleanup transition was not applied: {}",
+                        transitionDiagnostic("beginCleanup", cleanup));
+                return;
+            }
         }
-        lifecycleService.markIdle(matchId);
+        MatchTransitionResult idle = lifecycleService.markIdle(matchId);
+        if (!transitionReached(idle, MatchState.IDLE)) {
+            TacticalTabletMod.LOGGER.warn("Match lifecycle idle transition was not applied: {}",
+                    transitionDiagnostic("markIdle", idle));
+        }
     }
 
     public static List<MatchStartStep> startSteps() {
@@ -183,7 +205,8 @@ public final class MatchStartCoordinator {
         MatchStartStatus status = switch (snapshot.state()) {
             case PREPARING -> MatchStartStatus.ALREADY_STARTING;
             case STARTING -> MatchStartStatus.ALREADY_STARTING;
-            case RUNNING, ENDING, CLEANING, FAILED -> MatchStartStatus.ALREADY_RUNNING;
+            case RUNNING, ENDING -> MatchStartStatus.ALREADY_RUNNING;
+            case CLEANING, FAILED -> MatchStartStatus.BLOCKED_REQUIRES_CLEANUP;
             case IDLE -> MatchStartStatus.REJECTED;
         };
         return new MatchStartResult(
@@ -199,19 +222,25 @@ public final class MatchStartCoordinator {
         );
     }
 
-    private List<String> rollback(MinecraftServer server, List<MatchStartStep> completed) {
+    private List<String> rollback(MinecraftServer server, List<MatchStartStep> completed, MatchStartStep failedStep) {
         List<String> failures = new ArrayList<>();
+        if (failedStep != null && START_STEPS.contains(failedStep) && !completed.contains(failedStep)) {
+            rollbackStep(server, failedStep, failures);
+        }
         for (int i = completed.size() - 1; i >= 0; i--) {
-            MatchStartStep step = completed.get(i);
-            try {
-                gateway.rollback(server, step);
-            } catch (Exception rollbackException) {
-                String diagnostic = diagnostic(step.name(), rollbackException);
-                failures.add(diagnostic);
-                TacticalTabletMod.LOGGER.error("Match start rollback failed step={}: {}", step, diagnostic, rollbackException);
-            }
+            rollbackStep(server, completed.get(i), failures);
         }
         return failures;
+    }
+
+    private void rollbackStep(MinecraftServer server, MatchStartStep step, List<String> failures) {
+        try {
+            gateway.rollback(server, step);
+        } catch (Exception rollbackException) {
+            String diagnostic = diagnostic(step.name(), rollbackException);
+            failures.add(diagnostic);
+            TacticalTabletMod.LOGGER.error("Match start rollback failed step={}: {}", step, diagnostic, rollbackException);
+        }
     }
 
     private static MatchStartStep nextFailedStep(List<MatchStartStep> completed) {
@@ -229,6 +258,46 @@ public final class MatchStartCoordinator {
         }
         String diagnostic = stage + ": " + exception.getClass().getSimpleName() + ": " + message;
         return diagnostic.length() <= 512 ? diagnostic : diagnostic.substring(0, 512);
+    }
+
+    private List<String> transitionToIdleAfterRollback(UUID matchId) {
+        List<String> failures = new ArrayList<>();
+        MatchTransitionResult cleanup = lifecycleService.beginCleanup(matchId);
+        collectUnexpectedTransition(failures, "beginCleanup", cleanup, MatchState.CLEANING);
+        if (transitionReached(cleanup, MatchState.CLEANING)) {
+            MatchTransitionResult idle = lifecycleService.markIdle(matchId);
+            collectUnexpectedTransition(failures, "markIdle", idle, MatchState.IDLE);
+        }
+        return failures;
+    }
+
+    private static void collectUnexpectedTransition(
+            List<String> failures,
+            String stage,
+            MatchTransitionResult result,
+            MatchState expectedState
+    ) {
+        if (!transitionReached(result, expectedState)) {
+            failures.add(transitionDiagnostic(stage, result));
+        }
+    }
+
+    private static boolean transitionReached(MatchTransitionResult result, MatchState expectedState) {
+        return result != null
+                && (result.status() == MatchTransitionStatus.APPLIED || result.status() == MatchTransitionStatus.NO_OP)
+                && result.currentState() == expectedState;
+    }
+
+    private static String transitionDiagnostic(String stage, MatchTransitionResult result) {
+        if (result == null) {
+            return stage + ": missing transition result";
+        }
+        String diagnostic = result.diagnostic().orElse("no diagnostic");
+        String message = stage + ": " + result.status()
+                + " " + result.previousState()
+                + " -> " + result.currentState()
+                + ": " + diagnostic;
+        return message.length() <= 512 ? message : message.substring(0, 512);
     }
 
     private static final class MatchStartFailure extends Exception {
