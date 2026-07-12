@@ -213,10 +213,10 @@ public final class DiscordLeaderboardService {
             }
         }
 
-        List<MatchStats> matchSnapshot = new ArrayList<>();
-        for (MatchStats stats : currentMatchStats.values()) {
-            matchSnapshot.add(stats.snapshot());
-        }
+        List<MatchPlayerStatsSnapshot> finalizedSnapshot = finalizeMatchStatistics(server);
+        List<MatchStats> matchSnapshot = finalizedSnapshot.stream()
+                .map(MatchStats::fromSnapshot)
+                .toList();
 
         for (MatchStats stats : matchSnapshot) {
             currentSetStats.computeIfAbsent(stats.uuid, ignored -> new MatchStats(
@@ -256,6 +256,13 @@ public final class DiscordLeaderboardService {
         }
 
         SetWinner setWinner = findSetWinner(server);
+        if (currentSetCompetitive && setWinner != null) {
+            if (!PlayerProgressManager.addCoins(server, setWinner.uuid(), setWinner.name(), 100)) {
+                TacticalTabletMod.LOGGER.error("Failed to award 100 competitive-set coins to {} ({})",
+                        setWinner.name(), setWinner.uuid());
+            }
+            refreshSetCoinBalances(server);
+        }
         sendCurrentSetReport(server);
         currentSetStats.clear();
         currentSetStartedAtMillis = 0L;
@@ -266,6 +273,20 @@ public final class DiscordLeaderboardService {
         currentSetMap = "";
         deleteSetState();
         return setWinner;
+    }
+
+    static synchronized List<MatchPlayerStatsSnapshot> finalizeMatchStatistics(MinecraftServer server) {
+        List<MatchPlayerStatsSnapshot> snapshot = new ArrayList<>();
+        for (MatchStats stats : currentMatchStats.values()) {
+            snapshot.add(stats.toSnapshot(server));
+        }
+        return List.copyOf(snapshot);
+    }
+
+    private static void refreshSetCoinBalances(MinecraftServer server) {
+        for (MatchStats stats : currentSetStats.values()) {
+            stats.refreshCoinBalance(server);
+        }
     }
 
     private static synchronized void loadSetState(MinecraftServer server) {
@@ -737,7 +758,7 @@ public final class DiscordLeaderboardService {
                 .append("Урон: **`").append(formatDamage(stats.damage)).append("`**  ")
                 .append("Смерти: `").append(stats.deaths).append("`  ")
                 .append("У/С: `").append(stats.formattedKd()).append("`  ")
-                .append("Монеты: `").append(stats.coinsEarned()).append("`\n");
+                .append("Баланс: `").append(stats.coinBalance()).append("`\n");
     }
 
     private static void appendMatchPlayerRow(StringBuilder description, int place, MatchStats stats) {
@@ -753,7 +774,7 @@ public final class DiscordLeaderboardService {
                 .append("Урон: **`").append(formatDamage(stats.damage)).append("`**  ")
                 .append("Смерти: `").append(stats.deaths).append("`  ")
                 .append("У/С: `").append(stats.formattedKd()).append("`  ")
-                .append("Монеты: `").append(stats.coinsEarned()).append("`\n");
+                .append("Баланс: `").append(stats.coinBalance()).append("`\n");
     }
 
     private static void appendTeamMatchResults(
@@ -782,7 +803,7 @@ public final class DiscordLeaderboardService {
                             .append("Урон: **`0.0`**  ")
                             .append("Смерти: `0`  ")
                             .append("У/С: `0.00`  ")
-                            .append("Монеты: `0`\n");
+                            .append("Баланс: `0`\n");
                 } else {
                     appendTeamPlayerRow(description, stats);
                 }
@@ -806,7 +827,7 @@ public final class DiscordLeaderboardService {
                 .append("Урон: **`").append(formatDamage(stats.damage)).append("`**  ")
                 .append("Смерти: `").append(stats.deaths).append("`  ")
                 .append("У/С: `").append(stats.formattedKd()).append("`  ")
-                .append("Монеты: `").append(stats.coinsEarned()).append("`\n");
+                .append("Баланс: `").append(stats.coinBalance()).append("`\n");
     }
 
     private static void appendHeaderLine(StringBuilder description, String label, String value) {
@@ -949,6 +970,7 @@ public final class DiscordLeaderboardService {
         private int wins;
         private double damage;
         private int teamKills;
+        private int coinBalance;
 
         private MatchStats(String name) {
             this("", name);
@@ -961,6 +983,20 @@ public final class DiscordLeaderboardService {
 
         private static MatchStats fromPlayer(ServerPlayer player) {
             return new MatchStats(player.getStringUUID(), player.getGameProfile().getName());
+        }
+
+        private static MatchStats fromSnapshot(MatchPlayerStatsSnapshot snapshot) {
+            MatchStats stats = new MatchStats(
+                    snapshot.playerId() == null ? "" : snapshot.playerId().toString(),
+                    snapshot.playerName()
+            );
+            stats.kills = snapshot.kills();
+            stats.deaths = snapshot.deaths();
+            stats.wins = snapshot.wins();
+            stats.damage = snapshot.actualHealthDamage();
+            stats.teamKills = snapshot.teamKills();
+            stats.coinBalance = snapshot.actualCoinBalance();
+            return stats;
         }
 
         private synchronized void addKill() {
@@ -986,7 +1022,32 @@ public final class DiscordLeaderboardService {
             copy.wins = wins;
             copy.damage = damage;
             copy.teamKills = teamKills;
+            copy.coinBalance = coinBalance;
             return copy;
+        }
+
+        private synchronized MatchPlayerStatsSnapshot toSnapshot(MinecraftServer server) {
+            UUID playerId = parseUuid(uuid);
+            int actualBalance = playerId == null
+                    ? Math.max(0, coinBalance)
+                    : PlayerProgressManager.getCoins(server, playerId, name);
+            return new MatchPlayerStatsSnapshot(
+                    playerId,
+                    name,
+                    kills,
+                    deaths,
+                    damage,
+                    actualBalance,
+                    wins,
+                    teamKills
+            );
+        }
+
+        private synchronized void refreshCoinBalance(MinecraftServer server) {
+            UUID playerId = parseUuid(uuid);
+            if (playerId != null) {
+                coinBalance = PlayerProgressManager.getCoins(server, playerId, name);
+            }
         }
 
         private double kd() {
@@ -997,13 +1058,12 @@ public final class DiscordLeaderboardService {
             return String.format(Locale.US, "%.2f", kd());
         }
 
-        private int coinsEarned() {
-            return kills * PlayerProgressManager.KILL_COIN_REWARD
-                    + wins * PlayerProgressManager.WIN_COIN_REWARD;
+        private int coinBalance() {
+            return Math.max(0, coinBalance);
         }
 
         private PlayerStats toPlayerStats() {
-            return new PlayerStats(name, kills, deaths, wins, 1, coinsEarned());
+            return new PlayerStats(name, kills, deaths, wins, 1, coinBalance());
         }
 
         private synchronized void merge(MatchStats other) {
@@ -1013,6 +1073,16 @@ public final class DiscordLeaderboardService {
             wins += other.wins;
             damage += other.damage;
             teamKills += other.teamKills;
+            coinBalance = other.coinBalance;
+        }
+
+        private static UUID parseUuid(String value) {
+            if (value == null || value.isBlank()) return null;
+            try {
+                return UUID.fromString(value);
+            } catch (RuntimeException exception) {
+                return null;
+            }
         }
 
         private static String sanitizeName(String value) {

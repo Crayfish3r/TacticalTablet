@@ -21,6 +21,7 @@ import com.makar.tacticaltablet.game.teleport.SafeTeleport;
 import com.makar.tacticaltablet.game.team.TeamMatchManager;
 import com.makar.tacticaltablet.game.team.TeamId;
 import com.makar.tacticaltablet.game.zone.ZoneManager;
+import com.makar.tacticaltablet.integration.discord.MatchDamageAccounting;
 import com.makar.tacticaltablet.integration.discord.DiscordLeaderboardService;
 import com.makar.tacticaltablet.integration.discord.DiscordWebhookClient;
 import com.makar.tacticaltablet.integration.discord.LeaderboardScheduler;
@@ -52,6 +53,7 @@ import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.level.GameRules;
 import net.minecraft.world.level.GameType;
 import net.minecraftforge.event.TickEvent;
+import net.minecraftforge.event.entity.living.LivingDamageEvent;
 import net.minecraftforge.event.entity.living.LivingDeathEvent;
 import net.minecraftforge.event.entity.living.LivingDropsEvent;
 import net.minecraftforge.event.entity.living.LivingHurtEvent;
@@ -224,14 +226,40 @@ public class ServerEvents {
                 return;
             }
 
-            if (event.getAmount() > 0.0F) {
-                DiscordLeaderboardService.recordMatchDamage(attacker, event.getAmount());
-            }
         } finally {
             long elapsedMs = (System.nanoTime() - started) / 1_000_000L;
             if (elapsedMs >= 5L) {
                 TacticalTabletMod.LOGGER.warn("[PERF] onLivingHurt took {} ms victim={}", elapsedMs, player.getGameProfile().getName());
             }
+        }
+    }
+
+    @SubscribeEvent
+    public static void onLivingDamage(LivingDamageEvent event) {
+        if (event.isCanceled()) return;
+        if (!(event.getEntity() instanceof ServerPlayer victim)) return;
+        if (!(event.getSource().getEntity() instanceof ServerPlayer attacker)) return;
+        if (attacker.getUUID().equals(victim.getUUID())) return;
+
+        boolean attackerParticipant = attacker.getTags().contains("war.playing")
+                && LivesManager.isAliveParticipant(attacker);
+        boolean victimParticipant = victim.getTags().contains("war.playing")
+                && LivesManager.isAliveParticipant(victim);
+        boolean friendlyFire = GameStateManager.getCurrentMode().isTeamMode()
+                && TeamMatchManager.areTeammates(attacker, victim);
+        double actualHealthLost = MatchDamageAccounting.actualHealthLostFromFinalDamage(
+                victim.getHealth(),
+                event.getAmount()
+        );
+
+        if (MatchDamageAccounting.shouldRecordDamage(
+                event.isCanceled(),
+                friendlyFire,
+                attackerParticipant,
+                victimParticipant,
+                actualHealthLost
+        )) {
+            DiscordLeaderboardService.recordMatchDamage(attacker, actualHealthLost);
         }
     }
 
@@ -313,6 +341,24 @@ public class ServerEvents {
         long started = System.nanoTime();
 
         try {
+            boolean participating = isActiveMatchParticipant(victim);
+            processPlayerDeath(victim, event.getSource());
+            if (participating) {
+                GameStateManager.checkForMatchEnd(victim.server);
+            }
+        } finally {
+            long elapsedMs = (System.nanoTime() - started) / 1_000_000L;
+            if (elapsedMs >= 10L) {
+                TacticalTabletMod.LOGGER.warn("[PERF] onDeath took {} ms victim={}", elapsedMs, victim.getGameProfile().getName());
+            }
+        }
+    }
+
+    private static boolean isActiveMatchParticipant(ServerPlayer player) {
+        return player != null && player.getTags().contains("war.playing");
+    }
+
+    private static void processPlayerDeath(ServerPlayer victim, DamageSource source) {
         SpectatorCameraManager.onPlayerDeath(victim);
 
         if (GameStateManager.isRunning(victim.server)
@@ -320,9 +366,7 @@ public class ServerEvents {
             VoiceChatTeamManager.removePlayerFromVoiceGroup(victim);
         }
 
-        DamageSource source = event.getSource();
         Set<String> victimTags = victim.getTags();
-
         boolean victimWasPlaying = victimTags.contains("war.playing");
         boolean victimWasInLobby = victimTags.contains("in_lobby") || GameStateManager.isInLobby(victim);
 
@@ -330,25 +374,31 @@ public class ServerEvents {
             return;
         }
 
-        if (victimWasPlaying) {
-            DeathTransitionManager.recordDeath(victim, source);
-            CorpseLootManager.createCorpse(victim);
-            PlayerProgressManager.addDeath(victim);
-            DiscordLeaderboardService.recordMatchDeath(victim);
-            LivesManager.handleDeath(victim);
-            ContractManager.onPlayerKilled(victim, source.getEntity() instanceof ServerPlayer killer ? killer : null);
-            ExtractionPointManager.onPlayerDeathOrLogout(victim);
-            ClassXPManager.sync(victim);
-            if (source.getEntity() instanceof ServerPlayer syncKiller
-                    && !syncKiller.getUUID().equals(victim.getUUID())) {
-                ClassXPManager.sync(syncKiller);
-            }
-            GameStateManager.checkForMatchEnd(victim.server);
+        if (!victimWasPlaying) {
+            return;
         }
 
-        if (!(source.getEntity() instanceof ServerPlayer killer)) return;
+        ServerPlayer killer = source.getEntity() instanceof ServerPlayer sourceKiller ? sourceKiller : null;
+
+        DeathTransitionManager.recordDeath(victim, source);
+        CorpseLootManager.createCorpse(victim);
+        PlayerProgressManager.addDeath(victim);
+        DiscordLeaderboardService.recordMatchDeath(victim);
+        LivesManager.handleDeath(victim);
+
+        processKillerConsequences(victim, source, killer);
+
+        ContractManager.onPlayerKilled(victim, killer);
+        ExtractionPointManager.onPlayerDeathOrLogout(victim);
+        ClassXPManager.sync(victim);
+        if (killer != null && !killer.getUUID().equals(victim.getUUID())) {
+            ClassXPManager.sync(killer);
+        }
+    }
+
+    private static void processKillerConsequences(ServerPlayer victim, DamageSource source, ServerPlayer killer) {
+        if (killer == null) return;
         if (!killer.getTags().contains("war.playing")) return;
-        if (!victimWasPlaying) return;
         if (killer.getUUID().equals(victim.getUUID())) return;
 
         Entity direct = source.getDirectEntity();
@@ -374,7 +424,6 @@ public class ServerEvents {
         PlayerProgressManager.addKill(killer);
         DiscordLeaderboardService.recordMatchKill(killer);
         PlayerProgressManager.addCoins(killer, PlayerProgressManager.KILL_COIN_REWARD);
-        ClassXPManager.sync(killer);
 
         String clazz = PlayerTabletState.getSelectedClass(killer);
         if (clazz == null || clazz.isBlank()) return;
@@ -384,13 +433,8 @@ public class ServerEvents {
 
         int awardedXp = ClassXPManager.addXP(killer, clazz, result.xp);
         XpNotifier.send(killer, awardedXp, result.reason);
-        } finally {
-            long elapsedMs = (System.nanoTime() - started) / 1_000_000L;
-            if (elapsedMs >= 10L) {
-                TacticalTabletMod.LOGGER.warn("[PERF] onDeath took {} ms victim={}", elapsedMs, victim.getGameProfile().getName());
-            }
-        }
     }
+
 
     private static void banTeamKiller(ServerPlayer player, int teamKills) {
         Date createdAt = new Date();

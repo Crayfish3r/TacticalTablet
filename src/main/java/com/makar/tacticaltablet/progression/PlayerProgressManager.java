@@ -608,6 +608,10 @@ public class PlayerProgressManager {
         return progress.coins;
     }
 
+    public static synchronized int getCoins(MinecraftServer server, UUID uuid) {
+        return getCoins(server, uuid, "");
+    }
+
     public static synchronized boolean setCoins(MinecraftServer server, UUID uuid, String lastKnownName, int amount) {
         if (server == null || uuid == null) return false;
 

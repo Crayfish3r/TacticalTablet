@@ -159,11 +159,12 @@ public class GameStateManager {
 
     public static boolean isTabletAvailableInLobby(MinecraftServer server) {
         if (server == null) return false;
-        return isRunning(server)
-                || startTransitionPlayerSetup
-                || (MapSetManager.isClanWarSet() && matchPhase == MatchPhase.WAITING)
-                || matchPhase == MatchPhase.VOTING
-                || matchPhase == MatchPhase.TEAM_SELECT;
+        return TabletLobbyPolicy.isTabletAvailable(
+                isRunning(server),
+                startTransitionPlayerSetup,
+                MapSetManager.isClanWarSet(),
+                matchPhase
+        );
     }
 
     public static boolean isInLobby(ServerPlayer player) {
@@ -353,25 +354,22 @@ public class GameStateManager {
         ExtractionPointManager.reset(server);
         boolean clanWarSet = MapSetManager.isClanWarSet();
         boolean setComplete = MapSetManager.onGameCompleted(server);
-        DiscordLeaderboardService.SetWinner setWinner =
-                DiscordLeaderboardService.sendCurrentMatchLeaderboard(server, normalizedWinners(winners, displayWinner), setComplete, clanWarSet);
+        List<ServerPlayer> normalizedWinners = normalizedWinners(winners, displayWinner);
 
-        if (setComplete && MapSetManager.isCompetitiveSet() && setWinner != null) {
-            if (PlayerProgressManager.addCoins(server, setWinner.uuid(), 100)) {
-                broadcast(server, "[WAR] Победитель соревновательного сета " + setWinner.name()
-                        + " получает 100 монет для casual-режима.");
-            } else {
-                TacticalTabletMod.LOGGER.error("Failed to award 100 competitive-set coins to {} ({})",
-                        setWinner.name(), setWinner.uuid());
-            }
-        }
-
-        for (ServerPlayer winner : normalizedWinners(winners, displayWinner)) {
+        for (ServerPlayer winner : normalizedWinners) {
             PlayerProgressManager.addWin(winner);
             PlayerProgressManager.addCoins(winner, PlayerProgressManager.WIN_COIN_REWARD);
             ClassXPManager.addXPToAllClasses(winner, WIN_XP_ALL_CLASSES);
             PlayerProgressManager.savePlayer(winner);
             ClassXPManager.sync(winner);
+        }
+
+        DiscordLeaderboardService.SetWinner setWinner =
+                DiscordLeaderboardService.sendCurrentMatchLeaderboard(server, normalizedWinners, setComplete, clanWarSet);
+
+        if (setComplete && MapSetManager.isCompetitiveSet() && setWinner != null) {
+            broadcast(server, "[WAR] Победитель соревновательного сета " + setWinner.name()
+                    + " получает 100 монет для casual-режима.");
         }
 
         showWinnerTitle(server, winnerName, winnerTeam);

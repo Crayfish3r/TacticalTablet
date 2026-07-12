@@ -10,6 +10,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GameStateManagerCharacterizationTest {
@@ -68,5 +69,31 @@ class GameStateManagerCharacterizationTest {
                 LegacyMatchStateMapper.fromLegacyState(1, 1, MatchPhase.RUNNING));
         assertEquals(MatchState.ENDING,
                 LegacyMatchStateMapper.fromLegacyState(1, 0, MatchPhase.POST_GAME));
+    }
+
+    @Test
+    void tabletLobbyPolicyAllowsVotingTeamSelectAndMapVoting() {
+        assertTrue(TabletLobbyPolicy.isTabletAvailable(
+                false, false, false, MatchPhase.VOTING));
+        assertTrue(TabletLobbyPolicy.isTabletAvailable(
+                false, false, false, MatchPhase.TEAM_SELECT));
+        assertTrue(TabletLobbyPolicy.isTabletAvailable(
+                false, false, false, MatchPhase.MAP_VOTING));
+    }
+
+    @Test
+    void tabletLobbyPolicyDoesNotAllowPlainWaitingWithoutSpecialCondition() {
+        assertFalse(TabletLobbyPolicy.isTabletAvailable(
+                false, false, false, MatchPhase.WAITING));
+    }
+
+    @Test
+    void tabletLobbyPolicyKeepsClanWarWaitingAndStartTransitionBehavior() {
+        assertTrue(TabletLobbyPolicy.isTabletAvailable(
+                false, false, true, MatchPhase.WAITING));
+        assertFalse(TabletLobbyPolicy.isTabletAvailable(
+                false, false, true, MatchPhase.RESTARTING));
+        assertTrue(TabletLobbyPolicy.isTabletAvailable(
+                false, true, false, MatchPhase.RESTARTING));
     }
 }

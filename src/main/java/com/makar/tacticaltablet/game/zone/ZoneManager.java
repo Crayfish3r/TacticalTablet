@@ -5,6 +5,7 @@ import com.google.gson.GsonBuilder;
 import com.google.gson.JsonSyntaxException;
 import com.makar.tacticaltablet.core.TacticalTabletMod;
 import com.makar.tacticaltablet.game.GameStateManager;
+import com.makar.tacticaltablet.game.lives.LivesManager;
 import com.makar.tacticaltablet.game.respawn.RespawnControlManager;
 
 import net.minecraft.network.chat.Component;
@@ -14,6 +15,8 @@ import net.minecraft.server.level.ServerBossEvent;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.BossEvent;
+import net.minecraft.world.effect.MobEffectInstance;
+import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.level.border.WorldBorder;
 import net.minecraft.world.level.storage.LevelResource;
 
@@ -36,6 +39,10 @@ public final class ZoneManager {
     private static final double DEFAULT_CENTER_Z = 0.0D;
     private static final int DEFAULT_RANDOM_RADIUS = 100;
     private static final int MAX_RANDOM_RADIUS = 10000;
+    private static final int SMALL_MATCH_MAX_PLAYERS = ZonePacingPolicy.SMALL_MATCH_MAX_PLAYERS;
+    private static final double SMALL_MATCH_INITIAL_ZONE_SIZE = ZonePacingPolicy.SMALL_MATCH_INITIAL_ZONE_SIZE;
+    private static final int FINAL_REVEAL_INTERVAL_SECONDS = ZonePacingPolicy.FINAL_REVEAL_INTERVAL_SECONDS;
+    private static final int FINAL_REVEAL_DURATION_TICKS = ZonePacingPolicy.FINAL_REVEAL_DURATION_TICKS;
     private static final Random RANDOM = new Random();
     private static final int BOSS_BAR_VISIBLE_SECONDS = 8;
     private static final Phase[] PHASES = new Phase[]{
@@ -46,10 +53,14 @@ public final class ZoneManager {
             new Phase(5, 50.0D, 90, 150, true, "Фаза 5: возрождения отключены, зона сужается до 50 блоков.", "Фаза 5 - зона сужается до 50"),
             new Phase(6, 1.0D, 90, Integer.MAX_VALUE, true, "Финальная зона: граница сужается до 1 блока.", "Финальная зона - сужение до 1 блока")
     };
+    private static final int SMALL_MATCH_INITIAL_PHASE_INDEX = findPhaseIndexBySize(SMALL_MATCH_INITIAL_ZONE_SIZE);
+    private static final int FINAL_REVEAL_START_PHASE_INDEX = PHASES.length - 2;
 
     private static int currentPhaseIndex = -1;
     private static int secondsLeft = 0;
     private static int bossBarSecondsLeft = 0;
+    private static final ZoneFinalRevealScheduler FINAL_REVEAL_SCHEDULER =
+            new ZoneFinalRevealScheduler(FINAL_REVEAL_INTERVAL_SECONDS);
     private static ServerBossEvent zoneBossBar;
 
     private ZoneManager() {
@@ -58,15 +69,26 @@ public final class ZoneManager {
     public static void start(MinecraftServer server) {
         currentPhaseIndex = -1;
         secondsLeft = 0;
+        FINAL_REVEAL_SCHEDULER.reset();
         ZoneSettings settings = loadSettings(server);
         applyConfiguredCenter(server, settings, true);
-        applyPhase(server, 0);
+        int playerCount = GameStateManager.onlinePlayers(server);
+        int initialPhaseIndex = ZonePacingPolicy.initialPhaseIndex(playerCount, SMALL_MATCH_INITIAL_PHASE_INDEX);
+        startAtPhase(server, initialPhaseIndex);
+        TacticalTabletMod.LOGGER.info(
+                "Tactical Tablet zone pacing selected: players={}, smallMatchMaxPlayers={}, initialPhase={}, initialSize={}",
+                playerCount,
+                SMALL_MATCH_MAX_PLAYERS,
+                PHASES[initialPhaseIndex].number,
+                PHASES[initialPhaseIndex].size
+        );
     }
 
     public static void reset(MinecraftServer server) {
         currentPhaseIndex = -1;
         secondsLeft = 0;
         bossBarSecondsLeft = 0;
+        FINAL_REVEAL_SCHEDULER.reset();
         hideBossBar();
 
         ServerLevel overworld = GameStateManager.getOverworld(server);
@@ -86,6 +108,7 @@ public final class ZoneManager {
         if (server == null || currentPhaseIndex < 0) return;
         syncBossBarPlayers(server);
         tickBossBar();
+        tickFinalReveal(server);
 
         if (secondsLeft == Integer.MAX_VALUE) return;
 
@@ -101,6 +124,14 @@ public final class ZoneManager {
     }
 
     private static void applyPhase(MinecraftServer server, int phaseIndex) {
+        applyPhase(server, phaseIndex, false);
+    }
+
+    private static void startAtPhase(MinecraftServer server, int phaseIndex) {
+        applyPhase(server, phaseIndex, true);
+    }
+
+    private static void applyPhase(MinecraftServer server, int phaseIndex, boolean forceImmediate) {
         ServerLevel overworld = GameStateManager.getOverworld(server);
         if (overworld == null || phaseIndex < 0 || phaseIndex >= PHASES.length) return;
 
@@ -113,7 +144,7 @@ public final class ZoneManager {
         border.setWarningBlocks(8);
         border.setWarningTime(15);
 
-        if (phase.transitionSeconds <= 1) {
+        if (forceImmediate || phase.transitionSeconds <= 1) {
             border.setSize(phase.size);
         } else {
             border.lerpSizeBetween(currentSize, phase.size, phase.transitionSeconds * 1000L);
@@ -135,6 +166,38 @@ public final class ZoneManager {
                 phase.transitionSeconds,
                 phase.durationSeconds
         );
+    }
+
+    private static void tickFinalReveal(MinecraftServer server) {
+        if (!FINAL_REVEAL_SCHEDULER.tick(currentPhaseIndex, FINAL_REVEAL_START_PHASE_INDEX, PHASES.length)) {
+            return;
+        }
+
+        int affected = 0;
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            if (!isFinalRevealTarget(player)) continue;
+
+            player.addEffect(new MobEffectInstance(
+                    MobEffects.GLOWING,
+                    FINAL_REVEAL_DURATION_TICKS,
+                    0,
+                    false,
+                    false,
+                    true
+            ));
+            affected++;
+        }
+
+        TacticalTabletMod.LOGGER.info("Tactical Tablet final zone reveal applied to {} player(s)", affected);
+    }
+
+    private static boolean isFinalRevealTarget(ServerPlayer player) {
+        return player != null
+                && ZonePacingPolicy.isFinalRevealTarget(
+                        LivesManager.isAliveParticipant(player),
+                        player.isSpectator(),
+                        player.getTags().contains("war.playing")
+                );
     }
 
     private static void showBossBar(MinecraftServer server, Phase phase) {
@@ -273,6 +336,16 @@ public final class ZoneManager {
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
             player.sendSystemMessage(component);
         }
+    }
+
+    private static int findPhaseIndexBySize(double size) {
+        for (int i = 0; i < PHASES.length; i++) {
+            if (Double.compare(PHASES[i].size, size) == 0) {
+                return i;
+            }
+        }
+
+        throw new IllegalStateException("Zone phase with size " + size + " is not configured");
     }
 
     private record Phase(
