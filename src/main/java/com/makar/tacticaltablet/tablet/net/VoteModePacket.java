@@ -1,8 +1,5 @@
 package com.makar.tacticaltablet.tablet.net;
 
-import com.makar.tacticaltablet.anticheat.AntiCheatManager;
-import com.makar.tacticaltablet.anticheat.Severity;
-import com.makar.tacticaltablet.anticheat.ViolationType;
 import com.makar.tacticaltablet.game.MatchMode;
 import com.makar.tacticaltablet.game.MatchPhase;
 import com.makar.tacticaltablet.game.GameStateManager;
@@ -19,15 +16,12 @@ import java.util.function.Supplier;
 public class VoteModePacket {
 
     private final MatchMode mode;
-    private final int rawModeId;
-
     public VoteModePacket(MatchMode mode) {
         this.mode = mode == null ? MatchMode.SOLO : mode;
-        this.rawModeId = this.mode.ordinal();
     }
 
     public VoteModePacket(FriendlyByteBuf buf) {
-        this.rawModeId = buf.readByte();
+        int rawModeId = buf.readByte();
         MatchMode[] values = MatchMode.values();
         this.mode = rawModeId >= 0 && rawModeId < values.length ? values[rawModeId] : null;
     }
@@ -50,12 +44,6 @@ public class VoteModePacket {
             }
 
             if (mode == null) {
-                AntiCheatManager.record(
-                        player,
-                        ViolationType.INVALID_TABLET_PACKET,
-                        Severity.HIGH,
-                        "invalid vote mode id=" + rawModeId
-                );
                 LobbyManager.sync(player);
                 return;
             }

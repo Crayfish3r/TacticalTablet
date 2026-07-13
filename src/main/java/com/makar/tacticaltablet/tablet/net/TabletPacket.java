@@ -1,8 +1,5 @@
 package com.makar.tacticaltablet.tablet.net;
 
-import com.makar.tacticaltablet.anticheat.AntiCheatManager;
-import com.makar.tacticaltablet.anticheat.Severity;
-import com.makar.tacticaltablet.anticheat.ViolationType;
 import com.makar.tacticaltablet.clan.ClanManager;
 import com.makar.tacticaltablet.game.GameStateManager;
 import com.makar.tacticaltablet.game.MapSetManager;
@@ -88,12 +85,6 @@ public class TabletPacket {
             if (player == null) return;
 
             if (actionId < MIN_ACTION_ID || actionId > MAX_ACTION_ID) {
-                AntiCheatManager.record(
-                        player,
-                        ViolationType.INVALID_TABLET_PACKET,
-                        Severity.HIGH,
-                        "invalid actionId=" + actionId
-                );
                 return;
             }
 
@@ -103,12 +94,6 @@ public class TabletPacket {
             }
 
             if (!InventoryManager.hasTablet(player)) {
-                AntiCheatManager.record(
-                        player,
-                        ViolationType.INVALID_TABLET_PACKET,
-                        Severity.HIGH,
-                        "tablet packet without tablet actionId=" + actionId
-                );
                 LobbyManager.sync(player);
                 return;
             }
@@ -135,12 +120,6 @@ public class TabletPacket {
 
             String kit = KITS.get(actionId);
             if (kit == null) {
-                AntiCheatManager.record(
-                        player,
-                        ViolationType.INVALID_TABLET_PACKET,
-                        Severity.HIGH,
-                        "unknown actionId=" + actionId
-                );
                 return;
             }
 
@@ -205,12 +184,6 @@ public class TabletPacket {
     private void handleBaseUnlock(ServerPlayer player, int classActionId) {
         String kit = KITS.get(classActionId);
         if (kit == null || !PlayerProgressManager.isUnlockableBaseClass(kit)) {
-            AntiCheatManager.record(
-                    player,
-                    ViolationType.INVALID_TABLET_PACKET,
-                    Severity.HIGH,
-                    "invalid base unlock actionId=" + actionId
-            );
             LobbyManager.sync(player);
             return;
         }
@@ -234,12 +207,6 @@ public class TabletPacket {
     private void handleTierUpgrade(ServerPlayer player, int classActionId, int targetTier) {
         String kit = KITS.get(classActionId);
         if (kit == null || !PlayerProgressManager.isBaseProgressionClass(kit)) {
-            AntiCheatManager.record(
-                    player,
-                    ViolationType.INVALID_TABLET_PACKET,
-                    Severity.HIGH,
-                    "invalid class upgrade actionId=" + actionId
-            );
             LobbyManager.sync(player);
             return;
         }
@@ -265,16 +232,6 @@ public class TabletPacket {
     }
 
     private void handleRtp(ServerPlayer player) {
-        String invalidReason = getInvalidRtpReason(player);
-        if (!invalidReason.isEmpty()) {
-            AntiCheatManager.record(
-                    player,
-                    ViolationType.INVALID_RTP,
-                    getInvalidRtpSeverity(invalidReason),
-                    invalidReason
-            );
-        }
-
         if (!GameStateManager.isRunning(player.server)) {
             player.sendSystemMessage(Component.literal("[WAR] Планшет недоступен до начала матча."));
             LobbyManager.sync(player);
@@ -290,40 +247,6 @@ public class TabletPacket {
         }
 
         RtpTimerManager.forceRtp(player);
-    }
-
-    private String getInvalidRtpReason(ServerPlayer player) {
-        if (!GameStateManager.isRunning(player.server)) {
-            return "game not running";
-        }
-
-        if (!LivesManager.canContinueMatch(player)) {
-            return "player eliminated";
-        }
-
-        if (!GameStateManager.isInLobby(player)) {
-            return "not in lobby dimension";
-        }
-
-        if (!player.getTags().contains("in_lobby")) {
-            return "missing in_lobby tag";
-        }
-
-        if (PlayerTabletState.isRtpUsed(player)) {
-            return "rtp already used";
-        }
-
-        return "";
-    }
-
-    private Severity getInvalidRtpSeverity(String reason) {
-        if ("not in lobby dimension".equals(reason)
-                || "missing in_lobby tag".equals(reason)
-                || "rtp already used".equals(reason)) {
-            return Severity.HIGH;
-        }
-
-        return Severity.MEDIUM;
     }
 
     private void handleKit(ServerPlayer player, String kit) {
@@ -361,12 +284,6 @@ public class TabletPacket {
 
         if (PlayerProgressManager.isExclusiveClass(kit)
                 && !PlayerProgressManager.isExclusiveClassGranted(player, kit)) {
-            AntiCheatManager.record(
-                    player,
-                    ViolationType.INVALID_TABLET_PACKET,
-                    Severity.HIGH,
-                    "locked exclusive class actionId=" + actionId
-            );
             player.sendSystemMessage(Component.literal("[WAR] Этот эксклюзивный класс тебе не выдан."));
             LobbyManager.sync(player);
             return;

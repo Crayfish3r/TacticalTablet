@@ -3,9 +3,6 @@ package com.makar.tacticaltablet.clan;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonSyntaxException;
-import com.makar.tacticaltablet.anticheat.AntiCheatManager;
-import com.makar.tacticaltablet.anticheat.Severity;
-import com.makar.tacticaltablet.anticheat.ViolationType;
 import com.makar.tacticaltablet.core.TacticalTabletMod;
 import com.makar.tacticaltablet.game.GameStateManager;
 import com.makar.tacticaltablet.game.MapSetManager;
@@ -184,12 +181,6 @@ public class ClanManager {
         long now = System.currentTimeMillis();
         Long lastRequest = lastJoinRequestTimes.get(player.getUUID());
         if (lastRequest != null && now - lastRequest < JOIN_REQUEST_COOLDOWN_MS) {
-            AntiCheatManager.record(
-                    player,
-                    ViolationType.PACKET_SPAM,
-                    Severity.MEDIUM,
-                    "clan join request cooldown"
-            );
             return Result.RATE_LIMITED;
         }
         lastJoinRequestTimes.put(player.getUUID(), now);
@@ -197,12 +188,6 @@ public class ClanManager {
         if (findClanByMember(playerId) != null) return Result.ALREADY_IN_CLAN;
         if (containsUuid(clan.pending, playerId)) return Result.ALREADY_PENDING;
         if (countPendingRequests(playerId) >= MAX_PENDING_REQUESTS_PER_PLAYER) {
-            AntiCheatManager.record(
-                    player,
-                    ViolationType.PACKET_SPAM,
-                    Severity.MEDIUM,
-                    "too many active clan join requests"
-            );
             return Result.PENDING_LIMIT_REACHED;
         }
         if (clan.pending.size() >= ClanConstants.MAX_PENDING) return Result.CLAN_PENDING_FULL;

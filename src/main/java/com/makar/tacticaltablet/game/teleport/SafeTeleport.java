@@ -30,11 +30,14 @@ public class SafeTeleport {
     private static final int MAX_POOL_SIZE = 256;
     private static final int POOL_ATTEMPT_MULTIPLIER = 80;
     private static final int POOL_ATTEMPTS_PER_TICK = 48;
+    private static final int POOL_LOW_WATER_MARK = 12;
+    private static final int REFILL_COOLDOWN_TICKS = 100;
     private static final int FALLBACK_ATTEMPTS_PER_CALL = 96;
     private static final int POOL_CHUNK_LOADS_PER_TICK = 4;
     private static final int FALLBACK_CHUNK_LOADS_PER_CALL = 8;
     private static final int TEAM_CLUSTER_CHUNK_LOADS_PER_CALL = 4;
     private static final int TEST_CHUNK_LOADS_PER_CALL = 16;
+    private static final int PREPARED_CHUNK_LOADS_PER_CALL = 2;
     private static final int[][] TEAM_OFFSETS = new int[][]{
             {0, 0},
             {3, 0},
@@ -62,6 +65,7 @@ public class SafeTeleport {
     private static int poolAttempts = 0;
     private static int poolMaxAttempts = 0;
     private static int chunkLoadBudget = 0;
+    private static int refillCooldownTicks = 0;
     private static RtpSettings activeRtpSettings = RtpSettings.surfaceDefaults();
     private static String poolConfigurationError = "";
 
@@ -78,6 +82,7 @@ public class SafeTeleport {
         poolAttempts = 0;
         poolMaxAttempts = 0;
         poolRandom = RandomSource.create();
+        refillCooldownTicks = 0;
         activeRtpSettings = ZoneManager.getActiveRtpSettings();
         poolConfigurationError = "";
 
@@ -125,6 +130,12 @@ public class SafeTeleport {
             return new PoolStatus(poolTarget, preparedSpawns.size(), poolAttempts, 0.0D, 0.0D);
         }
 
+        pruneInvalidPreparedSpawns(overworld);
+        if (refillCooldownTicks > 0) refillCooldownTicks--;
+
+        if (!poolPreparing && shouldStartRefill(preparedSpawns.size(), poolTarget, refillCooldownTicks)) {
+            beginRefill(overworld);
+        }
         if (!poolPreparing) {
             return getPoolStatus(overworld);
         }
@@ -133,6 +144,7 @@ public class SafeTeleport {
 
         if (preparedSpawns.size() >= poolTarget || poolAttempts >= poolMaxAttempts) {
             poolPreparing = false;
+            refillCooldownTicks = REFILL_COOLDOWN_TICKS;
             WorldBorder border = overworld.getWorldBorder();
             TacticalTabletMod.LOGGER.info(
                     "[TacticalTablet] Prepared RTP pool: mode={}, safePoints={}, target={}, attempts={}, borderSize={}, margin={}",
@@ -215,6 +227,7 @@ public class SafeTeleport {
         poolTarget = 0;
         poolAttempts = 0;
         poolMaxAttempts = 0;
+        refillCooldownTicks = 0;
         poolConfigurationError = "";
         activeRtpSettings = RtpSettings.surfaceDefaults();
     }
@@ -375,6 +388,24 @@ public class SafeTeleport {
         return batchAttempts;
     }
 
+    private static void beginRefill(ServerLevel overworld) {
+        if (!isRtpConfigurationUsable(overworld)) return;
+        poolAttempts = 0;
+        poolMaxAttempts = activeRtpSettings.mode() == RtpPlacementMode.FIXED_Y_BOX
+                ? activeRtpSettings.maxAttempts()
+                : poolTarget * POOL_ATTEMPT_MULTIPLIER;
+        poolRandom = RandomSource.create();
+        poolPreparing = true;
+        TacticalTabletMod.LOGGER.debug(
+                "Starting incremental RTP pool refill. mode={}, prepared={}, target={}",
+                activeRtpSettings.mode(), preparedSpawns.size(), poolTarget
+        );
+    }
+
+    static boolean shouldStartRefill(int prepared, int target, int cooldownTicks) {
+        return target > 0 && prepared < Math.min(POOL_LOW_WATER_MARK, target) && cooldownTicks <= 0;
+    }
+
     private static PoolStatus getPoolStatus(ServerLevel overworld) {
         if (overworld == null) {
             return new PoolStatus(poolTarget, preparedSpawns.size(), poolAttempts, 0.0D, 0.0D);
@@ -406,7 +437,7 @@ public class SafeTeleport {
             int index = random.nextInt(preparedSpawns.size());
             BlockPos position = preparedSpawns.remove(index);
             preparedSpawnKeys.remove(position.asLong());
-            return isSafeSpawn(overworld, position) ? position : null;
+            return validatePreparedPointForUse(overworld, position) ? position : null;
         }
 
         BlockPos bestStrictPosition = null;
@@ -437,16 +468,35 @@ public class SafeTeleport {
         BlockPos position = selected;
         preparedSpawns.remove(position);
         preparedSpawnKeys.remove(position.asLong());
-        return position;
+        return validatePreparedPointForUse(overworld, position) ? position : null;
     }
 
     private static void pruneInvalidPreparedSpawns(ServerLevel overworld) {
         for (int i = preparedSpawns.size() - 1; i >= 0; i--) {
             BlockPos position = preparedSpawns.get(i);
-            if (!isSafeSpawn(overworld, position)) {
+            if (shouldPrune(validateSpawn(overworld, position))) {
                 preparedSpawns.remove(i);
                 preparedSpawnKeys.remove(position.asLong());
             }
+        }
+    }
+
+    private static boolean validatePreparedPointForUse(ServerLevel level, BlockPos position) {
+        chunkLoadBudget = PREPARED_CHUNK_LOADS_PER_CALL;
+        try {
+            if (!ensureChunkAvailable(level, position.getX() >> 4, position.getZ() >> 4)) {
+                requeuePreparedPoint(position);
+                return false;
+            }
+            return validateSpawn(level, position) == SpawnValidationResult.SAFE;
+        } finally {
+            chunkLoadBudget = 0;
+        }
+    }
+
+    private static void requeuePreparedPoint(BlockPos position) {
+        if (preparedSpawnKeys.add(position.asLong())) {
+            preparedSpawns.add(position);
         }
     }
 
@@ -596,6 +646,7 @@ public class SafeTeleport {
                 settings.spawnY(),
                 randomBetween(random, settings.minZ(), settings.maxZ())
         );
+        if (!ensureChunkAvailable(level, position.getX() >> 4, position.getZ() >> 4)) return null;
         if (!isSafeSpawn(level, position)) return null;
         if (strictDistance && !isFarEnough(occupiedPositions, position, getMinPlayerDistance(level.getWorldBorder()))) {
             return null;
@@ -639,6 +690,7 @@ public class SafeTeleport {
                 for (int dz = -radius; dz <= radius; dz++) {
                     if (radius > 0 && Math.abs(dx) != radius && Math.abs(dz) != radius) continue;
                     BlockPos candidate = new BlockPos(baseX + dx, settings.spawnY(), baseZ + dz);
+                    if (!ensureChunkAvailable(level, candidate.getX() >> 4, candidate.getZ() >> 4)) continue;
                     if (isSafeSpawn(level, candidate)) return candidate;
                 }
             }
@@ -737,33 +789,40 @@ public class SafeTeleport {
     }
 
     private static boolean isSafeSpawn(ServerLevel level, BlockPos pos) {
-        if (!level.hasChunk(pos.getX() >> 4, pos.getZ() >> 4)) return false;
-        if (pos.getY() <= level.getMinBuildHeight() + 2) return false;
-        if (pos.getY() >= level.getMaxBuildHeight() - 2) return false;
+        return validateSpawn(level, pos) == SpawnValidationResult.SAFE;
+    }
+
+    private static SpawnValidationResult validateSpawn(ServerLevel level, BlockPos pos) {
+        if (pos.getY() <= level.getMinBuildHeight() + 2) return SpawnValidationResult.UNSAFE;
+        if (pos.getY() >= level.getMaxBuildHeight() - 2) return SpawnValidationResult.UNSAFE;
 
         WorldBorder border = level.getWorldBorder();
         if (activeRtpSettings.mode() == RtpPlacementMode.FIXED_Y_BOX) {
-            if (!isInsideFixedYBox(pos, activeRtpSettings)) return false;
+            if (!isInsideFixedYBox(pos, activeRtpSettings)) return SpawnValidationResult.UNSAFE;
             if (activeRtpSettings.requireInsideWorldBorder()
-                    && !isInsideBorder(border, pos.getX() + 0.5D, pos.getZ() + 0.5D, 0.0D)) return false;
+                    && !isInsideBorder(border, pos.getX() + 0.5D, pos.getZ() + 0.5D, 0.0D)) return SpawnValidationResult.UNSAFE;
         } else if (!isInsideBorder(border, pos.getX() + 0.5D, pos.getZ() + 0.5D, getSpawnBorderMargin(border))) {
-            return false;
+            return SpawnValidationResult.UNSAFE;
         }
+
+        if (!level.hasChunk(pos.getX() >> 4, pos.getZ() >> 4)) return SpawnValidationResult.CHUNK_UNAVAILABLE;
 
         BlockPos groundPos = pos.below();
         BlockState ground = level.getBlockState(groundPos);
         BlockState feet = level.getBlockState(pos);
         BlockState head = level.getBlockState(pos.above());
 
-        if (level.getBlockEntity(groundPos) != null) return false;
-        if (level.getBlockEntity(pos) != null) return false;
-        if (level.getBlockEntity(pos.above()) != null) return false;
-        if (!isStandable(level, groundPos, ground)) return false;
-        if (!hasStableGroundBelow(level, groundPos, activeRtpSettings.requiredSolidBlocksBelow())) return false;
-        if (!isPassable(level, pos, feet)) return false;
-        if (!isPassable(level, pos.above(), head)) return false;
+        if (level.getBlockEntity(groundPos) != null) return SpawnValidationResult.UNSAFE;
+        if (level.getBlockEntity(pos) != null) return SpawnValidationResult.UNSAFE;
+        if (level.getBlockEntity(pos.above()) != null) return SpawnValidationResult.UNSAFE;
+        if (!isStandable(level, groundPos, ground)) return SpawnValidationResult.UNSAFE;
+        if (!hasStableGroundBelow(level, groundPos, activeRtpSettings.requiredSolidBlocksBelow())) return SpawnValidationResult.UNSAFE;
+        if (!isPassable(level, pos, feet)) return SpawnValidationResult.UNSAFE;
+        if (!isPassable(level, pos.above(), head)) return SpawnValidationResult.UNSAFE;
 
-        return !isHazard(ground) && !isHazard(feet) && !isHazard(head);
+        return isHazard(ground) || isHazard(feet) || isHazard(head)
+                ? SpawnValidationResult.UNSAFE
+                : SpawnValidationResult.SAFE;
     }
 
     private static boolean isInsideFixedYBox(BlockPos position, RtpSettings settings) {
@@ -839,6 +898,16 @@ public class SafeTeleport {
             double margin,
             List<BlockPos> samples
     ) {
+    }
+
+    enum SpawnValidationResult {
+        SAFE,
+        UNSAFE,
+        CHUNK_UNAVAILABLE
+    }
+
+    static boolean shouldPrune(SpawnValidationResult result) {
+        return result == SpawnValidationResult.UNSAFE;
     }
 
     private record PlayerPosition(double x, double z) {

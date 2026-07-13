@@ -1,9 +1,5 @@
 package com.makar.tacticaltablet.game;
 
-import com.makar.tacticaltablet.anticheat.AntiCheatManager;
-import com.makar.tacticaltablet.anticheat.MovementAntiCheat;
-import com.makar.tacticaltablet.anticheat.Severity;
-import com.makar.tacticaltablet.anticheat.ViolationType;
 import com.makar.tacticaltablet.admin.TestModeManager;
 import com.makar.tacticaltablet.airdrop.AirdropManager;
 import com.makar.tacticaltablet.client.NameTagManager;
@@ -70,7 +66,6 @@ import java.util.Set;
 
 public class ServerEvents {
 
-    private static final double MAX_MELEE_REACH = 5.5D;
     private static final int TEAM_KILL_BAN_THRESHOLD = 3;
     private static final long TEAM_KILL_BAN_MILLIS = 15L * 60L * 1000L;
     private static int utilityTickCounter = 0;
@@ -92,6 +87,7 @@ public class ServerEvents {
             PrefixManager.updateLastKnownName(player.getUUID(), player.getGameProfile().getName());
             TeamMatchManager.rememberPlayer(player);
             NameTagManager.applyToAll(player.server);
+            LivesManager.reconcileMatchStateOnJoin(player);
             if (LivesManager.ensureEliminatedIfOutOfLives(player)) {
                 TeamMatchManager.applyScoreboardTeams(player.server);
                 ClassXPManager.sync(player);
@@ -174,6 +170,7 @@ public class ServerEvents {
             }
         }
 
+        LivesManager.copyMatchBinding(oldPlayer, newPlayer);
         PlayerTabletState.reset(newPlayer);
     }
 
@@ -210,8 +207,6 @@ public class ServerEvents {
             if (!attacker.getTags().contains("war.playing") || !playing) {
                 return;
             }
-
-            checkCombatReach(player, event.getSource());
 
             String sourceText = safeLower(event.getSource().getMsgId())
                     + " " + entityId(event.getSource().getDirectEntity())
@@ -285,7 +280,6 @@ public class ServerEvents {
         SpectatorCameraManager.onServerTick(event.getServer());
         GameStateManager.onServerTick(event.getServer());
         InventoryGuard.tick(event.getServer());
-        MovementAntiCheat.tick(event.getServer());
 
         if (++utilityTickCounter >= 100) {
             utilityTickCounter = 0;
@@ -320,8 +314,6 @@ public class ServerEvents {
             }
 
             TabletPacket.reset(player);
-            AntiCheatManager.reset(player);
-            MovementAntiCheat.reset(player);
             if (!GameStateManager.getCurrentMode().isTeamMode()) {
                 NameTagManager.remove(player);
             }
@@ -504,8 +496,6 @@ public class ServerEvents {
         SafeTeleport.clearPool();
         PlayerTabletState.resetAll();
         TabletPacket.resetAll();
-        AntiCheatManager.resetAll();
-        MovementAntiCheat.resetAll();
         InventoryLockEvents.resetTracking();
         PlayerProgressManager.resetStorage();
         PrefixManager.clearRuntime();
@@ -597,33 +587,6 @@ public class ServerEvents {
         }
 
         return new XPResult(10, "убийство");
-    }
-
-    private static void checkCombatReach(ServerPlayer victim, DamageSource source) {
-        if (victim == null || source == null) return;
-        if (!(source.getEntity() instanceof ServerPlayer attacker)) return;
-        if (attacker.getUUID().equals(victim.getUUID())) return;
-        if (!attacker.getTags().contains("war.playing")) return;
-        if (!victim.getTags().contains("war.playing")) return;
-
-        Entity direct = source.getDirectEntity();
-        if (direct instanceof Projectile) return;
-
-        String msgId = safeLower(source.getMsgId());
-        String sourceText = msgId + " " + entityId(direct) + " " + entityId(source.getEntity());
-        if (!isMeleeDamage(attacker, msgId, sourceText, direct)) return;
-
-        double distance = attacker.distanceTo(victim);
-        if (distance <= MAX_MELEE_REACH) return;
-
-        AntiCheatManager.record(
-                attacker,
-                ViolationType.COMBAT_REACH,
-                Severity.HIGH,
-                "target=" + victim.getGameProfile().getName()
-                        + " distance=" + String.format(Locale.ROOT, "%.2f", distance)
-                        + " max=" + String.format(Locale.ROOT, "%.2f", MAX_MELEE_REACH)
-        );
     }
 
     private static boolean isLongRangeKill(ServerPlayer killer, ServerPlayer victim) {

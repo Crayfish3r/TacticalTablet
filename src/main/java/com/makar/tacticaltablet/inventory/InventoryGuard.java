@@ -2,9 +2,6 @@ package com.makar.tacticaltablet.inventory;
 
 import com.makar.tacticaltablet.airdrop.AirdropCompassHelper;
 import com.makar.tacticaltablet.airdrop.AirdropManager;
-import com.makar.tacticaltablet.anticheat.AntiCheatManager;
-import com.makar.tacticaltablet.anticheat.Severity;
-import com.makar.tacticaltablet.anticheat.ViolationType;
 import com.makar.tacticaltablet.core.ModItems;
 import com.makar.tacticaltablet.game.GameStateManager;
 import com.makar.tacticaltablet.game.MapSetManager;
@@ -17,7 +14,6 @@ import com.makar.tacticaltablet.tablet.PlayerTabletState;
 
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.ItemStack;
 
 import java.util.Set;
@@ -63,9 +59,7 @@ public class InventoryGuard {
 
         if (eliminated) {
             if (!isInventoryEmpty(player)) {
-                int removed = countItems(player);
                 InventoryManager.clearInventory(player);
-                recordInventory(player, removed, "eliminated inventory cleanup");
             }
             return;
         }
@@ -77,9 +71,7 @@ public class InventoryGuard {
 
         if (inLobby && !gameRunning) {
             if (!isInventoryEmpty(player)) {
-                int removed = countItems(player);
                 InventoryManager.clearInventory(player);
-                recordInventory(player, removed, "waiting lobby inventory cleanup");
             }
             return;
         }
@@ -100,9 +92,7 @@ public class InventoryGuard {
         }
 
         if (playing && kitUsed && InventoryManager.hasTablet(player)) {
-            int removed = countTablets(player);
             InventoryManager.clearTablets(player);
-            recordInventory(player, removed, Severity.HIGH, "tablet after kit used");
         }
     }
 
@@ -126,17 +116,6 @@ public class InventoryGuard {
         if (changed) {
             InventoryManager.syncInventory(player);
         }
-
-        if (cleanup.removed() > 0) {
-            recordInventory(
-                    player,
-                    cleanup.removed(),
-                    cleanup.extraTablets() > 0 ? Severity.HIGH : severityForRemoved(cleanup.removed()),
-                    cleanup.extraTablets() > 0
-                            ? "removed spectator items and duplicate tablets"
-                            : "removed spectator items"
-            );
-        }
     }
 
     private static void keepOnlyTabletCompassAndSync(ServerPlayer player) {
@@ -153,23 +132,10 @@ public class InventoryGuard {
         if (changed) {
             InventoryManager.syncInventory(player);
         }
-
-        if (changed) {
-            boolean duplicateTablets = cleanup.extraTablets() > 0;
-            recordInventory(
-                    player,
-                    cleanup.removed(),
-                    duplicateTablets ? Severity.HIGH : severityForRemoved(cleanup.removed()),
-                    duplicateTablets
-                            ? "removed non-tablet items and duplicate tablets"
-                            : "removed non-tablet items"
-            );
-        }
     }
 
     private static InventoryCleanup keepOnlyTabletAndAirdropCompass(ServerPlayer player) {
         int removed = 0;
-        int extraTablets = 0;
         boolean tabletAlreadyKept = false;
         boolean compassAlreadyKept = false;
         boolean extractionCompassAlreadyKept = false;
@@ -188,7 +154,6 @@ public class InventoryGuard {
 
                 player.getInventory().setItem(i, ItemStack.EMPTY);
                 removed++;
-                extraTablets++;
                 continue;
             }
 
@@ -233,12 +198,11 @@ public class InventoryGuard {
             player.getInventory().setChanged();
         }
 
-        return new InventoryCleanup(removed, extraTablets);
+        return new InventoryCleanup(removed);
     }
 
     private static InventoryCleanup keepOnlyTablet(ServerPlayer player) {
         int removed = 0;
-        int extraTablets = 0;
         boolean tabletAlreadyKept = false;
 
         for (int i = 0; i < player.getInventory().getContainerSize(); i++) {
@@ -251,8 +215,6 @@ public class InventoryGuard {
                     tabletAlreadyKept = true;
                     continue;
                 }
-
-                extraTablets++;
             }
 
             player.getInventory().setItem(i, ItemStack.EMPTY);
@@ -263,7 +225,7 @@ public class InventoryGuard {
             player.getInventory().setChanged();
         }
 
-        return new InventoryCleanup(removed, extraTablets);
+        return new InventoryCleanup(removed);
     }
 
     private static boolean isInventoryEmpty(ServerPlayer player) {
@@ -276,56 +238,7 @@ public class InventoryGuard {
         return true;
     }
 
-    private static int countItems(ServerPlayer player) {
-        int count = 0;
-
-        for (int i = 0; i < player.getInventory().getContainerSize(); i++) {
-            if (!player.getInventory().getItem(i).isEmpty()) {
-                count++;
-            }
-        }
-
-        return count;
-    }
-
-    private static int countTablets(ServerPlayer player) {
-        int count = 0;
-
-        for (InteractionHand hand : InteractionHand.values()) {
-            if (player.getItemInHand(hand).getItem() == ModItems.TACTICAL_TABLET.get()) {
-                count++;
-            }
-        }
-
-        for (int i = 0; i < player.getInventory().getContainerSize(); i++) {
-            if (player.getInventory().getItem(i).getItem() == ModItems.TACTICAL_TABLET.get()) {
-                count++;
-            }
-        }
-
-        return count;
-    }
-
-    private static Severity severityForRemoved(int removed) {
-        return removed > 1 ? Severity.MEDIUM : Severity.LOW;
-    }
-
-    private static void recordInventory(ServerPlayer player, int removed, String reason) {
-        recordInventory(player, removed, severityForRemoved(removed), reason);
-    }
-
-    private static void recordInventory(ServerPlayer player, int removed, Severity severity, String reason) {
-        if (removed <= 0) return;
-
-        AntiCheatManager.record(
-                player,
-                ViolationType.ILLEGAL_INVENTORY,
-                severity,
-                "removed " + removed + " items; reason=" + reason
-        );
-    }
-
-    private record InventoryCleanup(int removed, int extraTablets) {
+    private record InventoryCleanup(int removed) {
     }
 }
 

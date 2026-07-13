@@ -26,6 +26,8 @@ import net.minecraft.world.level.GameType;
 import net.minecraft.world.scores.Objective;
 import net.minecraft.world.scores.Scoreboard;
 
+import java.util.UUID;
+
 public class LivesManager {
 
     public static final String OBJECTIVE = "lives";
@@ -33,14 +35,68 @@ public class LivesManager {
 
     private static final String TAG_LIVES_INIT = "war.lives_init";
     private static final String TAG_ELIMINATED = "war.eliminated";
+    private static final String DATA_MATCH_ID = "tacticaltablet.match_id";
 
     public static void ensureStarted(ServerPlayer player) {
         if (player == null) return;
+        bindToCurrentMatch(player);
         if (player.getTags().contains(TAG_LIVES_INIT)) return;
         if (player.getTags().contains(TAG_ELIMINATED)) return;
 
         setLives(player, GameStateManager.getLivesPerPlayer());
         player.addTag(TAG_LIVES_INIT);
+    }
+
+    /**
+     * Drops persistent match state only when it belongs to an older match. Calling this on every
+     * login is safe: reconnecting to the same match keeps lives and elimination intact.
+     */
+    public static void reconcileMatchStateOnJoin(ServerPlayer player) {
+        if (player == null) return;
+
+        UUID currentMatchId = GameStateManager.getLifecycleSnapshot().matchId().orElse(null);
+        if (currentMatchId == null) return;
+
+        String savedMatchId = player.getPersistentData().getString(DATA_MATCH_ID);
+        if (!isStateFromCurrentMatch(savedMatchId, currentMatchId)) {
+            resetPlayer(player);
+            player.removeTag("war.playing");
+            player.removeTag("in_lobby");
+            PlayerTabletState.reset(player);
+            RtpTimerManager.cancel(player);
+        }
+        setMatchId(player, currentMatchId);
+    }
+
+    public static boolean isBoundToCurrentMatch(ServerPlayer player) {
+        if (player == null) return false;
+        UUID currentMatchId = GameStateManager.getLifecycleSnapshot().matchId().orElse(null);
+        return currentMatchId != null && isStateFromCurrentMatch(
+                player.getPersistentData().getString(DATA_MATCH_ID),
+                currentMatchId
+        );
+    }
+
+    public static void copyMatchBinding(ServerPlayer source, ServerPlayer target) {
+        if (source == null || target == null) return;
+        String matchId = source.getPersistentData().getString(DATA_MATCH_ID);
+        if (matchId.isBlank()) {
+            target.getPersistentData().remove(DATA_MATCH_ID);
+        } else {
+            target.getPersistentData().putString(DATA_MATCH_ID, matchId);
+        }
+    }
+
+    static boolean isStateFromCurrentMatch(String savedMatchId, UUID currentMatchId) {
+        return currentMatchId != null && currentMatchId.toString().equals(savedMatchId);
+    }
+
+    private static void bindToCurrentMatch(ServerPlayer player) {
+        GameStateManager.getLifecycleSnapshot().matchId().ifPresent(matchId -> setMatchId(player, matchId));
+    }
+
+    private static void setMatchId(ServerPlayer player, UUID matchId) {
+        player.getPersistentData().putString(DATA_MATCH_ID, matchId.toString());
     }
 
     public static int getLives(ServerPlayer player) {
@@ -299,6 +355,7 @@ public class LivesManager {
         player.removeTag(TAG_LIVES_INIT);
         player.removeTag(TAG_ELIMINATED);
         setLives(player, GameStateManager.getLivesPerPlayer());
+        bindToCurrentMatch(player);
     }
 
     public static void resetAll(MinecraftServer server) {
@@ -306,6 +363,7 @@ public class LivesManager {
 
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
             resetPlayer(player);
+            PlayerTabletState.reset(player);
         }
     }
 

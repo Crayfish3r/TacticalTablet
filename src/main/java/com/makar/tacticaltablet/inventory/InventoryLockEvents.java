@@ -1,8 +1,5 @@
 package com.makar.tacticaltablet.inventory;
 
-import com.makar.tacticaltablet.anticheat.AntiCheatManager;
-import com.makar.tacticaltablet.anticheat.Severity;
-import com.makar.tacticaltablet.anticheat.ViolationType;
 import com.makar.tacticaltablet.airdrop.AirdropManager;
 import com.makar.tacticaltablet.core.TacticalTabletMod;
 import com.makar.tacticaltablet.game.GameStateManager;
@@ -46,12 +43,6 @@ public class InventoryLockEvents {
 
         if (isLobbyOrBattle(player) && !canUseDroppedItems(player)) {
             event.setCanceled(true);
-            AntiCheatManager.record(
-                    player,
-                    ViolationType.ILLEGAL_INVENTORY,
-                    Severity.LOW,
-                    "blocked item toss item=" + itemName(event.getEntity().getItem())
-            );
             return;
         }
 
@@ -89,12 +80,6 @@ public class InventoryLockEvents {
 
             event.setCanceled(true);
             event.setCancellationResult(InteractionResult.FAIL);
-            AntiCheatManager.record(
-                    player,
-                    ViolationType.ILLEGAL_CONTAINER,
-                    Severity.LOW,
-                    "blocked container at " + event.getPos().toShortString()
-            );
 
             player.sendSystemMessage(
                     Component.literal("[WAR] Контейнеры отключены во время матча.")
@@ -239,13 +224,6 @@ public class InventoryLockEvents {
         String path = blockId.getPath();
         return path.contains("jump")
                 && (path.contains("plate") || path.contains("pad") || path.contains("board"));
-    }
-
-    private static String itemName(ItemStack stack) {
-        if (stack == null || stack.isEmpty()) return "empty";
-
-        ResourceLocation itemId = ForgeRegistries.ITEMS.getKey(stack.getItem());
-        return itemId == null ? stack.getItem().toString() : itemId.toString();
     }
 
     private record DroppedItemOwner(UUID owner, long expiresAtMillis) {
