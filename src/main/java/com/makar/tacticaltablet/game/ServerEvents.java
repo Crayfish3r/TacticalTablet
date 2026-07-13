@@ -13,6 +13,7 @@ import com.makar.tacticaltablet.game.lives.LivesManager;
 import com.makar.tacticaltablet.game.lobby.LobbyManager;
 import com.makar.tacticaltablet.game.respawn.RtpTimerManager;
 import com.makar.tacticaltablet.game.respawn.DeathTransitionManager;
+import com.makar.tacticaltablet.game.respawn.PostRtpProtectionManager;
 import com.makar.tacticaltablet.game.teleport.SafeTeleport;
 import com.makar.tacticaltablet.game.team.TeamMatchManager;
 import com.makar.tacticaltablet.game.team.TeamId;
@@ -49,6 +50,7 @@ import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.level.GameRules;
 import net.minecraft.world.level.GameType;
 import net.minecraftforge.event.TickEvent;
+import net.minecraftforge.event.entity.living.LivingAttackEvent;
 import net.minecraftforge.event.entity.living.LivingDamageEvent;
 import net.minecraftforge.event.entity.living.LivingDeathEvent;
 import net.minecraftforge.event.entity.living.LivingDropsEvent;
@@ -56,6 +58,7 @@ import net.minecraftforge.event.entity.living.LivingHurtEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.event.ServerChatEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.event.server.ServerStartedEvent;
 import net.minecraftforge.event.server.ServerStoppedEvent;
 import net.minecraftforge.event.server.ServerStoppingEvent;
@@ -172,6 +175,14 @@ public class ServerEvents {
 
         LivesManager.copyMatchBinding(oldPlayer, newPlayer);
         PlayerTabletState.reset(newPlayer);
+    }
+
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public static void onPostRtpAttack(LivingAttackEvent event) {
+        if (!(event.getEntity() instanceof ServerPlayer player)) return;
+        if (!PostRtpProtectionManager.isProtected(player)) return;
+
+        event.setCanceled(true);
     }
 
     @SubscribeEvent
@@ -293,6 +304,7 @@ public class ServerEvents {
     @SubscribeEvent
     public static void onLogout(PlayerEvent.PlayerLoggedOutEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
+            PostRtpProtectionManager.clear(player);
             PacketHandler.clearC2SRateLimits(player);
             boolean runningMatchParticipant = GameStateManager.isRunning(player.server)
                     && GameStateManager.getMatchPhase() == MatchPhase.RUNNING
@@ -330,6 +342,7 @@ public class ServerEvents {
     @SubscribeEvent
     public static void onDeath(LivingDeathEvent event) {
         if (!(event.getEntity() instanceof ServerPlayer victim)) return;
+        PostRtpProtectionManager.clear(victim);
         long started = System.nanoTime();
 
         try {

@@ -20,8 +20,6 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.effect.MobEffectInstance;
-import net.minecraft.world.effect.MobEffects;
 
 import java.util.ArrayDeque;
 import java.util.HashMap;
@@ -46,7 +44,7 @@ public class RtpTimerManager {
     private static final int RTP_DELAY = 20 * 30;
     private static final int RETRY_DELAY = 20 * 3;
     private static final int RTP_PER_TICK = 1;
-    private static final int POST_RTP_INVULNERABILITY_TICKS = 20 * 5;
+    private static final int POST_RTP_PROTECTION_TICKS = 20 * 7;
     private static final long NOTICE_INTERVAL_MILLIS = 12_000L;
 
     public enum RtpRequestState {
@@ -111,6 +109,7 @@ public class RtpTimerManager {
         requestMatchIds.clear();
         lastFailureReasons.clear();
         lastNoticeTimes.clear();
+        PostRtpProtectionManager.clearAll();
     }
 
     public static int getTimeLeft(ServerPlayer player) {
@@ -265,19 +264,14 @@ public class RtpTimerManager {
         lastNoticeTimes.remove(uuid);
         LivesManager.ensureStarted(player);
         PlayerTabletState.setRtpUsed(player);
+        PostRtpProtectionManager.grant(player, POST_RTP_PROTECTION_TICKS);
 
         player.removeTag("in_lobby");
         player.addTag("war.playing");
         VoiceChatTeamManager.assignPlayerToVoiceGroup(player);
-        player.removeEffect(MobEffects.DAMAGE_RESISTANCE);
-        player.addEffect(new MobEffectInstance(
-                MobEffects.DAMAGE_RESISTANCE,
-                POST_RTP_INVULNERABILITY_TICKS,
-                255,
-                false,
-                false,
-                true
-        ));
+        player.displayClientMessage(Component.literal(
+                "[WAR] Защита после высадки: " + (POST_RTP_PROTECTION_TICKS / 20) + " сек."
+        ), true);
         AirdropManager.giveCompassToJoiningPlayer(player);
         ExtractionPointManager.giveCompassToActiveParticipant(player);
 
