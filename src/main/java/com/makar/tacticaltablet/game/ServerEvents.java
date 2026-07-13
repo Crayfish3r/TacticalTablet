@@ -342,10 +342,11 @@ public class ServerEvents {
 
         try {
             boolean participating = isActiveMatchParticipant(victim);
-            processPlayerDeath(victim, event.getSource());
-            if (participating) {
-                GameStateManager.checkForMatchEnd(victim.server);
-            }
+            PlayerDeathFinalization.process(
+                    participating,
+                    () -> processPlayerDeath(victim, event.getSource()),
+                    () -> GameStateManager.checkForMatchEnd(victim.server)
+            );
         } finally {
             long elapsedMs = (System.nanoTime() - started) / 1_000_000L;
             if (elapsedMs >= 10L) {

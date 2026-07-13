@@ -1,5 +1,18 @@
 {
-  "zoneCenterX": -320.0,
-  "zoneCenterZ": -165.0,
-  "zoneRandomRadius": 100
+  "zoneCenterX": -42,
+  "zoneCenterZ": 130,
+  "zoneRandomRadius": 0,
+  "rtp": {
+    "mode": "FIXED_Y_BOX",
+    "minX": -141,
+    "maxX": 71,
+    "minZ": 42,
+    "maxZ": 229,
+    "spawnY": 5,
+    "maxAttempts": 500,
+    "localSearchRadius": 10,
+    "teamSpreadRadius": 4,
+    "requiredSolidBlocksBelow": 1,
+    "requireInsideWorldBorder": true
+  }
 }

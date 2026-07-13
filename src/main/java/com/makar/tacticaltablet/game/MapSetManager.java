@@ -44,17 +44,7 @@ public final class MapSetManager {
     private static final String STATE_FILE = "map_set_state.json";
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
     private static final Random RANDOM = new Random();
-    private static final List<String> TEST_MAPS = List.of(
-            "Лесецк",
-            "Дикий Запад",
-            "Глубокая пещера",
-            "Раскольск",
-            "Манийск",
-            "Завод",
-            "Долина",
-            "Аэродром",
-            "Советский город"
-    );
+    private static List<String> votingMaps = List.of();
 
     private static final Map<UUID, String> votes = new HashMap<>();
     private static SetState state = new SetState();
@@ -166,6 +156,12 @@ public final class MapSetManager {
         if (server == null || voting || restartSecondsLeft >= 0) return;
 
         initStorage(server);
+        votingMaps = List.copyOf(MapRotationManager.listMapNames(server));
+        if (votingMaps.isEmpty()) {
+            TacticalTabletMod.LOGGER.error("Cannot start map voting: map rotation pool is empty.");
+            broadcast(server, "[WAR] Map voting cannot start because the map rotation pool is empty.");
+            return;
+        }
         if (debug) {
             state.completedGames = GAMES_PER_MAP;
             saveState();
@@ -293,7 +289,7 @@ public final class MapSetManager {
     }
 
     public static synchronized List<String> mapPool() {
-        return TEST_MAPS;
+        return votingMaps;
     }
 
     private static MapVoteStatePacket createStatePacket(ServerPlayer player, boolean openScreen) {
@@ -306,7 +302,7 @@ public final class MapSetManager {
                 state.nextSetClanWar,
                 voteSecondsLeft,
                 votes.getOrDefault(player.getUUID(), ""),
-                TEST_MAPS,
+                votingMaps,
                 counts
         );
     }
@@ -320,7 +316,7 @@ public final class MapSetManager {
 
     private static Map<String, Integer> voteCounts() {
         Map<String, Integer> counts = new LinkedHashMap<>();
-        for (String map : TEST_MAPS) counts.put(map, 0);
+        for (String map : votingMaps) counts.put(map, 0);
         for (String vote : votes.values()) counts.computeIfPresent(vote, (ignored, value) -> value + 1);
         return counts;
     }
@@ -330,17 +326,17 @@ public final class MapSetManager {
         int best = counts.values().stream().max(Comparator.naturalOrder()).orElse(0);
         List<String> leaders = new ArrayList<>();
 
-        for (String map : TEST_MAPS) {
+        for (String map : votingMaps) {
             if (counts.getOrDefault(map, 0) == best) leaders.add(map);
         }
 
-        if (leaders.isEmpty()) return TEST_MAPS.get(0);
+        if (leaders.isEmpty()) return votingMaps.isEmpty() ? "" : votingMaps.get(0);
         return leaders.get(RANDOM.nextInt(leaders.size()));
     }
 
     private static String canonicalMapName(String value) {
         String normalized = normalize(value);
-        for (String map : TEST_MAPS) {
+        for (String map : votingMaps) {
             if (normalize(map).equals(normalized)) return map;
         }
         return null;
@@ -419,6 +415,7 @@ public final class MapSetManager {
         voteSecondsLeft = 0;
         restartSecondsLeft = -1;
         selectedMap = "";
+        votingMaps = List.of();
         stopIssued = false;
     }
 

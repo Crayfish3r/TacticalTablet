@@ -210,12 +210,15 @@ public class RtpTimerManager {
         TeamId teamId = TeamMatchManager.getTeam(trigger);
         if (teamId == null) return false;
 
-        List<ServerPlayer> members = TeamMatchManager.getOnlineTeamMembers(server, teamId)
-                .stream()
-                .filter(player -> canRtp(player, false))
-                .toList();
+        List<ServerPlayer> members = TeamMatchManager.getOnlineTeamMembers(server, teamId);
 
-        if (members.isEmpty()) return false;
+        if (members.isEmpty()) return true;
+        if (members.stream().anyMatch(player -> !canRtp(player, false))) {
+            timers.put(trigger.getUUID(), RETRY_DELAY);
+            trigger.sendSystemMessage(Component.literal("[WAR] РљРѕРјР°РЅРґР° РµС‰С‘ РЅРµ РіРѕС‚РѕРІР° Рє РѕР±С‰РµРјСѓ RTP. РџРѕРІС‚РѕСЂСЏРµРј..."));
+            LobbyManager.sync(trigger);
+            return true;
+        }
 
         boolean success = SafeTeleport.teleportTeam(members);
         if (!success) {

@@ -2,6 +2,9 @@ package com.makar.tacticaltablet.game.teleport;
 
 import com.makar.tacticaltablet.core.TacticalTabletMod;
 import com.makar.tacticaltablet.game.GameStateManager;
+import com.makar.tacticaltablet.game.zone.ZoneManager;
+import com.makar.tacticaltablet.game.zone.ZoneManager.RtpPlacementMode;
+import com.makar.tacticaltablet.game.zone.ZoneManager.RtpSettings;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
@@ -59,6 +62,8 @@ public class SafeTeleport {
     private static int poolAttempts = 0;
     private static int poolMaxAttempts = 0;
     private static int chunkLoadBudget = 0;
+    private static RtpSettings activeRtpSettings = RtpSettings.surfaceDefaults();
+    private static String poolConfigurationError = "";
 
     public static synchronized PoolStatus preparePool(MinecraftServer server) {
         return beginPoolPreparation(server);
@@ -73,21 +78,37 @@ public class SafeTeleport {
         poolAttempts = 0;
         poolMaxAttempts = 0;
         poolRandom = RandomSource.create();
+        activeRtpSettings = ZoneManager.getActiveRtpSettings();
+        poolConfigurationError = "";
 
         ServerLevel overworld = GameStateManager.getOverworld(server);
         if (overworld == null) {
             return new PoolStatus(0, 0, 0, 0.0D, 0.0D);
         }
 
+        ZoneManager.RtpValidation validation = ZoneManager.validateActiveRtpSettings(overworld);
+        if (!validation.valid()) {
+            poolConfigurationError = validation.reason();
+            TacticalTabletMod.LOGGER.error(
+                    "[TacticalTablet] Invalid FIXED_Y_BOX RTP configuration: bounds=[{}..{}, {}..{}], spawnY={}, reason={}",
+                    activeRtpSettings.minX(), activeRtpSettings.maxX(), activeRtpSettings.minZ(), activeRtpSettings.maxZ(),
+                    activeRtpSettings.spawnY(), validation.reason()
+            );
+            return getPoolStatus(overworld);
+        }
+
         int players = Math.max(1, server.getPlayerList().getPlayerCount());
         poolTarget = Math.min(MAX_POOL_SIZE, Math.max(MIN_POOL_SIZE, players * POOL_POINTS_PER_PLAYER));
-        poolMaxAttempts = poolTarget * POOL_ATTEMPT_MULTIPLIER;
+        poolMaxAttempts = activeRtpSettings.mode() == RtpPlacementMode.FIXED_Y_BOX
+                ? activeRtpSettings.maxAttempts()
+                : poolTarget * POOL_ATTEMPT_MULTIPLIER;
         poolPreparing = true;
 
         WorldBorder border = overworld.getWorldBorder();
 
         TacticalTabletMod.LOGGER.info(
-                "Started RTP spawn pool preparation. target={}, maxAttempts={}, borderSize={}, margin={}",
+                "Started RTP spawn pool preparation. mode={}, target={}, maxAttempts={}, borderSize={}, margin={}",
+                activeRtpSettings.mode(),
                 poolTarget,
                 poolMaxAttempts,
                 border.getSize(),
@@ -114,7 +135,8 @@ public class SafeTeleport {
             poolPreparing = false;
             WorldBorder border = overworld.getWorldBorder();
             TacticalTabletMod.LOGGER.info(
-                    "Finished RTP spawn pool preparation. prepared={} target={} attempts={} borderSize={}, margin={}",
+                    "[TacticalTablet] Prepared RTP pool: mode={}, safePoints={}, target={}, attempts={}, borderSize={}, margin={}",
+                    activeRtpSettings.mode(),
                     preparedSpawns.size(),
                     poolTarget,
                     poolAttempts,
@@ -137,7 +159,14 @@ public class SafeTeleport {
         }
 
         int target = Math.min(MAX_POOL_SIZE, Math.max(1, requested));
-        int maxAttempts = target * POOL_ATTEMPT_MULTIPLIER;
+        activeRtpSettings = ZoneManager.getActiveRtpSettings();
+        ZoneManager.RtpValidation validation = ZoneManager.validateActiveRtpSettings(overworld);
+        if (!validation.valid()) {
+            return new TestResult(target, 0, 0, overworld.getWorldBorder().getSize(), getSpawnBorderMargin(overworld.getWorldBorder()), List.of());
+        }
+        int maxAttempts = activeRtpSettings.mode() == RtpPlacementMode.FIXED_Y_BOX
+                ? activeRtpSettings.maxAttempts()
+                : target * POOL_ATTEMPT_MULTIPLIER;
         RandomSource random = RandomSource.create();
         List<BlockPos> valid = new ArrayList<>();
         List<PlayerPosition> validPositions = new ArrayList<>();
@@ -186,6 +215,8 @@ public class SafeTeleport {
         poolTarget = 0;
         poolAttempts = 0;
         poolMaxAttempts = 0;
+        poolConfigurationError = "";
+        activeRtpSettings = RtpSettings.surfaceDefaults();
     }
 
     public static boolean teleport(ServerPlayer player) {
@@ -193,6 +224,7 @@ public class SafeTeleport {
 
         ServerLevel overworld = GameStateManager.getOverworld(player.server);
         if (overworld == null) return false;
+        if (!isRtpConfigurationUsable(overworld)) return false;
 
         RandomSource random = RandomSource.create();
         BlockPos safePos = takeBestPreparedPoint(player, overworld, random);
@@ -204,8 +236,11 @@ public class SafeTeleport {
         if (safePos == null) {
             WorldBorder border = overworld.getWorldBorder();
             TacticalTabletMod.LOGGER.warn(
-                    "Safe RTP point not found for {}. borderCenter=({}, {}), borderSize={}, attempts={}, preparedPool={}",
+                    "Safe RTP point not found for {}. mode={}, bounds=[{}..{}, {}..{}], spawnY={}, borderCenter=({}, {}), borderSize={}, attempts={}, preparedPool={}",
                     player.getGameProfile().getName(),
+                    activeRtpSettings.mode(),
+                    activeRtpSettings.minX(), activeRtpSettings.maxX(),
+                    activeRtpSettings.minZ(), activeRtpSettings.maxZ(), activeRtpSettings.spawnY(),
                     border.getCenterX(),
                     border.getCenterZ(),
                     border.getSize(),
@@ -238,6 +273,7 @@ public class SafeTeleport {
 
         ServerLevel overworld = GameStateManager.getOverworld(anchorPlayer.server);
         if (overworld == null) return false;
+        if (!isRtpConfigurationUsable(overworld)) return false;
 
         RandomSource random = RandomSource.create();
         BlockPos anchor = takeBestPreparedPoint(anchorPlayer, overworld, random);
@@ -264,9 +300,12 @@ public class SafeTeleport {
             return false;
         }
 
+        for (ServerPlayer player : players) {
+            if (player == null) return false;
+        }
+
         for (int i = 0; i < players.size(); i++) {
             ServerPlayer player = players.get(i);
-            if (player == null) continue;
 
             BlockPos safePos = positions.get(i);
             player.changeDimension(overworld);
@@ -287,11 +326,16 @@ public class SafeTeleport {
     private static List<BlockPos> findTeamCluster(ServerLevel overworld, BlockPos anchor, int count) {
         List<BlockPos> positions = new ArrayList<>();
 
-        for (int[] offset : TEAM_OFFSETS) {
+        int[][] offsets = activeRtpSettings.mode() == RtpPlacementMode.FIXED_Y_BOX
+                ? fixedTeamOffsets(activeRtpSettings.teamSpreadRadius(), count)
+                : TEAM_OFFSETS;
+        for (int[] offset : offsets) {
             if (positions.size() >= count) break;
 
             BlockPos base = anchor.offset(offset[0], 0, offset[1]);
-            BlockPos safe = findSafeNear(overworld, base.getX(), base.getZ(), getSpawnBorderMargin(overworld.getWorldBorder()));
+            BlockPos safe = activeRtpSettings.mode() == RtpPlacementMode.FIXED_Y_BOX
+                    ? findFixedYSafeNear(overworld, base.getX(), base.getZ(), activeRtpSettings)
+                    : findSafeNear(overworld, base.getX(), base.getZ(), getSpawnBorderMargin(overworld.getWorldBorder()));
             if (safe == null) continue;
             if (!positions.contains(safe)) {
                 positions.add(safe);
@@ -499,6 +543,10 @@ public class SafeTeleport {
             List<PlayerPosition> occupiedPositions,
             boolean strictDistance
     ) {
+        if (activeRtpSettings.mode() == RtpPlacementMode.FIXED_Y_BOX) {
+            return createFixedYSafePoint(overworld, random, occupiedPositions, strictDistance);
+        }
+
         WorldBorder border = overworld.getWorldBorder();
         double centerX = border.getCenterX();
         double centerZ = border.getCenterZ();
@@ -531,6 +579,35 @@ public class SafeTeleport {
         return position;
     }
 
+    private static boolean isRtpConfigurationUsable(ServerLevel level) {
+        if (!activeRtpSettings.valid()) return false;
+        return ZoneManager.validateActiveRtpSettings(level).valid();
+    }
+
+    private static BlockPos createFixedYSafePoint(
+            ServerLevel level,
+            RandomSource random,
+            List<PlayerPosition> occupiedPositions,
+            boolean strictDistance
+    ) {
+        RtpSettings settings = activeRtpSettings;
+        BlockPos position = new BlockPos(
+                randomBetween(random, settings.minX(), settings.maxX()),
+                settings.spawnY(),
+                randomBetween(random, settings.minZ(), settings.maxZ())
+        );
+        if (!isSafeSpawn(level, position)) return null;
+        if (strictDistance && !isFarEnough(occupiedPositions, position, getMinPlayerDistance(level.getWorldBorder()))) {
+            return null;
+        }
+        return position;
+    }
+
+    private static int randomBetween(RandomSource random, int min, int max) {
+        long range = (long) max - min + 1L;
+        return (int) (min + Math.floorMod(random.nextLong(), range));
+    }
+
     private static BlockPos findSafeNear(ServerLevel level, double x, double z, double margin) {
         int baseX = (int) Math.floor(x);
         int baseZ = (int) Math.floor(z);
@@ -552,6 +629,20 @@ public class SafeTeleport {
             }
         }
 
+        return null;
+    }
+
+    private static BlockPos findFixedYSafeNear(ServerLevel level, int baseX, int baseZ, RtpSettings settings) {
+        int radiusLimit = settings.localSearchRadius();
+        for (int radius = 0; radius <= radiusLimit; radius++) {
+            for (int dx = -radius; dx <= radius; dx++) {
+                for (int dz = -radius; dz <= radius; dz++) {
+                    if (radius > 0 && Math.abs(dx) != radius && Math.abs(dz) != radius) continue;
+                    BlockPos candidate = new BlockPos(baseX + dx, settings.spawnY(), baseZ + dz);
+                    if (isSafeSpawn(level, candidate)) return candidate;
+                }
+            }
+        }
         return null;
     }
 
@@ -651,7 +742,11 @@ public class SafeTeleport {
         if (pos.getY() >= level.getMaxBuildHeight() - 2) return false;
 
         WorldBorder border = level.getWorldBorder();
-        if (!isInsideBorder(border, pos.getX() + 0.5D, pos.getZ() + 0.5D, getSpawnBorderMargin(border))) {
+        if (activeRtpSettings.mode() == RtpPlacementMode.FIXED_Y_BOX) {
+            if (!isInsideFixedYBox(pos, activeRtpSettings)) return false;
+            if (activeRtpSettings.requireInsideWorldBorder()
+                    && !isInsideBorder(border, pos.getX() + 0.5D, pos.getZ() + 0.5D, 0.0D)) return false;
+        } else if (!isInsideBorder(border, pos.getX() + 0.5D, pos.getZ() + 0.5D, getSpawnBorderMargin(border))) {
             return false;
         }
 
@@ -664,15 +759,21 @@ public class SafeTeleport {
         if (level.getBlockEntity(pos) != null) return false;
         if (level.getBlockEntity(pos.above()) != null) return false;
         if (!isStandable(level, groundPos, ground)) return false;
-        if (!hasStableGroundBelow(level, groundPos)) return false;
+        if (!hasStableGroundBelow(level, groundPos, activeRtpSettings.requiredSolidBlocksBelow())) return false;
         if (!isPassable(level, pos, feet)) return false;
         if (!isPassable(level, pos.above(), head)) return false;
 
         return !isHazard(ground) && !isHazard(feet) && !isHazard(head);
     }
 
-    private static boolean hasStableGroundBelow(ServerLevel level, BlockPos groundPos) {
-        for (int i = 1; i <= 3; i++) {
+    private static boolean isInsideFixedYBox(BlockPos position, RtpSettings settings) {
+        return position.getX() >= settings.minX() && position.getX() <= settings.maxX()
+                && position.getZ() >= settings.minZ() && position.getZ() <= settings.maxZ()
+                && position.getY() == settings.spawnY();
+    }
+
+    private static boolean hasStableGroundBelow(ServerLevel level, BlockPos groundPos, int requiredSolidBlocks) {
+        for (int i = 1; i <= requiredSolidBlocks; i++) {
             BlockPos belowPos = groundPos.below(i);
             BlockState below = level.getBlockState(belowPos);
 
@@ -682,6 +783,24 @@ public class SafeTeleport {
         }
 
         return true;
+    }
+
+    private static int[][] fixedTeamOffsets(int spreadRadius, int count) {
+        int spread = Math.max(1, spreadRadius);
+        List<int[]> offsets = new ArrayList<>();
+        offsets.add(new int[]{0, 0});
+        for (int ring = 1; offsets.size() < count * 4; ring++) {
+            int radius = ring * spread;
+            offsets.add(new int[]{radius, 0});
+            offsets.add(new int[]{-radius, 0});
+            offsets.add(new int[]{0, radius});
+            offsets.add(new int[]{0, -radius});
+            offsets.add(new int[]{radius, radius});
+            offsets.add(new int[]{-radius, radius});
+            offsets.add(new int[]{radius, -radius});
+            offsets.add(new int[]{-radius, -radius});
+        }
+        return offsets.toArray(new int[0][]);
     }
 
     private static boolean isStandable(ServerLevel level, BlockPos pos, BlockState state) {

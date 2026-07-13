@@ -62,6 +62,7 @@ public final class ZoneManager {
     private static final ZoneFinalRevealScheduler FINAL_REVEAL_SCHEDULER =
             new ZoneFinalRevealScheduler(FINAL_REVEAL_INTERVAL_SECONDS);
     private static ServerBossEvent zoneBossBar;
+    private static volatile RtpSettings activeRtpSettings = RtpSettings.surfaceDefaults();
 
     private ZoneManager() {
     }
@@ -71,6 +72,7 @@ public final class ZoneManager {
         secondsLeft = 0;
         FINAL_REVEAL_SCHEDULER.reset();
         ZoneSettings settings = loadSettings(server);
+        activateRtpSettings(settings.rtpSettings);
         applyConfiguredCenter(server, settings, true);
         int playerCount = GameStateManager.onlinePlayers(server);
         int initialPhaseIndex = ZonePacingPolicy.initialPhaseIndex(playerCount, SMALL_MATCH_INITIAL_PHASE_INDEX);
@@ -95,6 +97,7 @@ public final class ZoneManager {
         if (overworld == null) return;
 
         ZoneSettings settings = loadSettings(server);
+        activateRtpSettings(settings.rtpSettings);
         WorldBorder border = overworld.getWorldBorder();
         border.setCenter(settings.zoneCenterX, settings.zoneCenterZ);
         border.setSize(360.0D);
@@ -315,7 +318,50 @@ public final class ZoneManager {
         }
 
         value.zoneRandomRadius = Math.max(0, Math.min(MAX_RANDOM_RADIUS, value.zoneRandomRadius));
+        value.rtpSettings = RtpSettings.fromRaw(value.rtp);
         return value;
+    }
+
+    /** The immutable RTP policy loaded once for the active map. */
+    public static RtpSettings getActiveRtpSettings() {
+        return activeRtpSettings;
+    }
+
+    // Package-private for parser regression tests; production loading uses the same DTO normalization path.
+    static RtpSettings parseRtpSettingsJson(String json) {
+        ZoneSettings settings = GSON.fromJson(json, ZoneSettings.class);
+        return normalize(settings).rtpSettings;
+    }
+
+    public static RtpValidation validateActiveRtpSettings(ServerLevel level) {
+        RtpSettings settings = activeRtpSettings;
+        if (!settings.valid()) return new RtpValidation(false, settings.validationError());
+        if (settings.mode() != RtpPlacementMode.FIXED_Y_BOX) return RtpValidation.success();
+        if (level == null) return new RtpValidation(false, "overworld is unavailable");
+        if (settings.spawnY() <= level.getMinBuildHeight() || settings.spawnY() >= level.getMaxBuildHeight()) {
+            return new RtpValidation(false, "spawnY is outside the dimension build height");
+        }
+        if (settings.requireInsideWorldBorder()) {
+            WorldBorder border = level.getWorldBorder();
+            boolean intersects = settings.maxX() + 0.5D > border.getMinX()
+                    && settings.minX() + 0.5D < border.getMaxX()
+                    && settings.maxZ() + 0.5D > border.getMinZ()
+                    && settings.minZ() + 0.5D < border.getMaxZ();
+            if (!intersects) return new RtpValidation(false, "RTP box does not intersect the WorldBorder");
+        }
+        return RtpValidation.success();
+    }
+
+    private static void activateRtpSettings(RtpSettings settings) {
+        activeRtpSettings = settings == null ? RtpSettings.surfaceDefaults() : settings;
+        if (activeRtpSettings.mode() == RtpPlacementMode.FIXED_Y_BOX && activeRtpSettings.valid()) {
+            TacticalTabletMod.LOGGER.info(
+                    "[TacticalTablet] Loaded RTP configuration: mode=FIXED_Y_BOX, bounds=[{}..{}, {}..{}], spawnY={}",
+                    activeRtpSettings.minX(), activeRtpSettings.maxX(), activeRtpSettings.minZ(), activeRtpSettings.maxZ(), activeRtpSettings.spawnY()
+            );
+        } else if (!activeRtpSettings.valid()) {
+            TacticalTabletMod.LOGGER.error("[TacticalTablet] Invalid FIXED_Y_BOX RTP configuration: {}", activeRtpSettings.validationError());
+        }
     }
 
     private static void writeDefaultConfig(Path configPath, ZoneSettings defaults) {
@@ -363,13 +409,116 @@ public final class ZoneManager {
         Double zoneCenterX;
         Double zoneCenterZ;
         Integer zoneRandomRadius;
+        RtpSettingsJson rtp;
+        transient RtpSettings rtpSettings;
 
         private static ZoneSettings defaults() {
             ZoneSettings settings = new ZoneSettings();
             settings.zoneCenterX = DEFAULT_CENTER_X;
             settings.zoneCenterZ = DEFAULT_CENTER_Z;
             settings.zoneRandomRadius = DEFAULT_RANDOM_RADIUS;
+            settings.rtpSettings = RtpSettings.surfaceDefaults();
             return settings;
+        }
+    }
+
+    private static final class RtpSettingsJson {
+        String mode;
+        Integer minX;
+        Integer maxX;
+        Integer minZ;
+        Integer maxZ;
+        Integer spawnY;
+        Integer maxAttempts;
+        Integer localSearchRadius;
+        Integer teamSpreadRadius;
+        Integer requiredSolidBlocksBelow;
+        Boolean requireInsideWorldBorder;
+    }
+
+    public enum RtpPlacementMode {
+        WORLD_BORDER_SURFACE,
+        FIXED_Y_BOX
+    }
+
+    public record RtpSettings(
+            RtpPlacementMode mode,
+            int minX,
+            int maxX,
+            int minZ,
+            int maxZ,
+            int spawnY,
+            int maxAttempts,
+            int localSearchRadius,
+            int teamSpreadRadius,
+            int requiredSolidBlocksBelow,
+            boolean requireInsideWorldBorder,
+            boolean valid,
+            String validationError
+    ) {
+        private static final int DEFAULT_MAX_ATTEMPTS = 80;
+        private static final int DEFAULT_LOCAL_SEARCH_RADIUS = 14;
+        private static final int DEFAULT_TEAM_SPREAD_RADIUS = 4;
+        private static final int DEFAULT_SOLID_BLOCKS_BELOW = 3;
+
+        public static RtpSettings surfaceDefaults() {
+            return new RtpSettings(RtpPlacementMode.WORLD_BORDER_SURFACE, 0, 0, 0, 0, 0,
+                    DEFAULT_MAX_ATTEMPTS, DEFAULT_LOCAL_SEARCH_RADIUS, DEFAULT_TEAM_SPREAD_RADIUS,
+                    DEFAULT_SOLID_BLOCKS_BELOW, true, true, "");
+        }
+
+        private static RtpSettings fromRaw(RtpSettingsJson raw) {
+            if (raw == null || raw.mode == null || raw.mode.isBlank()) return surfaceDefaults();
+
+            RtpPlacementMode mode;
+            try {
+                mode = RtpPlacementMode.valueOf(raw.mode.trim().toUpperCase(java.util.Locale.ROOT));
+            } catch (IllegalArgumentException exception) {
+                return invalid("unknown mode '" + raw.mode + "'");
+            }
+            if (mode == RtpPlacementMode.WORLD_BORDER_SURFACE) return surfaceDefaults();
+
+            if (raw.minX == null || raw.maxX == null || raw.minZ == null || raw.maxZ == null || raw.spawnY == null) {
+                return invalid("FIXED_Y_BOX requires minX, maxX, minZ, maxZ, and spawnY");
+            }
+
+            int minX = raw.minX;
+            int maxX = raw.maxX;
+            int minZ = raw.minZ;
+            int maxZ = raw.maxZ;
+            int spawnY = raw.spawnY;
+            int maxAttempts = valueOr(raw.maxAttempts, DEFAULT_MAX_ATTEMPTS);
+            int localSearchRadius = valueOr(raw.localSearchRadius, DEFAULT_LOCAL_SEARCH_RADIUS);
+            int teamSpreadRadius = valueOr(raw.teamSpreadRadius, DEFAULT_TEAM_SPREAD_RADIUS);
+            int solidBelow = valueOr(raw.requiredSolidBlocksBelow, DEFAULT_SOLID_BLOCKS_BELOW);
+            boolean requireBorder = raw.requireInsideWorldBorder == null || raw.requireInsideWorldBorder;
+
+            String error = null;
+            if (minX > maxX) error = "minX is greater than maxX";
+            else if (minZ > maxZ) error = "minZ is greater than maxZ";
+            else if (maxAttempts <= 0) error = "maxAttempts must be greater than zero";
+            else if (localSearchRadius < 0) error = "localSearchRadius must not be negative";
+            else if (teamSpreadRadius < 0) error = "teamSpreadRadius must not be negative";
+            else if (solidBelow < 1) error = "requiredSolidBlocksBelow must be at least one";
+            return new RtpSettings(mode, minX, maxX, minZ, maxZ, spawnY, maxAttempts,
+                    localSearchRadius, teamSpreadRadius, solidBelow, requireBorder, error == null, error == null ? "" : error);
+        }
+
+        private static int valueOr(Integer value, int fallback) {
+            return value == null ? fallback : value;
+        }
+
+        private static RtpSettings invalid(String reason) {
+            RtpSettings defaults = surfaceDefaults();
+            return new RtpSettings(RtpPlacementMode.FIXED_Y_BOX, 0, 0, 0, 0, 0,
+                    defaults.maxAttempts(), defaults.localSearchRadius(), defaults.teamSpreadRadius(),
+                    defaults.requiredSolidBlocksBelow(), true, false, reason);
+        }
+    }
+
+    public record RtpValidation(boolean valid, String reason) {
+        private static RtpValidation success() {
+            return new RtpValidation(true, "");
         }
     }
 }
