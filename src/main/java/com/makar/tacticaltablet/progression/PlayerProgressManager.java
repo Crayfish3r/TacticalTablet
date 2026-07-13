@@ -43,6 +43,7 @@ import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.BooleanSupplier;
 import java.util.stream.Stream;
 
 public class PlayerProgressManager {
@@ -188,6 +189,13 @@ public class PlayerProgressManager {
         INVALID_CLASS,
         MAX_TIER,
         WRONG_TIER
+    }
+
+    public enum ExclusiveClassGrantResult {
+        GRANTED,
+        ALREADY_OWNED,
+        INVALID_CLASS,
+        SAVE_FAILED
     }
 
     public static String[] getStandardClasses() {
@@ -819,28 +827,89 @@ public class PlayerProgressManager {
 
     public static synchronized boolean isExclusiveClassGranted(ServerPlayer player, String clazz) {
         if (player == null || clazz == null) return false;
-
-        String normalizedClass = normalizeClass(clazz);
-        if (!isExclusiveClass(normalizedClass)) return false;
-
-        PlayerProgress progress = getOrLoad(player, getPlayerKey(player));
-        return progress.purchasedClasses.getOrDefault(normalizedClass, 0) > 0;
+        return isExclusiveClassGranted(player.server, player.getUUID(), player.getGameProfile().getName(), clazz);
     }
 
     public static synchronized boolean grantExclusiveClass(ServerPlayer player, String clazz) {
         if (player == null || clazz == null) return false;
 
+        return grantExclusiveClass(player.server, player.getUUID(), player.getGameProfile().getName(), clazz)
+                == ExclusiveClassGrantResult.GRANTED;
+    }
+
+    public static synchronized boolean isExclusiveClassGranted(
+            MinecraftServer server,
+            UUID uuid,
+            String lastKnownName,
+            String clazz
+    ) {
+        if (server == null || uuid == null || clazz == null) return false;
+
         String normalizedClass = normalizeClass(clazz);
         if (!isExclusiveClass(normalizedClass)) return false;
 
-        String key = getPlayerKey(player);
-        PlayerProgress progress = getOrLoad(player, key);
-        if (progress.purchasedClasses.getOrDefault(normalizedClass, 0) > 0) return false;
+        PlayerProgress progress = getOrLoad(server, uuid, lastKnownName);
+        return progress.purchasedClasses.getOrDefault(normalizedClass, 0) > 0;
+    }
 
-        progress.purchasedClasses.put(normalizedClass, 1);
-        progress.classes.putIfAbsent(normalizedClass, 0);
-        markDirty(key);
-        return true;
+    public static synchronized ExclusiveClassGrantResult grantExclusiveClass(
+            MinecraftServer server,
+            UUID uuid,
+            String lastKnownName,
+            String clazz
+    ) {
+        if (server == null || uuid == null || clazz == null) {
+            return ExclusiveClassGrantResult.INVALID_CLASS;
+        }
+
+        PlayerProgress progress = getOrLoad(server, uuid, lastKnownName);
+        return grantExclusiveClassForPersistence(
+                progress.purchasedClasses,
+                progress.classes,
+                clazz,
+                () -> saveOffline(uuid, progress)
+        );
+    }
+
+    static ExclusiveClassGrantResult grantExclusiveClassForPersistence(
+            Map<String, Integer> purchasedClasses,
+            Map<String, Integer> classes,
+            String clazz,
+            BooleanSupplier save
+    ) {
+        String normalizedClass = normalizeClass(clazz);
+        if (purchasedClasses == null || classes == null || save == null || !isExclusiveClass(normalizedClass)) {
+            return ExclusiveClassGrantResult.INVALID_CLASS;
+        }
+        if (purchasedClasses.getOrDefault(normalizedClass, 0) > 0) {
+            return ExclusiveClassGrantResult.ALREADY_OWNED;
+        }
+
+        Integer previousPurchasedValue = purchasedClasses.get(normalizedClass);
+        boolean xpEntryExisted = classes.containsKey(normalizedClass);
+        Integer previousXpValue = classes.get(normalizedClass);
+
+        purchasedClasses.put(normalizedClass, 1);
+        classes.putIfAbsent(normalizedClass, 0);
+        if (save.getAsBoolean()) {
+            return ExclusiveClassGrantResult.GRANTED;
+        }
+
+        restoreMapValue(purchasedClasses, normalizedClass, previousPurchasedValue);
+        if (xpEntryExisted) {
+            classes.put(normalizedClass, previousXpValue);
+        } else {
+            classes.remove(normalizedClass);
+        }
+        return ExclusiveClassGrantResult.SAVE_FAILED;
+    }
+
+    private static void restoreMapValue(Map<String, Integer> values, String key, Integer previousValue) {
+        if (previousValue == null) {
+            values.remove(key);
+        } else {
+            values.put(key, previousValue);
+        }
     }
     public static synchronized Map<String, Integer> getPurchasedClasses(ServerPlayer player) {
         Map<String, Integer> result = new HashMap<>();
