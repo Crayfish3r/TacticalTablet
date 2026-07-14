@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 class PacketRegistryTest {
 
     @Test
-    void registryPreservesAllProtocol31IdsAndDirections() {
+    void registryPreservesAllProtocol32IdsAndDirections() {
         var entries = PacketProtocol.entries();
         Map<Class<?>, PacketProtocol.Entry> map = entries.stream()
                 .collect(java.util.stream.Collectors.toMap(PacketProtocol.Entry::packetClass, entry -> entry));

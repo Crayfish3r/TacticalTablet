@@ -22,10 +22,9 @@ import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
-/** Stable Tactical Tablet protocol registry. IDs are wire-compatible with protocol 31. */
+/** Tactical Tablet protocol registry. Protocol 32 changes TabletPacket upgrade action semantics. */
 public final class PacketHandler {
-    /** No wire format or packet semantics changed in this hardening patch. */
-    public static final String VERSION = "31";
+    public static final String VERSION = "32";
 
     public static final int TABLET = 0, TABLET_STATE = 1, VOTE_MODE = 2, JOIN_TEAM = 3, VOTE_MAP = 4,
             MAP_VOTE_STATE = 5, SET_COMPETITIVE = 6, SET_CLAN_WAR = 7, CONTRACT_SELECTION_STATE = 8,

@@ -9,6 +9,7 @@ import com.makar.tacticaltablet.game.lobby.LobbyManager;
 import com.makar.tacticaltablet.game.respawn.RtpTimerManager;
 import com.makar.tacticaltablet.inventory.InventoryManager;
 import com.makar.tacticaltablet.progression.ClassCooldownManager;
+import com.makar.tacticaltablet.progression.ClassTier;
 import com.makar.tacticaltablet.progression.kit.KitManager;
 import com.makar.tacticaltablet.progression.PlayerProgressManager;
 import com.makar.tacticaltablet.tablet.PlayerTabletState;
@@ -20,16 +21,16 @@ import net.minecraftforge.network.NetworkEvent;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.Supplier;
 
 public class TabletPacket {
 
     private static final int RTP_ACTION_ID = 7;
     private static final int MIN_ACTION_ID = 0;
-    private static final int MAX_ACTION_ID = 314;
+    private static final int MAX_ACTION_ID = 523;
     private static final int UNLOCK_BASE_ACTION_OFFSET = 100;
-    private static final int UPGRADE_EPIC_ACTION_OFFSET = 200;
-    private static final int UPGRADE_LEGEND_ACTION_OFFSET = 300;
+    private static final int UPGRADE_ACTION_OFFSET_STEP = 100;
 
     private static final Map<Integer, String> KITS = Map.ofEntries(
             Map.entry(0, "stormtrooper"),
@@ -108,13 +109,9 @@ public class TabletPacket {
                 return;
             }
 
-            if (isUpgradeEpicAction(actionId)) {
-                handleTierUpgrade(player, actionId - UPGRADE_EPIC_ACTION_OFFSET, PlayerProgressManager.EPIC_TIER);
-                return;
-            }
-
-            if (isUpgradeLegendAction(actionId)) {
-                handleTierUpgrade(player, actionId - UPGRADE_LEGEND_ACTION_OFFSET, PlayerProgressManager.LEGEND_TIER);
+            Optional<UpgradeAction> upgrade = decodeUpgradeAction(actionId);
+            if (upgrade.isPresent()) {
+                handleTierUpgrade(player, upgrade.get().classActionId(), upgrade.get().targetTier());
                 return;
             }
 
@@ -138,24 +135,28 @@ public class TabletPacket {
         return UNLOCK_BASE_ACTION_OFFSET + classActionId;
     }
 
-    public static int upgradeEpicActionId(int classActionId) {
-        return UPGRADE_EPIC_ACTION_OFFSET + classActionId;
+    public static int upgradeActionId(int classActionId, int targetTier) {
+        if (!KITS.containsKey(classActionId) || ClassTier.byId(targetTier).isEmpty()
+                || targetTier == ClassTier.BASIC.id()) {
+            return -1;
+        }
+        return (targetTier + 1) * UPGRADE_ACTION_OFFSET_STEP + classActionId;
     }
 
-    public static int upgradeLegendActionId(int classActionId) {
-        return UPGRADE_LEGEND_ACTION_OFFSET + classActionId;
+    public static Optional<UpgradeAction> decodeUpgradeAction(int actionId) {
+        if (actionId < 200 || actionId > MAX_ACTION_ID) return Optional.empty();
+        int tier = actionId / UPGRADE_ACTION_OFFSET_STEP - 1;
+        int classActionId = actionId % UPGRADE_ACTION_OFFSET_STEP;
+        if (!KITS.containsKey(classActionId) || ClassTier.byId(tier).isEmpty() || tier == ClassTier.BASIC.id()) {
+            return Optional.empty();
+        }
+        return Optional.of(new UpgradeAction(classActionId, tier));
     }
+
+    public record UpgradeAction(int classActionId, int targetTier) { }
 
     private static boolean isUnlockBaseAction(int id) {
-        return id >= UNLOCK_BASE_ACTION_OFFSET && id < UPGRADE_EPIC_ACTION_OFFSET;
-    }
-
-    private static boolean isUpgradeEpicAction(int id) {
-        return id >= UPGRADE_EPIC_ACTION_OFFSET && id < UPGRADE_LEGEND_ACTION_OFFSET;
-    }
-
-    private static boolean isUpgradeLegendAction(int id) {
-        return id >= UPGRADE_LEGEND_ACTION_OFFSET && id <= MAX_ACTION_ID;
+        return id >= UNLOCK_BASE_ACTION_OFFSET && id < 200 && KITS.containsKey(id - UNLOCK_BASE_ACTION_OFFSET);
     }
 
     private void handleShopPurchase(ServerPlayer player, String kit) {
@@ -212,7 +213,7 @@ public class TabletPacket {
         }
 
         PlayerProgressManager.ProgressionResult result = PlayerProgressManager.upgradeClassTier(player, kit, targetTier);
-        String tierName = targetTier >= PlayerProgressManager.LEGEND_TIER ? "LEGEND" : "EPIC";
+        String tierName = PlayerProgressManager.getTierDisplayName(targetTier);
         switch (result) {
             case SUCCESS -> {
                 player.sendSystemMessage(Component.literal("[WAR] Класс " + getDisplayName(kit)

@@ -58,15 +58,14 @@ public class PlayerProgressManager {
     private static final String BACKUPS_DIRECTORY = "backups";
     private static final String SEASON_FILE = "season.json";
 
-    private static final int DATA_VERSION = 10;
-    public static final int STANDARD_TIER = 0;
-    public static final int EPIC_TIER = 1;
-    public static final int LEGEND_TIER = 2;
-    public static final int EPIC_XP = 300;
-    public static final int LEGEND_XP = 800;
+    private static final int DATA_VERSION = 11;
+    public static final int BASIC_TIER = ClassTier.BASIC.id();
+    public static final int RARE_TIER = ClassTier.RARE.id();
+    public static final int EPIC_TIER = ClassTier.EPIC.id();
+    public static final int LEGEND_TIER = ClassTier.LEGEND.id();
+    public static final int MONSTER_TIER = ClassTier.MONSTER.id();
+    public static final int MAX_CLASS_XP = ClassTier.MAX_XP;
     public static final int BASE_UNLOCK_COST = 25;
-    public static final int EPIC_UPGRADE_COST = 20;
-    public static final int LEGEND_UPGRADE_COST = 50;
 
     public static final int KILL_COIN_REWARD = 2;
     public static final int WIN_COIN_REWARD = 5;
@@ -138,14 +137,14 @@ public class PlayerProgressManager {
     );
 
     private static final Map<String, Integer> SHOP_CLASS_LEVELS = Map.of(
-            "boomguy", 2,
-            "dream", 2,
-            "tagilla", 2,
-            "blackops", 2,
-            "cowboy", 1,
-            "solider", 0,
-            "rebel", 2,
-            "saboteur", 2
+            "boomguy", LEGEND_TIER,
+            "dream", LEGEND_TIER,
+            "tagilla", LEGEND_TIER,
+            "blackops", LEGEND_TIER,
+            "cowboy", EPIC_TIER,
+            "solider", BASIC_TIER,
+            "rebel", LEGEND_TIER,
+            "saboteur", LEGEND_TIER
     );
 
     private static final int AUTOSAVE_INTERVAL_TICKS = 20 * 60;
@@ -198,6 +197,34 @@ public class PlayerProgressManager {
         SAVE_FAILED
     }
 
+    /** Pure validation used by the server upgrade operation and regression tests. */
+    public static ProgressionResult evaluateTierUpgrade(int currentTier, int xp, int coins, int targetTier) {
+        ClassTier current = ClassTier.clamp(currentTier);
+        if (current.isMaximum()) return ProgressionResult.MAX_TIER;
+
+        Optional<ClassTier> target = ClassTier.byId(targetTier);
+        if (target.isEmpty() || target.get() == ClassTier.BASIC) return ProgressionResult.INVALID_CLASS;
+        if (target.get().id() != current.id() + 1) return ProgressionResult.WRONG_TIER;
+        if (xp < target.get().requiredXp()) return ProgressionResult.NOT_ENOUGH_XP;
+        if (coins < target.get().upgradeCost()) return ProgressionResult.NOT_ENOUGH_COINS;
+        return ProgressionResult.SUCCESS;
+    }
+
+    public static int normalizePersistedTier(int tier) {
+        return ClassTier.clamp(tier).id();
+    }
+
+    public static int normalizePersistedXp(int xp) {
+        return Math.max(0, Math.min(MAX_CLASS_XP, xp));
+    }
+
+    /** Value-only migration contract for persisted class entries. It never remaps a valid tier ID from v10. */
+    public static PersistedClassProgress migrateClassProgress(int dataVersion, int tier, int xp) {
+        return new PersistedClassProgress(DATA_VERSION, normalizePersistedTier(tier), normalizePersistedXp(xp));
+    }
+
+    public record PersistedClassProgress(int dataVersion, int tier, int xp) { }
+
     public static String[] getStandardClasses() {
         return BASE_CLASSES.clone();
     }
@@ -229,7 +256,7 @@ public class PlayerProgressManager {
     }
 
     public static int getShopFixedLevel(String clazz) {
-        return SHOP_CLASS_LEVELS.getOrDefault(normalizeClass(clazz), 0);
+        return SHOP_CLASS_LEVELS.getOrDefault(normalizeClass(clazz), BASIC_TIER);
     }
 
     public static boolean isShopClass(String clazz) {
@@ -258,15 +285,19 @@ public class PlayerProgressManager {
     }
 
     public static int getUpgradeCost(int targetTier) {
-        if (targetTier == EPIC_TIER) return EPIC_UPGRADE_COST;
-        if (targetTier == LEGEND_TIER) return LEGEND_UPGRADE_COST;
-        return 0;
+        return ClassTier.byId(targetTier).map(ClassTier::upgradeCost).orElse(0);
     }
 
     public static int getXpCapForTier(int tier) {
-        if (tier >= LEGEND_TIER) return LEGEND_XP;
-        if (tier == EPIC_TIER) return LEGEND_XP;
-        return EPIC_XP;
+        return ClassTier.clamp(tier).xpCap();
+    }
+
+    public static int getRequiredXpForTier(int tier) {
+        return ClassTier.byId(tier).map(ClassTier::requiredXp).orElse(0);
+    }
+
+    public static String getTierDisplayName(int tier) {
+        return ClassTier.clamp(tier).displayName();
     }
 
     public static synchronized void loadPlayer(ServerPlayer player) {
@@ -285,9 +316,10 @@ public class PlayerProgressManager {
 
         int oldVersion = progress.dataVersion;
         boolean changed = updateIdentity(progress, player);
+        boolean progressionValuesInvalid = requiresProgressionNormalization(progress);
         normalize(progress);
 
-        if (oldVersion < DATA_VERSION) {
+        if (oldVersion < DATA_VERSION || progressionValuesInvalid) {
             changed = true;
         }
 
@@ -449,9 +481,9 @@ public class PlayerProgressManager {
         String normalizedClass = normalizeClass(clazz);
         String key = getPlayerKey(player);
         PlayerProgress progress = getOrLoad(player, key);
-        int value = isShopClass(normalizedClass) ? 0 : Math.max(0, amount);
+        int value = isShopClass(normalizedClass) ? 0 : normalizePersistedXp(amount);
         if (isBaseProgressionClass(normalizedClass)) {
-            value = Math.min(value, LEGEND_XP);
+            value = Math.min(value, getXpCapForTier(getStoredTier(progress, normalizedClass)));
         }
         progress.classes.put(normalizedClass, value);
         markDirty(key);
@@ -461,15 +493,15 @@ public class PlayerProgressManager {
         String normalizedClass = normalizeClass(clazz);
 
         if (MapSetManager.isCompetitiveSet()) {
-            return isBaseProgressionClass(normalizedClass) ? EPIC_TIER : STANDARD_TIER;
+            return isBaseProgressionClass(normalizedClass) ? EPIC_TIER : BASIC_TIER;
         }
 
         if (isShopClass(normalizedClass)) {
-            return isClassPurchased(player, normalizedClass) ? getShopFixedLevel(normalizedClass) : 0;
+            return isClassPurchased(player, normalizedClass) ? getShopFixedLevel(normalizedClass) : BASIC_TIER;
         }
 
         if (!isBaseClassUnlocked(player, normalizedClass)) {
-            return STANDARD_TIER;
+            return BASIC_TIER;
         }
 
         PlayerProgress progress = getOrLoad(player, getPlayerKey(player));
@@ -477,9 +509,12 @@ public class PlayerProgressManager {
     }
 
     public static int getLevelForXP(int xp) {
-        if (xp >= LEGEND_XP) return 2;
-        if (xp >= EPIC_XP) return 1;
-        return 0;
+        int normalizedXp = normalizePersistedXp(xp);
+        ClassTier result = ClassTier.BASIC;
+        for (ClassTier tier : ClassTier.values()) {
+            if (normalizedXp >= tier.requiredXp()) result = tier;
+        }
+        return result.id();
     }
 
     public static synchronized boolean isBaseClassUnlocked(ServerPlayer player, String clazz) {
@@ -522,7 +557,7 @@ public class PlayerProgressManager {
         progress.coins -= BASE_UNLOCK_COST;
         progress.unlockedBaseClasses.put(normalizedClass, 1);
         progress.classes.putIfAbsent(normalizedClass, 0);
-        progress.classTiers.putIfAbsent(normalizedClass, STANDARD_TIER);
+        progress.classTiers.putIfAbsent(normalizedClass, BASIC_TIER);
         markDirty(key);
         return ProgressionResult.SUCCESS;
     }
@@ -536,10 +571,6 @@ public class PlayerProgressManager {
             return ProgressionResult.INVALID_CLASS;
         }
 
-        if (targetTier != EPIC_TIER && targetTier != LEGEND_TIER) {
-            return ProgressionResult.INVALID_CLASS;
-        }
-
         String key = getPlayerKey(player);
         PlayerProgress progress = getOrLoad(player, key);
         if (!isBaseClassUnlocked(progress, normalizedClass)) {
@@ -547,27 +578,15 @@ public class PlayerProgressManager {
         }
 
         int currentTier = getStoredTier(progress, normalizedClass);
-        if (currentTier >= LEGEND_TIER) {
-            return ProgressionResult.MAX_TIER;
-        }
-
-        if (targetTier != currentTier + 1) {
-            return ProgressionResult.WRONG_TIER;
-        }
-
-        int requiredXp = targetTier == EPIC_TIER ? EPIC_XP : LEGEND_XP;
-        if (progress.classes.getOrDefault(normalizedClass, 0) < requiredXp) {
-            return ProgressionResult.NOT_ENOUGH_XP;
-        }
+        int currentXp = progress.classes.getOrDefault(normalizedClass, 0);
+        ProgressionResult validation = evaluateTierUpgrade(currentTier, currentXp, progress.coins, targetTier);
+        if (validation != ProgressionResult.SUCCESS) return validation;
 
         int cost = getUpgradeCost(targetTier);
-        if (progress.coins < cost) {
-            return ProgressionResult.NOT_ENOUGH_COINS;
-        }
-
         progress.coins -= cost;
         progress.classTiers.put(normalizedClass, targetTier);
-        progress.classes.put(normalizedClass, Math.min(progress.classes.getOrDefault(normalizedClass, 0), getXpCapForTier(targetTier)));
+        // XP is accumulated independently from the purchased tier and is never reset on upgrade.
+        progress.classes.put(normalizedClass, currentXp);
         markDirty(key);
         return ProgressionResult.SUCCESS;
     }
@@ -959,8 +978,8 @@ public class PlayerProgressManager {
         for (String clazz : SHOP_CLASSES) {
             String normalizedClass = normalizeClass(clazz);
             result.put(normalizedClass, MapSetManager.isCompetitiveSet()
-                    ? STANDARD_TIER
-                    : isClassPurchased(player, normalizedClass) ? getShopFixedLevel(normalizedClass) : STANDARD_TIER);
+                    ? BASIC_TIER
+                    : isClassPurchased(player, normalizedClass) ? getShopFixedLevel(normalizedClass) : BASIC_TIER);
         }
         return result;
     }
@@ -975,7 +994,7 @@ public class PlayerProgressManager {
             String normalizedClass = normalizeClass(clazz);
             if (!isBaseClassUnlocked(progress, normalizedClass)) continue;
             int xp = progress.classes.getOrDefault(normalizeClass(clazz), 0);
-            completed += Math.min(Math.max(xp, 0), LEGEND_XP) / (double) LEGEND_XP;
+            completed += normalizePersistedXp(xp) / (double) MAX_CLASS_XP;
         }
 
         for (String clazz : SHOP_CLASSES) {
@@ -1041,7 +1060,7 @@ public class PlayerProgressManager {
             String normalizedClass = normalizeClass(clazz);
             int xp = isShopClass(normalizedClass)
                     ? 0
-                    : MapSetManager.isCompetitiveSet() ? EPIC_XP : progress.classes.getOrDefault(normalizedClass, 0);
+                    : MapSetManager.isCompetitiveSet() ? ClassTier.EPIC.requiredXp() : progress.classes.getOrDefault(normalizedClass, 0);
             result.put(normalizedClass, xp);
         }
 
@@ -1057,9 +1076,9 @@ public class PlayerProgressManager {
         for (String clazz : ALL_CLASSES) {
             String normalizedClass = normalizeClass(clazz);
             int level = MapSetManager.isCompetitiveSet()
-                    ? isBaseProgressionClass(normalizedClass) ? EPIC_TIER : STANDARD_TIER
+                    ? isBaseProgressionClass(normalizedClass) ? EPIC_TIER : BASIC_TIER
                     : isShopClass(normalizedClass)
-                            ? progress.purchasedClasses.getOrDefault(normalizedClass, 0) > 0 ? getShopFixedLevel(normalizedClass) : STANDARD_TIER
+                            ? progress.purchasedClasses.getOrDefault(normalizedClass, 0) > 0 ? getShopFixedLevel(normalizedClass) : BASIC_TIER
                             : getStoredTier(progress, normalizedClass);
             result.put(normalizedClass, level);
         }
@@ -1550,10 +1569,13 @@ public class PlayerProgressManager {
             }
         }
 
+        progress.classes.replaceAll((clazz, xp) -> normalizePersistedXp(xp == null ? 0 : xp));
+        progress.classTiers.replaceAll((clazz, tier) -> normalizePersistedTier(tier == null ? BASIC_TIER : tier));
+
         for (String clazz : BASE_CLASSES) {
             String normalizedClass = normalizeClass(clazz);
-            progress.classes.put(normalizedClass, Math.min(Math.max(0, progress.classes.getOrDefault(normalizedClass, 0)), LEGEND_XP));
-            progress.classTiers.put(normalizedClass, clampTier(progress.classTiers.getOrDefault(normalizedClass, STANDARD_TIER)));
+            progress.classes.put(normalizedClass, normalizePersistedXp(progress.classes.getOrDefault(normalizedClass, 0)));
+            progress.classTiers.put(normalizedClass, clampTier(progress.classTiers.getOrDefault(normalizedClass, BASIC_TIER)));
             progress.unlockedBaseClasses.put(normalizedClass, isBaseClassUnlocked(progress, normalizedClass) ? 1 : 0);
         }
 
@@ -1566,17 +1588,35 @@ public class PlayerProgressManager {
         }
     }
 
+    private static boolean requiresProgressionNormalization(PlayerProgress progress) {
+        if (progress == null || progress.classes == null || progress.classTiers == null) return true;
+        for (Integer xp : progress.classes.values()) {
+            if (xp == null || xp != normalizePersistedXp(xp)) return true;
+        }
+        for (Integer tier : progress.classTiers.values()) {
+            if (tier == null || tier != normalizePersistedTier(tier)) return true;
+        }
+        for (String clazz : BASE_CLASSES) {
+            String normalizedClass = normalizeClass(clazz);
+            if (!progress.classes.containsKey(normalizedClass) || !progress.classTiers.containsKey(normalizedClass)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static void migrateLegacyBaseProgress(PlayerProgress progress) {
         for (String clazz : BASE_CLASSES) {
             String normalizedClass = normalizeClass(clazz);
-            int xp = Math.min(Math.max(0, progress.classes.getOrDefault(normalizedClass, 0)), LEGEND_XP);
+            int xp = normalizePersistedXp(progress.classes.getOrDefault(normalizedClass, 0));
 
             if (xp > 0 || isInitialBaseClass(normalizedClass)) {
                 progress.unlockedBaseClasses.put(normalizedClass, 1);
             }
 
             if (!progress.classTiers.containsKey(normalizedClass)) {
-                progress.classTiers.put(normalizedClass, getLevelForXP(xp));
+                // Profiles without an explicit purchase record start at BASIC; do not infer purchases from XP.
+                progress.classTiers.put(normalizedClass, BASIC_TIER);
             }
         }
     }
@@ -1589,12 +1629,12 @@ public class PlayerProgressManager {
     }
 
     private static int getStoredTier(PlayerProgress progress, String clazz) {
-        if (progress == null) return STANDARD_TIER;
-        return clampTier(progress.classTiers.getOrDefault(normalizeClass(clazz), STANDARD_TIER));
+        if (progress == null) return BASIC_TIER;
+        return clampTier(progress.classTiers.getOrDefault(normalizeClass(clazz), BASIC_TIER));
     }
 
     private static int clampTier(int tier) {
-        return Math.max(STANDARD_TIER, Math.min(LEGEND_TIER, tier));
+        return normalizePersistedTier(tier);
     }
 
     private static boolean containsClass(String[] classes, String clazz) {

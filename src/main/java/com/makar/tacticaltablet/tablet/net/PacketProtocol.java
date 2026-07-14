@@ -10,7 +10,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-/** Immutable protocol-31 map; deliberately independent of Forge channel bootstrap. */
+/** Immutable protocol-32 map; deliberately independent of Forge channel bootstrap. */
 public final class PacketProtocol {
     public record Entry(int id, Class<?> packetClass, NetworkDirection direction) { }
 

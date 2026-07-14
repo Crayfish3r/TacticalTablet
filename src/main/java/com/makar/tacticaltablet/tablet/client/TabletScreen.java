@@ -13,6 +13,7 @@ import com.makar.tacticaltablet.clan.ClanManager;
 import com.makar.tacticaltablet.clan.ClanRejectJoinPacket;
 import com.makar.tacticaltablet.tablet.net.PacketHandler;
 import com.makar.tacticaltablet.tablet.net.TabletPacket;
+import com.makar.tacticaltablet.progression.ClassTier;
 import com.makar.tacticaltablet.progression.PlayerProgressManager;
 import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.Minecraft;
@@ -59,12 +60,26 @@ public class TabletScreen extends Screen {
     private static final ResourceLocation BTN_EPIC_DISABLED =
             new ResourceLocation("tacticaltablet", "textures/gui/button_disabled_epic.png");
 
+    private static final ResourceLocation BTN_RARE =
+            new ResourceLocation("tacticaltablet", "textures/gui/button_rare.png");
+    private static final ResourceLocation BTN_RARE_HOVER =
+            new ResourceLocation("tacticaltablet", "textures/gui/button_hover_rare.png");
+    private static final ResourceLocation BTN_RARE_DISABLED =
+            new ResourceLocation("tacticaltablet", "textures/gui/button_disabled_rare.png");
+
     private static final ResourceLocation BTN_LEGEND =
             new ResourceLocation("tacticaltablet", "textures/gui/button_legend.png");
     private static final ResourceLocation BTN_LEGEND_HOVER =
             new ResourceLocation("tacticaltablet", "textures/gui/button_hover_legend.png");
     private static final ResourceLocation BTN_LEGEND_DISABLED =
             new ResourceLocation("tacticaltablet", "textures/gui/button_disabled_legend.png");
+
+    private static final ResourceLocation BTN_MONSTER =
+            new ResourceLocation("tacticaltablet", "textures/gui/button_monster.png");
+    private static final ResourceLocation BTN_MONSTER_HOVER =
+            new ResourceLocation("tacticaltablet", "textures/gui/button_hover_monster.png");
+    private static final ResourceLocation BTN_MONSTER_DISABLED =
+            new ResourceLocation("tacticaltablet", "textures/gui/button_disabled_monster.png");
 
     private static final ResourceLocation TP_BTN =
             new ResourceLocation("tacticaltablet", "textures/gui/tp_button.png");
@@ -1160,10 +1175,11 @@ public class TabletScreen extends Screen {
                 PacketHandler.sendToServer(new TabletPacket(action.actionId()));
             } else if (confirmAction == ConfirmAction.BASE_UNLOCK) {
                 PacketHandler.sendToServer(new TabletPacket(TabletPacket.unlockBaseActionId(action.actionId())));
-            } else if (targetTier == PlayerProgressManager.EPIC_TIER) {
-                PacketHandler.sendToServer(new TabletPacket(TabletPacket.upgradeEpicActionId(action.actionId())));
-            } else if (targetTier == PlayerProgressManager.LEGEND_TIER) {
-                PacketHandler.sendToServer(new TabletPacket(TabletPacket.upgradeLegendActionId(action.actionId())));
+            } else {
+                int actionId = TabletPacket.upgradeActionId(action.actionId(), targetTier);
+                if (actionId >= 0) {
+                    PacketHandler.sendToServer(new TabletPacket(actionId));
+                }
             }
 
             returnToTablet();
@@ -1801,7 +1817,7 @@ public class TabletScreen extends Screen {
                     && TabletClientState.isBaseClassUnlocked(action.classKey())
                     && !dismissedUpgradePrompts.contains(action.classKey())) {
                 int targetTier = getAvailableUpgradeTier();
-                if (targetTier > PlayerProgressManager.STANDARD_TIER
+                if (targetTier > PlayerProgressManager.BASIC_TIER
                         && TabletClientState.getCoins() >= PlayerProgressManager.getUpgradeCost(targetTier)) {
                     this.active = true;
                     return;
@@ -1855,12 +1871,7 @@ public class TabletScreen extends Screen {
 
             if (isBaseClassAction() && !dismissedUpgradePrompts.contains(action.classKey())) {
                 int targetTier = getAvailableUpgradeTier();
-                if (targetTier == PlayerProgressManager.EPIC_TIER
-                        && TabletClientState.getCoins() >= PlayerProgressManager.getUpgradeCost(targetTier)) {
-                    showTierUpgradeConfirmation(action, targetTier);
-                    return;
-                }
-                if (targetTier == PlayerProgressManager.LEGEND_TIER
+                if (targetTier > PlayerProgressManager.BASIC_TIER
                         && TabletClientState.getCoins() >= PlayerProgressManager.getUpgradeCost(targetTier)) {
                     showTierUpgradeConfirmation(action, targetTier);
                     return;
@@ -1884,7 +1895,7 @@ public class TabletScreen extends Screen {
             }
             wasHovered = hover;
 
-            String label = getRenderedLabel();
+            String label = fitLabel(getRenderedLabel());
             ResourceLocation texture = getTexture(hover);
 
             RenderSystem.setShader(GameRenderer::getPositionTexShader);
@@ -1928,6 +1939,15 @@ public class TabletScreen extends Screen {
             return "[" + action.price() + " \u041c\u041e\u041d\u0415\u0422] " + action.label();
         }
 
+        private String fitLabel(String label) {
+            int availableWidth = width - 12;
+            var font = Minecraft.getInstance().font;
+            if (font.width(label) <= availableWidth) return label;
+
+            String suffix = "...";
+            return font.plainSubstrByWidth(label, Math.max(0, availableWidth - font.width(suffix))) + suffix;
+        }
+
         private String getProgressPrefix() {
             if (action.exclusive() || action.rtp() || action.locked()) return "";
             if (action.shop()) return TabletClientState.isClassPurchased(action.classKey()) ? "\u041a\u0423\u041f\u041b\u0415\u041d\u041e " : "";
@@ -1937,13 +1957,17 @@ public class TabletScreen extends Screen {
             if (!TabletClientState.isBaseClassUnlocked(action.classKey())) {
                 return "[\u041e\u0422\u041a\u0420. " + PlayerProgressManager.BASE_UNLOCK_COST + "] ";
             }
-            if (tier == PlayerProgressManager.STANDARD_TIER) {
-                return "[" + xp + "/" + PlayerProgressManager.EPIC_XP + "] ";
+            ClassTier current = ClassTier.clamp(tier);
+            if (current.isMaximum()) return "[MAX " + xp + "/" + current.xpCap() + "] ";
+            ClassTier next = current.next().orElseThrow();
+            int coins = TabletClientState.getCoins();
+            if (xp < next.requiredXp()) {
+                return "[" + xp + "/" + next.requiredXp() + " XP] ";
             }
-            if (tier == PlayerProgressManager.EPIC_TIER) {
-                return "[EPIC " + xp + "/" + PlayerProgressManager.LEGEND_XP + "] ";
+            if (coins < next.upgradeCost()) {
+                return "[" + coins + "/" + next.upgradeCost() + " COINS] ";
             }
-            return "\u041c\u0410\u041a\u0421. ";
+            return "[UPGRADE " + next.upgradeCost() + " COINS] ";
         }
 
         private ResourceLocation getTexture(boolean hover) {
@@ -1959,27 +1983,21 @@ public class TabletScreen extends Screen {
                     ? action.fixedLevel()
                     : TabletClientState.getClassTier(action.classKey());
 
-            if (!this.active) {
-                if (level >= 2) {
-                    return BTN_LEGEND_DISABLED;
-                }
-
-                if (level == 1) {
-                    return BTN_EPIC_DISABLED;
-                }
-
-                return BTN_DISABLED;
-            }
-
-            if (level >= 2) {
-                return hover ? BTN_LEGEND_HOVER : BTN_LEGEND;
-            }
-
-            if (level == 1) {
-                return hover ? BTN_EPIC_HOVER : BTN_EPIC;
-            }
-
-            return hover ? BTN_HOVER : BTN;
+            ClassTier tier = ClassTier.clamp(level);
+            if (!this.active) return switch (tier) {
+                case MONSTER -> BTN_MONSTER_DISABLED;
+                case LEGEND -> BTN_LEGEND_DISABLED;
+                case EPIC -> BTN_EPIC_DISABLED;
+                case RARE -> BTN_RARE_DISABLED;
+                case BASIC -> BTN_DISABLED;
+            };
+            return switch (tier) {
+                case MONSTER -> hover ? BTN_MONSTER_HOVER : BTN_MONSTER;
+                case LEGEND -> hover ? BTN_LEGEND_HOVER : BTN_LEGEND;
+                case EPIC -> hover ? BTN_EPIC_HOVER : BTN_EPIC;
+                case RARE -> hover ? BTN_RARE_HOVER : BTN_RARE;
+                case BASIC -> hover ? BTN_HOVER : BTN;
+            };
         }
 
         private boolean isBaseClassAction() {
@@ -1990,15 +2008,11 @@ public class TabletScreen extends Screen {
             int tier = TabletClientState.getClassTier(action.classKey());
             int xp = TabletClientState.getXP(action.classKey());
 
-            if (tier == PlayerProgressManager.STANDARD_TIER && xp >= PlayerProgressManager.EPIC_XP) {
-                return PlayerProgressManager.EPIC_TIER;
-            }
-
-            if (tier == PlayerProgressManager.EPIC_TIER && xp >= PlayerProgressManager.LEGEND_XP) {
-                return PlayerProgressManager.LEGEND_TIER;
-            }
-
-            return PlayerProgressManager.STANDARD_TIER;
+            ClassTier current = ClassTier.clamp(tier);
+            return current.next()
+                    .filter(next -> xp >= next.requiredXp())
+                    .map(ClassTier::id)
+                    .orElse(PlayerProgressManager.BASIC_TIER);
         }
     }
 

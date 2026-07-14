@@ -2,6 +2,7 @@ package com.makar.tacticaltablet.progression.kit;
 
 import com.makar.tacticaltablet.inventory.InventoryManager;
 import com.makar.tacticaltablet.progression.ClassXPManager;
+import com.makar.tacticaltablet.progression.ClassTier;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -31,52 +32,45 @@ public class KitManager {
     private static final String ALT_SUFFIX = "_alt";
     private static final int MAX_KIT_NBT_LENGTH = 2048;
 
-    private static final Set<String> LEVEL_KITS = Set.of(
-            "stormtrooper",
-            "sniper",
-            "mortarman",
-            "scout",
-            "droneoperator",
-            "machinegunner",
-            "rpgtrooper",
-            "boomguy",
-            "dream"
-    );
-
     private static final Map<String, CachedKit> CACHE = new ConcurrentHashMap<>();
+    private static final Set<String> MISSING_TIER_KITS_LOGGED = ConcurrentHashMap.newKeySet();
 
     public static boolean giveKit(ServerPlayer player, String kitName) {
         if (player == null || kitName == null || kitName.isBlank()) return false;
 
-        String finalKitName = getLeveledKitName(player, kitName);
-        String loadedKitName = finalKitName;
+        int tier = ClassXPManager.getLevel(player, kitName);
+        List<String> regularCandidates = getKitFileCandidates(kitName, tier, false);
+        String loadedKitName = regularCandidates.get(0);
         String loadedDirectory = KIT_DIRECTORY;
         List<ItemStack> items = List.of();
 
         if (KitRotationManager.isAltKitsActive()) {
-            String altKitName = finalKitName + ALT_SUFFIX;
-            if (kitFileExists(ALT_KIT_DIRECTORY, altKitName)) {
-                items = loadKit(ALT_KIT_DIRECTORY, altKitName, true);
+            for (String altKitName : getKitFileCandidates(kitName, tier, true)) {
+                if (!kitFileExists(ALT_KIT_DIRECTORY, altKitName)) continue;
+                items = loadKit(ALT_KIT_DIRECTORY, altKitName, false);
                 if (!items.isEmpty()) {
                     loadedKitName = altKitName;
                     loadedDirectory = ALT_KIT_DIRECTORY;
+                    break;
                 } else {
-                    System.out.println("[TacticalTablet] Alt kit not found or empty: " + altKitName
-                            + ", fallback to regular: " + finalKitName);
+                    logMissingTierKit(ALT_KIT_DIRECTORY, altKitName);
                 }
             }
         }
 
         if (items.isEmpty()) {
-            items = loadKit(finalKitName);
-        }
-
-        if (items.isEmpty() && !finalKitName.equals(kitName)) {
-            System.out.println("[TacticalTablet] Leveled kit not found or empty: " + finalKitName + ", fallback to: " + kitName);
-            finalKitName = kitName;
-            loadedKitName = kitName;
-            loadedDirectory = KIT_DIRECTORY;
-            items = loadKit(kitName);
+            for (String candidate : regularCandidates) {
+                if (!kitFileExists(KIT_DIRECTORY, candidate)) {
+                    logMissingTierKit(KIT_DIRECTORY, candidate);
+                    continue;
+                }
+                items = loadKit(KIT_DIRECTORY, candidate, false);
+                if (!items.isEmpty()) {
+                    loadedKitName = candidate;
+                    break;
+                }
+                logMissingTierKit(KIT_DIRECTORY, candidate);
+            }
         }
 
         if (items.isEmpty()) {
@@ -86,7 +80,7 @@ public class KitManager {
 
         System.out.println("[TacticalTablet] Giving kit: player=" + player.getScoreboardName()
                 + ", class=" + kitName
-                + ", level=" + ClassXPManager.getLevel(player, kitName)
+                + ", level=" + tier
                 + ", file=" + loadedDirectory + "/" + loadedKitName + ".json");
 
         for (ItemStack stack : items) {
@@ -98,22 +92,19 @@ public class KitManager {
         return true;
     }
 
-    private static String getLeveledKitName(ServerPlayer player, String kitName) {
-        if (!LEVEL_KITS.contains(kitName)) {
-            return kitName;
+    /** Returns ordered file stems, from the requested tier down to BASIC. */
+    public static List<String> getKitFileCandidates(String kitName, int tier, boolean alt) {
+        if (kitName == null || kitName.isBlank()) {
+            return List.of(kitName == null ? "" : kitName + (alt ? ALT_SUFFIX : ""));
         }
 
-        int level = ClassXPManager.getLevel(player, kitName);
-
-        if (level >= 2) {
-            return kitName + "_legend";
+        ClassTier requested = ClassTier.clamp(tier);
+        List<String> candidates = new ArrayList<>();
+        for (int id = requested.id(); id >= ClassTier.BASIC.id(); id--) {
+            String candidate = kitName + ClassTier.clamp(id).kitSuffix();
+            candidates.add(alt ? candidate + ALT_SUFFIX : candidate);
         }
-
-        if (level == 1) {
-            return kitName + "_epic";
-        }
-
-        return kitName;
+        return List.copyOf(candidates);
     }
 
     private static List<ItemStack> loadKit(String name) {
@@ -159,6 +150,13 @@ public class KitManager {
                 .resolve("config/tacticaltablet/" + directory + "/" + name + ".json");
 
         return configPath.toFile().exists();
+    }
+
+    private static void logMissingTierKit(String directory, String name) {
+        String key = directory + "/" + name;
+        if (MISSING_TIER_KITS_LOGGED.add(key)) {
+            System.out.println("[TacticalTablet] Kit file not found or empty: " + key + ".json");
+        }
     }
 
     private static List<ItemStack> parseKitFile(File file) throws Exception {
