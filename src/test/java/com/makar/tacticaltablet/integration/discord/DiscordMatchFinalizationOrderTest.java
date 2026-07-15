@@ -32,6 +32,8 @@ class DiscordMatchFinalizationOrderTest {
         assertTrue(processDeath.contains("LivesManager.handleDeath(victim)"));
         assertTrue(processDeath.contains("processKillerConsequences(victim, source, killer)"));
         assertTrue(processDeath.contains("ContractManager.onPlayerKilled(victim, killer)"));
+        assertTrue(processDeath.indexOf("if (!victimWasPlaying)")
+                < processDeath.indexOf("processKillerConsequences(victim, source, killer)"));
         assertTrue(!processDeath.contains("checkForMatchEnd"));
         assertTrue(!killerConsequences.contains("checkForMatchEnd"));
         assertTrue(killerConsequences.indexOf("DiscordLeaderboardService.recordMatchKill(killer)")
@@ -39,28 +41,44 @@ class DiscordMatchFinalizationOrderTest {
     }
 
     @Test
-    void winRewardsAreCommittedBeforeDiscordSnapshot() throws IOException {
+    void gameWinKeepsStatisticsAndXpButDoesNotAwardCoins() throws IOException {
         String source = Files.readString(GAME_STATE_MANAGER);
         String endGame = block(source, "private static void endGame(MinecraftServer server, List<ServerPlayer>", "private static List<ServerPlayer> normalizedWinners");
 
         assertTrue(endGame.indexOf("PlayerProgressManager.addWin(winner)")
                 < endGame.indexOf("DiscordLeaderboardService.sendCurrentMatchLeaderboard"));
-        assertTrue(endGame.indexOf("PlayerProgressManager.addCoins(winner, PlayerProgressManager.WIN_COIN_REWARD)")
+        assertTrue(endGame.indexOf("ClassXPManager.addXPToAllClasses(winner, WIN_XP_ALL_CLASSES)")
                 < endGame.indexOf("DiscordLeaderboardService.sendCurrentMatchLeaderboard"));
+        assertTrue(!endGame.contains("addCoins"));
+        assertTrue(!source.contains("WIN_COIN_REWARD"));
     }
 
     @Test
     void setRewardIsCommittedBeforeSetReportAndCurrentStatsClear() throws IOException {
-        String source = Files.readString(DISCORD_SERVICE);
-        String sendCurrent = block(source, "public static synchronized SetWinner sendCurrentMatchLeaderboard", "static synchronized List<MatchPlayerStatsSnapshot> finalizeMatchStatistics");
-        String setReportBranch = block(sendCurrent, "SetWinner setWinner = findSetWinner(server)", "deleteSetState()");
+        String discord = Files.readString(DISCORD_SERVICE);
+        String game = Files.readString(GAME_STATE_MANAGER);
+        String sendCurrent = block(discord, "public static synchronized SetRewardSummary sendCurrentMatchLeaderboard", "static synchronized List<MatchPlayerStatsSnapshot> finalizeMatchStatistics");
+        String endGame = block(game, "private static void endGame(MinecraftServer server, List<ServerPlayer>", "private static List<ServerPlayer> normalizedWinners");
 
         assertTrue(sendCurrent.indexOf("finalizeMatchStatistics(server)")
                 < sendCurrent.indexOf("currentMatchStats.clear()"));
-        assertTrue(setReportBranch.indexOf("PlayerProgressManager.addCoins(server, setWinner.uuid(), setWinner.name(), 100)")
-                < setReportBranch.indexOf("sendCurrentSetReport(server)"));
-        assertTrue(setReportBranch.indexOf("sendCurrentSetReport(server)")
-                < setReportBranch.indexOf("currentSetStats.clear()"));
+        assertTrue(endGame.indexOf("awardSetAndLogFailures(server, setSummary)")
+                < endGame.indexOf("dispatchSetReportOnce(server, setSummary)"));
+        assertTrue(!discord.contains("100 competitive-set coins"));
+        assertTrue(!discord.contains("addCoins(server, setWinner"));
+    }
+
+    @Test
+    void individualGameTitleContainsOnlyTheResult() throws IOException {
+        String source = Files.readString(GAME_STATE_MANAGER);
+        String title = block(source, "private static void showWinnerTitle", "private static void broadcast");
+
+        assertTrue(title.contains("ПОБЕДИТЕЛЬ ИГРЫ"));
+        assertTrue(title.contains("ПОБЕДИТЕЛИ ИГРЫ"));
+        assertTrue(title.contains("Победитель не определён"));
+        assertTrue(!title.contains("монет"));
+        assertTrue(!title.contains("опыта"));
+        assertTrue(!title.contains("награ"));
     }
 
     @Test

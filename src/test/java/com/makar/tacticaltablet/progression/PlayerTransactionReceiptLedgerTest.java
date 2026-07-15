@@ -140,6 +140,54 @@ class PlayerTransactionReceiptLedgerTest {
         assertTrue(PlayerTransactionReceiptLedger.normalizeReceipts(List.of(receipt)).isEmpty());
     }
 
+    @Test
+    void setRewardCreditIsAppliedOnceAcrossRepeatedFinalizationAndReload() {
+        String key = "set:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa:place:1:player:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+        TestState state = new TestState(10, new ArrayList<>());
+
+        RepositoryResult first = PlayerTransactionReceiptLedger.applyCredit(
+                state, key, "set_reward", 35, CLOCK, () -> true);
+        String json = GSON.toJson(state);
+        TestState reloaded = GSON.fromJson(json, TestState.class);
+        reloaded.receipts(PlayerTransactionReceiptLedger.normalizeReceipts(reloaded.receipts()));
+        RepositoryResult repeated = PlayerTransactionReceiptLedger.applyCredit(
+                reloaded, key, "set_reward", 35, CLOCK, () -> true);
+
+        assertEquals(RepositoryResult.Status.APPLIED, first.status());
+        assertEquals(RepositoryResult.Status.ALREADY_APPLIED, repeated.status());
+        assertEquals(45, reloaded.coins());
+        assertEquals(1, reloaded.receipts().size());
+    }
+
+    @Test
+    void crashBeforeCreditCommitLeavesOperationAvailableForRetry() {
+        String key = "set:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa:place:2:player:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+        TestState state = new TestState(10, new ArrayList<>());
+
+        RepositoryResult failed = PlayerTransactionReceiptLedger.applyCredit(
+                state, key, "set_reward", 35, CLOCK, () -> false);
+        RepositoryResult retry = PlayerTransactionReceiptLedger.applyCredit(
+                state, key, "set_reward", 35, CLOCK, () -> true);
+
+        assertEquals(RepositoryResult.Status.FAILED, failed.status());
+        assertEquals(RepositoryResult.Status.APPLIED, retry.status());
+        assertEquals(45, state.coins());
+        assertEquals(1, state.receipts().size());
+    }
+
+    @Test
+    void sameSetRewardKeyWithDifferentAmountConflicts() {
+        String key = "set:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa:place:3:player:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+        TestState state = new TestState(10, new ArrayList<>());
+        PlayerTransactionReceiptLedger.applyCredit(state, key, "set_reward", 35, CLOCK, () -> true);
+
+        RepositoryResult mismatch = PlayerTransactionReceiptLedger.applyCredit(
+                state, key, "set_reward", 45, CLOCK, () -> true);
+
+        assertEquals(RepositoryResult.Status.CONFLICT, mismatch.status());
+        assertEquals(45, state.coins());
+    }
+
     private static void assertConflictWithMutatedReceipt(
             CreateClanTransaction transaction,
             java.util.function.Consumer<AppliedTransactionReceipt> mutator

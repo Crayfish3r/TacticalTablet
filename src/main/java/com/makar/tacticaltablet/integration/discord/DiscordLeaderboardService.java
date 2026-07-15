@@ -9,6 +9,15 @@ import com.makar.tacticaltablet.game.MapSetManager;
 import com.makar.tacticaltablet.game.MatchMode;
 import com.makar.tacticaltablet.game.team.TeamId;
 import com.makar.tacticaltablet.game.team.TeamMatchManager;
+import com.makar.tacticaltablet.game.set.SetResultService;
+import com.makar.tacticaltablet.game.set.SetRewardSummary;
+import com.makar.tacticaltablet.game.set.GamePerformance;
+import com.makar.tacticaltablet.game.set.MatchPlacementTracker;
+import com.makar.tacticaltablet.game.set.SetLeaderboardSnapshot;
+import com.makar.tacticaltablet.game.set.SetMatchRuntime;
+import com.makar.tacticaltablet.game.set.SetPlayerResult;
+import com.makar.tacticaltablet.game.set.SetScoringRules;
+import com.makar.tacticaltablet.game.set.SetDiscordFormatter;
 import com.makar.tacticaltablet.integration.discord.DiscordWebhookClient.DiscordEmbed;
 import com.makar.tacticaltablet.map.MapRotationManager;
 import com.makar.tacticaltablet.progression.PlayerProgressManager;
@@ -44,10 +53,12 @@ public final class DiscordLeaderboardService {
     private static final int RANKED_MATCH_COLOR = 0x9B59B6;
     private static final int CLAN_WAR_COLOR = 0x2ECC71;
     private static final int CLAN_WAR_WIN_CLAN_COINS = 10;
+    private static final int SET_STATS_DATA_VERSION = 3;
     private static final String SET_STATS_FILE = "map_set_stats.json";
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
     private static final Map<String, MatchStats> currentMatchStats = new ConcurrentHashMap<>();
     private static final Map<String, MatchStats> currentSetStats = new HashMap<>();
+    private static final Map<String, List<GamePerformance>> currentSetGames = new HashMap<>();
 
     private static long currentMatchStartedAtMillis;
     private static int currentMatchAirdrops;
@@ -148,6 +159,12 @@ public final class DiscordLeaderboardService {
         currentMatchStats.computeIfAbsent(key(player), ignored -> MatchStats.fromPlayer(player)).addDeath();
     }
 
+    public static synchronized void recordMatchAssist(UUID playerId, String playerName) {
+        if (playerId == null) return;
+        currentMatchStats.computeIfAbsent(playerId.toString(),
+                ignored -> new MatchStats(playerId.toString(), playerName)).addAssist();
+    }
+
     public static void recordMatchDamage(ServerPlayer attacker, double amount) {
         if (attacker == null || amount <= 0.0D) {
             return;
@@ -179,7 +196,7 @@ public final class DiscordLeaderboardService {
         }
     }
 
-    public static synchronized SetWinner sendCurrentMatchLeaderboard(
+    public static synchronized SetRewardSummary sendCurrentMatchLeaderboard(
             MinecraftServer server,
             ServerPlayer winner,
             boolean setComplete,
@@ -193,7 +210,7 @@ public final class DiscordLeaderboardService {
         );
     }
 
-    public static synchronized SetWinner sendCurrentMatchLeaderboard(
+    public static synchronized SetRewardSummary sendCurrentMatchLeaderboard(
             MinecraftServer server,
             List<ServerPlayer> winners,
             boolean setComplete,
@@ -218,6 +235,27 @@ public final class DiscordLeaderboardService {
                 .map(MatchStats::fromSnapshot)
                 .toList();
 
+        Map<UUID, MatchPlacementTracker.CombatTotals> combatTotals = new HashMap<>();
+        for (MatchPlayerStatsSnapshot stats : finalizedSnapshot) {
+            if (stats.playerId() != null) {
+                combatTotals.put(stats.playerId(), new MatchPlacementTracker.CombatTotals(
+                        stats.kills(), stats.assists(), stats.actualHealthDamage()));
+            }
+        }
+        List<UUID> winnerIds = winners == null ? List.of() : winners.stream()
+                .filter(java.util.Objects::nonNull).map(ServerPlayer::getUUID).distinct().toList();
+        TeamId winningTeam = winners == null ? null : winners.stream()
+                .filter(java.util.Objects::nonNull).map(TeamMatchManager::getTeam)
+                .filter(java.util.Objects::nonNull).findFirst().orElse(null);
+        MatchPlacementTracker.PlacementSnapshot placementSnapshot = SetMatchRuntime.finishMatch(
+                winnerIds, winningTeam, combatTotals);
+        List<GamePerformance> gamePerformances = buildGamePerformances(
+                currentSetMatches + 1, placementSnapshot, matchSnapshot);
+        for (GamePerformance performance : gamePerformances) {
+            currentSetGames.computeIfAbsent(performance.playerId().toString(), ignored -> new ArrayList<>())
+                    .add(performance);
+        }
+
         for (MatchStats stats : matchSnapshot) {
             currentSetStats.computeIfAbsent(stats.uuid, ignored -> new MatchStats(
                             stats.uuid,
@@ -233,6 +271,7 @@ public final class DiscordLeaderboardService {
         currentMatchStats.clear();
         currentMatchStartedAtMillis = 0L;
         currentMatchAirdrops = 0;
+        SetMatchRuntime.reset();
 
         if (!setComplete) {
             return null;
@@ -244,27 +283,37 @@ public final class DiscordLeaderboardService {
                 ClanManager.addClanCoins(server, clanWinner.clanId, CLAN_WAR_WIN_CLAN_COINS);
             }
             sendClanWarSetReport(server, clanWinner);
-            currentSetStats.clear();
-            currentSetStartedAtMillis = 0L;
-            currentSetAirdrops = 0;
-            currentSetMatches = 0;
-            currentSetClanWar = false;
-            currentSetCompetitive = false;
-            currentSetMap = "";
-            deleteSetState();
             return null;
         }
 
-        SetWinner setWinner = findSetWinner(server);
-        if (currentSetCompetitive && setWinner != null) {
-            if (!PlayerProgressManager.addCoins(server, setWinner.uuid(), setWinner.name(), 100)) {
-                TacticalTabletMod.LOGGER.error("Failed to award 100 competitive-set coins to {} ({})",
-                        setWinner.name(), setWinner.uuid());
-            }
-            refreshSetCoinBalances(server);
+        return prepareCompletedSetSummary(server);
+    }
+
+    public static synchronized SetRewardSummary prepareCompletedSetSummary(MinecraftServer server) {
+        SetRewardSummary existing = MapSetManager.getRewardSummary();
+        SetLeaderboardSnapshot existingSnapshot = MapSetManager.getLeaderboardSnapshot();
+        if (existing != null && existingSnapshot != null) return existing;
+        if (server == null || MapSetManager.isClanWarSet()) return null;
+
+        SetLeaderboardSnapshot snapshot = SetResultService.createSnapshot(
+                MapSetManager.getSetId(), MapSetManager.getParticipantNames(),
+                SetResultService.flatten(currentSetGames));
+        SetRewardSummary summary = SetResultService.createRewardSummary(snapshot);
+        if (!MapSetManager.saveCompletedSetResults(server, snapshot, summary)) {
+            TacticalTabletMod.LOGGER.error("Failed to persist set reward summary for set {}", summary.setId());
+            return null;
         }
-        sendCurrentSetReport(server);
+        return summary;
+    }
+
+    public static synchronized CompletableFuture<Boolean> sendCompletedSetReport(
+            MinecraftServer server, SetRewardSummary summary) {
+        return sendCurrentSetReport(server, summary);
+    }
+
+    public static synchronized void clearCompletedSetState() {
         currentSetStats.clear();
+        currentSetGames.clear();
         currentSetStartedAtMillis = 0L;
         currentSetAirdrops = 0;
         currentSetMatches = 0;
@@ -272,7 +321,6 @@ public final class DiscordLeaderboardService {
         currentSetCompetitive = false;
         currentSetMap = "";
         deleteSetState();
-        return setWinner;
     }
 
     static synchronized List<MatchPlayerStatsSnapshot> finalizeMatchStatistics(MinecraftServer server) {
@@ -296,6 +344,7 @@ public final class DiscordLeaderboardService {
         Path serverRoot = worldRoot.getParent() == null ? worldRoot : worldRoot.getParent();
         setStatsPath = serverRoot.resolve("tacticaltablet_data").resolve(SET_STATS_FILE);
         currentSetStats.clear();
+        currentSetGames.clear();
         currentSetStartedAtMillis = 0L;
         currentSetAirdrops = 0;
         currentSetMatches = 0;
@@ -311,6 +360,14 @@ public final class DiscordLeaderboardService {
                 deleteSetState();
                 return;
             }
+            if (loaded.dataVersion < SET_STATS_DATA_VERSION && loaded.matches > 0) {
+                TacticalTabletMod.LOGGER.warn(
+                        "Active set statistics version {} has no reliable per-game placements/assists; resetting only this active set",
+                        loaded.dataVersion);
+                deleteSetState();
+                MapSetManager.resetIncompatibleActiveSet(server);
+                return;
+            }
 
             currentSetMap = loaded.mapName == null ? "" : loaded.mapName;
             currentSetStartedAtMillis = Math.max(0L, loaded.startedAtMillis);
@@ -319,6 +376,13 @@ public final class DiscordLeaderboardService {
             currentSetClanWar = loaded.clanWarSet;
             currentSetCompetitive = loaded.competitiveSet;
             if (loaded.players != null) currentSetStats.putAll(loaded.players);
+            if (loaded.games != null) currentSetGames.putAll(loaded.games);
+            recoverLegacyParticipants(server);
+            if (!currentSetClanWar && currentSetMatches >= MapSetManager.GAMES_PER_MAP) {
+                if (!MapSetManager.ensureSetCompleted(server)) {
+                    TacticalTabletMod.LOGGER.error("Failed to reconcile completed set state after statistics recovery");
+                }
+            }
         } catch (IOException | RuntimeException exception) {
             TacticalTabletMod.LOGGER.error("Failed to load map set stats from {}", setStatsPath, exception);
             deleteSetState();
@@ -334,6 +398,7 @@ public final class DiscordLeaderboardService {
         }
 
         SetStatsState snapshot = new SetStatsState();
+        snapshot.dataVersion = SET_STATS_DATA_VERSION;
         snapshot.mapName = currentSetMap;
         snapshot.startedAtMillis = currentSetStartedAtMillis;
         snapshot.airdrops = currentSetAirdrops;
@@ -341,6 +406,7 @@ public final class DiscordLeaderboardService {
         snapshot.clanWarSet = currentSetClanWar || MapSetManager.isClanWarSet();
         snapshot.competitiveSet = currentSetCompetitive || MapSetManager.isCompetitiveSet();
         snapshot.players = new HashMap<>(currentSetStats);
+        snapshot.games = new HashMap<>(currentSetGames);
         Path temp = setStatsPath.resolveSibling(setStatsPath.getFileName() + ".tmp");
 
         try {
@@ -371,48 +437,80 @@ public final class DiscordLeaderboardService {
         return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
     }
 
-    private static CompletableFuture<Boolean> sendCurrentSetReport(MinecraftServer server) {
+    private static List<GamePerformance> buildGamePerformances(
+            int gameNumber,
+            MatchPlacementTracker.PlacementSnapshot placements,
+            List<MatchStats> stats
+    ) {
+        Map<UUID, MatchStats> byId = new HashMap<>();
+        if (stats != null) {
+            for (MatchStats player : stats) {
+                try {
+                    byId.put(UUID.fromString(player.uuid), player);
+                } catch (IllegalArgumentException ignored) {
+                }
+            }
+        }
+        List<GamePerformance> result = new ArrayList<>();
+        if (placements != null) {
+            for (MatchPlacementTracker.PlayerPlacement placement : placements.players()) {
+                MatchStats player = byId.get(placement.playerId());
+                if (player != null) {
+                    player.placement = placement.placement();
+                    player.teamId = placement.teamId() == null ? "" : placement.teamId().name();
+                }
+                result.add(new GamePerformance(
+                        gameNumber,
+                        placement.playerId(),
+                        placement.playerName(),
+                        placement.placement(),
+                        player == null ? 0 : player.kills,
+                        player == null ? 0 : player.assists,
+                        player == null ? 0.0D : player.damage,
+                        player == null ? 0 : player.deaths,
+                        placement.teamId() == null ? "" : placement.teamId().name()
+                ));
+            }
+        }
+        result.sort(SetScoringRules.GAME_PERFORMANCE_COMPARATOR);
+        return List.copyOf(result);
+    }
+
+    private static void recoverLegacyParticipants(MinecraftServer server) {
+        if (!MapSetManager.getParticipants().isEmpty()) return;
+        Map<UUID, String> evidencedParticipants = new HashMap<>();
+        for (MatchStats stats : currentSetStats.values()) {
+            if (stats.wins <= 0 && stats.kills <= 0 && stats.deaths <= 0 && stats.damage <= 0.0D) continue;
+            try {
+                evidencedParticipants.put(UUID.fromString(stats.uuid), stats.name);
+            } catch (IllegalArgumentException ignored) {
+            }
+        }
+        if (!evidencedParticipants.isEmpty()) {
+            TacticalTabletMod.LOGGER.info("Recovered {} evidenced participants from legacy set statistics",
+                    evidencedParticipants.size());
+            MapSetManager.recoverLegacyParticipants(server, evidencedParticipants);
+        }
+    }
+
+    private static CompletableFuture<Boolean> sendCurrentSetReport(MinecraftServer server, SetRewardSummary summary) {
         DiscordConfig config = DiscordConfig.get(server);
         if (config == null || !config.hasWebhook()) {
             TacticalTabletMod.LOGGER.warn("Discord webhook is not configured. Set webhookUrl in config/tacticaltablet_discord.json");
             return CompletableFuture.completedFuture(false);
         }
 
-        List<MatchStats> players = sortedSet(new ArrayList<>(currentSetStats.values()));
-        MatchStats winner = players.isEmpty() ? null : players.get(0);
-        MatchStats damageLeader = damageLeader(players);
-        DiscordEmbed embed = buildSetEmbed(
+        SetLeaderboardSnapshot snapshot = MapSetManager.getLeaderboardSnapshot();
+        List<DiscordEmbed> embeds = buildSetEmbeds(
                 (currentSetCompetitive ? "Итоги рейтингового матча" : "Итоги сета")
                         + " из " + currentSetMatches + " игр - " + config.getServerName(),
                 currentMapName(server),
-                players,
-                config.getTopLimit(),
                 currentSetStartedAtMillis,
                 currentSetAirdrops,
-                winner,
-                damageLeader
+                summary,
+                snapshot
         );
-        return DiscordWebhookClient.sendEmbedAsync(config.getWebhookUrl(), embed);
-    }
-
-    private static SetWinner findSetWinner(MinecraftServer server) {
-        if (currentSetStats.isEmpty()) return null;
-        List<MatchStats> sorted = sortedSet(new ArrayList<>(currentSetStats.values()));
-        if (sorted.isEmpty()) return null;
-        MatchStats winner = sorted.get(0);
-        try {
-            return new SetWinner(UUID.fromString(winner.uuid), winner.name);
-        } catch (RuntimeException exception) {
-            if (server != null) {
-                for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-                    if (player.getGameProfile().getName().equalsIgnoreCase(winner.name)) {
-                        return new SetWinner(player.getUUID(), winner.name);
-                    }
-                }
-            }
-            TacticalTabletMod.LOGGER.warn("Cannot award set winner {}: invalid UUID {}", winner.name, winner.uuid);
-            return null;
-        }
+        return DiscordWebhookClient.sendEmbedsAsync(config.getWebhookUrl(), embeds);
     }
 
     private static CompletableFuture<Boolean> sendClanWarSetReport(MinecraftServer server, ClanWarStats winner) {
@@ -655,46 +753,44 @@ public final class DiscordLeaderboardService {
         return new DiscordEmbed(title, description.toString(), MATCH_COLOR, "Тактический планшет");
     }
 
-    private static DiscordEmbed buildSetEmbed(
+    private static List<DiscordEmbed> buildSetEmbeds(
             String title,
             String mapName,
-            List<MatchStats> players,
-            int topLimit,
             long startedAtMillis,
             int airdrops,
-            MatchStats winner,
-            MatchStats damageLeader
+            SetRewardSummary summary,
+            SetLeaderboardSnapshot snapshot
     ) {
-        int count = Math.min(Math.max(1, topLimit), players.size());
         StringBuilder description = new StringBuilder();
         appendHeaderLine(description, "Карта", mapName);
         appendHeaderLine(description, "Длительность сета", formatDuration(startedAtMillis));
         description.append("**Игры:** `").append(currentSetMatches).append("`\n");
         description.append("**Аирдропы за сет:** `").append(Math.max(0, airdrops)).append("`\n");
 
-        if (winner != null) {
-            description.append("**Победитель сета:** **").append(winner.name).append("**  ")
-                    .append("Победы `").append(winner.wins).append("`  ")
-                    .append("Убийства `").append(winner.kills).append("`  ")
-                    .append("Урон `").append(formatDamage(winner.damage)).append("`\n");
-        }
-
-        if (damageLeader != null) {
-            description.append("**Топ урон:** `").append(damageLeader.name).append("`  `")
-                    .append(formatDamage(damageLeader.damage)).append("`\n");
-        }
-
-        if (players.isEmpty()) {
-            description.append("\nНет данных по сету.");
-        } else {
-            description.append("\n**Суммарные результаты игроков**\n");
-            for (int i = 0; i < count; i++) {
-                appendSetPlayerRow(description, i + 1, players.get(i));
+        if (summary != null) {
+            description.append("**Уникальные участники:** `").append(summary.participantCount()).append("`\n");
+            if (!summary.placements().isEmpty()) {
+                description.append("**Награждённые места:**\n");
+                for (var placement : summary.placements()) {
+                    description.append(placement.place()).append(". **").append(placement.playerName()).append("** — `")
+                            .append(summary.rewardCoins()).append(" coins`  Очки `").append(placement.totalScore())
+                            .append("`  Победы `").append(placement.wins())
+                            .append("`  Убийства `").append(placement.kills()).append("`  Помощи `")
+                            .append(placement.assists()).append("`  PvP-урон `")
+                            .append(formatDamage(placement.damage())).append("`  Смерти `")
+                            .append(placement.deaths()).append("`\n");
+                }
             }
         }
-
         int color = currentSetCompetitive ? RANKED_MATCH_COLOR : MATCH_COLOR;
-        return new DiscordEmbed(title, description.toString(), color, "Тактический планшет");
+        List<String> pages = SetDiscordFormatter.formatLeaderboardPages(snapshot, 3400);
+        List<DiscordEmbed> embeds = new ArrayList<>();
+        embeds.add(new DiscordEmbed(title, description + pages.get(0), color, "Тактический планшет"));
+        for (int i = 1; i < pages.size(); i++) {
+            embeds.add(new DiscordEmbed(title + " — часть " + (i + 1), pages.get(i), color,
+                    "Тактический планшет"));
+        }
+        return List.copyOf(embeds);
     }
 
     private static DiscordEmbed buildClanWarSetEmbed(
@@ -750,17 +846,6 @@ public final class DiscordLeaderboardService {
                 .append("КК: `").append(stats.clanCoins).append("`\n");
     }
 
-    private static void appendSetPlayerRow(StringBuilder description, int place, MatchStats stats) {
-        description.append('\n')
-                .append("**#").append(place).append(' ').append(stats.name).append("**\n")
-                .append("Победы: **`").append(stats.wins).append("`**  ")
-                .append("Убийства: **`").append(stats.kills).append("`**  ")
-                .append("Урон: **`").append(formatDamage(stats.damage)).append("`**  ")
-                .append("Смерти: `").append(stats.deaths).append("`  ")
-                .append("У/С: `").append(stats.formattedKd()).append("`  ")
-                .append("Баланс: `").append(stats.coinBalance()).append("`\n");
-    }
-
     private static void appendMatchPlayerRow(StringBuilder description, int place, MatchStats stats) {
         description.append('\n')
                 .append("**#").append(place).append(" ").append(stats.name).append("**");
@@ -770,7 +855,9 @@ public final class DiscordLeaderboardService {
         }
 
         description.append('\n')
+                .append("Очки игры: **`").append(SetScoringRules.calculateGameScore(stats.toGamePerformance())).append("`**  ")
                 .append("Убийства: **`").append(stats.kills).append("`**  ")
+                .append("Помощи: **`").append(stats.assists).append("`**  ")
                 .append("Урон: **`").append(formatDamage(stats.damage)).append("`**  ")
                 .append("Смерти: `").append(stats.deaths).append("`  ")
                 .append("У/С: `").append(stats.formattedKd()).append("`  ")
@@ -823,7 +910,9 @@ public final class DiscordLeaderboardService {
         }
 
         description.append('\n')
+                .append("Очки игры: **`").append(SetScoringRules.calculateGameScore(stats.toGamePerformance())).append("`**  ")
                 .append("Убийства: **`").append(stats.kills).append("`**  ")
+                .append("Помощи: **`").append(stats.assists).append("`**  ")
                 .append("Урон: **`").append(formatDamage(stats.damage)).append("`**  ")
                 .append("Смерти: `").append(stats.deaths).append("`  ")
                 .append("У/С: `").append(stats.formattedKd()).append("`  ")
@@ -840,22 +929,8 @@ public final class DiscordLeaderboardService {
 
     private static List<MatchStats> sortedMatch(List<MatchStats> players) {
         List<MatchStats> result = new ArrayList<>(players == null ? List.of() : players);
-        result.sort(Comparator
-                .comparingInt((MatchStats stats) -> stats.kills).reversed()
-                .thenComparing(Comparator.comparingDouble((MatchStats stats) -> stats.damage).reversed())
-                .thenComparingInt(stats -> stats.deaths)
-                .thenComparing(stats -> stats.name, String.CASE_INSENSITIVE_ORDER));
-        return result;
-    }
-
-    private static List<MatchStats> sortedSet(List<MatchStats> players) {
-        List<MatchStats> result = new ArrayList<>(players == null ? List.of() : players);
-        result.sort(Comparator
-                .comparingInt((MatchStats stats) -> stats.wins).reversed()
-                .thenComparing(Comparator.comparingInt((MatchStats stats) -> stats.kills).reversed())
-                .thenComparing(Comparator.comparingDouble((MatchStats stats) -> stats.damage).reversed())
-                .thenComparingInt(stats -> stats.deaths)
-                .thenComparing(stats -> stats.name, String.CASE_INSENSITIVE_ORDER));
+        result.sort((left, right) -> SetScoringRules.GAME_PERFORMANCE_COMPARATOR.compare(
+                left.toGamePerformance(), right.toGamePerformance()));
         return result;
     }
 
@@ -966,11 +1041,14 @@ public final class DiscordLeaderboardService {
         private final String uuid;
         private final String name;
         private int kills;
+        private int assists;
         private int deaths;
         private int wins;
         private double damage;
         private int teamKills;
         private int coinBalance;
+        private int placement;
+        private String teamId = "";
 
         private MatchStats(String name) {
             this("", name);
@@ -991,6 +1069,7 @@ public final class DiscordLeaderboardService {
                     snapshot.playerName()
             );
             stats.kills = snapshot.kills();
+            stats.assists = snapshot.assists();
             stats.deaths = snapshot.deaths();
             stats.wins = snapshot.wins();
             stats.damage = snapshot.actualHealthDamage();
@@ -1007,6 +1086,10 @@ public final class DiscordLeaderboardService {
             deaths++;
         }
 
+        private synchronized void addAssist() {
+            assists++;
+        }
+
         private synchronized void addWin() {
             wins = 1;
         }
@@ -1018,11 +1101,14 @@ public final class DiscordLeaderboardService {
         private synchronized MatchStats snapshot() {
             MatchStats copy = new MatchStats(uuid, name);
             copy.kills = kills;
+            copy.assists = assists;
             copy.deaths = deaths;
             copy.wins = wins;
             copy.damage = damage;
             copy.teamKills = teamKills;
             copy.coinBalance = coinBalance;
+            copy.placement = placement;
+            copy.teamId = teamId;
             return copy;
         }
 
@@ -1035,6 +1121,7 @@ public final class DiscordLeaderboardService {
                     playerId,
                     name,
                     kills,
+                    assists,
                     deaths,
                     damage,
                     actualBalance,
@@ -1066,9 +1153,16 @@ public final class DiscordLeaderboardService {
             return new PlayerStats(name, kills, deaths, wins, 1, coinBalance());
         }
 
+        private GamePerformance toGamePerformance() {
+            UUID playerId = parseUuid(uuid);
+            return new GamePerformance(0, playerId == null ? new UUID(0L, 0L) : playerId, name,
+                    placement, kills, assists, damage, deaths, teamId);
+        }
+
         private synchronized void merge(MatchStats other) {
             if (other == null) return;
             kills += other.kills;
+            assists += other.assists;
             deaths += other.deaths;
             wins += other.wins;
             damage += other.damage;
@@ -1127,6 +1221,7 @@ public final class DiscordLeaderboardService {
     }
 
     private static final class SetStatsState {
+        int dataVersion = SET_STATS_DATA_VERSION;
         String mapName = "";
         long startedAtMillis;
         int airdrops;
@@ -1134,8 +1229,7 @@ public final class DiscordLeaderboardService {
         boolean clanWarSet;
         boolean competitiveSet;
         Map<String, MatchStats> players = new HashMap<>();
+        Map<String, List<GamePerformance>> games = new HashMap<>();
     }
 
-    public record SetWinner(UUID uuid, String name) {
-    }
 }

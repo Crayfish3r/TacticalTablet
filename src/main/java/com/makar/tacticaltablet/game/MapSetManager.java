@@ -6,6 +6,8 @@ import com.makar.tacticaltablet.core.TacticalTabletMod;
 import com.makar.tacticaltablet.map.MapRotationManager;
 import com.makar.tacticaltablet.progression.ClassXPManager;
 import com.makar.tacticaltablet.progression.PlayerProgressManager;
+import com.makar.tacticaltablet.game.set.SetRewardSummary;
+import com.makar.tacticaltablet.game.set.SetLeaderboardSnapshot;
 import com.makar.tacticaltablet.tablet.net.MapVoteStatePacket;
 import com.makar.tacticaltablet.tablet.net.PacketHandler;
 import net.minecraft.network.chat.Component;
@@ -33,14 +35,17 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Random;
 import java.util.UUID;
+import java.util.LinkedHashSet;
+import java.util.Set;
 
 public final class MapSetManager {
 
     public static final int GAMES_PER_MAP = 4;
     public static final int MAP_VOTE_SECONDS = 30;
     public static final int RESTART_COUNTDOWN_SECONDS = 10;
+    public static final int SET_REWARD_SECONDS = 15;
 
-    private static final int DATA_VERSION = 2;
+    private static final int DATA_VERSION = 4;
     private static final String STATE_FILE = "map_set_state.json";
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
     private static final Random RANDOM = new Random();
@@ -69,6 +74,13 @@ public final class MapSetManager {
             state.mapName = currentMap;
             state.lastRotation = lastRotation;
             state.completedGames = 0;
+            state.setId = UUID.randomUUID().toString();
+            state.participants.clear();
+            state.rewardSummary = null;
+            state.leaderboardSnapshot = null;
+            state.rewardEndsAtMillis = 0L;
+            state.rewardPhaseStatus = RewardPhaseStatus.PENDING;
+            state.setReportDispatched = false;
             saveState();
         } else if (!normalize(state.mapName).equals(normalize(currentMap))
                 || (!state.lastRotation.isBlank() && !lastRotation.isBlank()
@@ -83,6 +95,13 @@ public final class MapSetManager {
             state.mapName = currentMap;
             state.lastRotation = lastRotation;
             state.completedGames = 0;
+            state.setId = UUID.randomUUID().toString();
+            state.participants.clear();
+            state.rewardSummary = null;
+            state.leaderboardSnapshot = null;
+            state.rewardEndsAtMillis = 0L;
+            state.rewardPhaseStatus = RewardPhaseStatus.PENDING;
+            state.setReportDispatched = false;
             state.competitiveSet = state.nextSetCompetitive;
             state.clanWarSet = state.nextSetClanWar;
             state.nextSetCompetitive = false;
@@ -116,8 +135,158 @@ public final class MapSetManager {
         return state.completedGames >= GAMES_PER_MAP;
     }
 
+    public static synchronized boolean ensureSetCompleted(MinecraftServer server) {
+        initStorage(server);
+        if (state.completedGames >= GAMES_PER_MAP) return true;
+        int previous = state.completedGames;
+        state.completedGames = GAMES_PER_MAP;
+        if (saveState()) return true;
+        state.completedGames = previous;
+        return false;
+    }
+
     public static synchronized boolean isSetComplete() {
         return state.completedGames >= GAMES_PER_MAP;
+    }
+
+    public static synchronized UUID getSetId() {
+        try {
+            return UUID.fromString(state.setId);
+        } catch (RuntimeException exception) {
+            state.setId = UUID.randomUUID().toString();
+            saveState();
+            return UUID.fromString(state.setId);
+        }
+    }
+
+    public static synchronized void recordParticipant(MinecraftServer server, UUID playerId, String name) {
+        if (server == null || playerId == null || state.completedGames >= GAMES_PER_MAP) return;
+        initStorage(server);
+        state.participants.put(playerId.toString(), name == null ? "" : name);
+        saveState();
+    }
+
+    public static synchronized void recoverLegacyParticipants(MinecraftServer server, Map<UUID, String> participants) {
+        if (server == null || participants == null || participants.isEmpty() || !state.participants.isEmpty()) return;
+        initStorage(server);
+        for (Map.Entry<UUID, String> entry : participants.entrySet()) {
+            if (entry.getKey() != null) {
+                state.participants.put(entry.getKey().toString(), entry.getValue() == null ? "" : entry.getValue());
+            }
+        }
+        saveState();
+    }
+
+    public static synchronized Set<UUID> getParticipants() {
+        Set<UUID> result = new LinkedHashSet<>();
+        for (String value : state.participants.keySet()) {
+            try { result.add(UUID.fromString(value)); } catch (IllegalArgumentException ignored) { }
+        }
+        return Set.copyOf(result);
+    }
+
+    public static synchronized Map<UUID, String> getParticipantNames() {
+        Map<UUID, String> result = new LinkedHashMap<>();
+        for (Map.Entry<String, String> entry : state.participants.entrySet()) {
+            try {
+                result.put(UUID.fromString(entry.getKey()), entry.getValue() == null ? "" : entry.getValue());
+            } catch (IllegalArgumentException ignored) {
+            }
+        }
+        return Map.copyOf(result);
+    }
+
+    public static synchronized SetRewardSummary getRewardSummary() {
+        return state.rewardSummary;
+    }
+
+    public static synchronized SetLeaderboardSnapshot getLeaderboardSnapshot() {
+        return state.leaderboardSnapshot;
+    }
+
+    public static synchronized boolean saveRewardSummary(MinecraftServer server, SetRewardSummary summary) {
+        initStorage(server);
+        state.rewardSummary = summary;
+        if (saveState()) return true;
+        state.rewardSummary = null;
+        return false;
+    }
+
+    public static synchronized boolean saveCompletedSetResults(
+            MinecraftServer server, SetLeaderboardSnapshot snapshot, SetRewardSummary summary) {
+        initStorage(server);
+        SetLeaderboardSnapshot previousSnapshot = state.leaderboardSnapshot;
+        SetRewardSummary previousSummary = state.rewardSummary;
+        state.leaderboardSnapshot = snapshot;
+        state.rewardSummary = summary;
+        if (saveState()) return true;
+        state.leaderboardSnapshot = previousSnapshot;
+        state.rewardSummary = previousSummary;
+        return false;
+    }
+
+    public static synchronized void resetIncompatibleActiveSet(MinecraftServer server) {
+        initStorage(server);
+        TacticalTabletMod.LOGGER.warn("Resetting only the active map set because its statistics cannot be migrated safely");
+        state.completedGames = 0;
+        state.setId = UUID.randomUUID().toString();
+        state.participants.clear();
+        state.rewardSummary = null;
+        state.leaderboardSnapshot = null;
+        state.rewardEndsAtMillis = 0L;
+        state.rewardPhaseStatus = RewardPhaseStatus.PENDING;
+        state.setReportDispatched = false;
+        saveState();
+    }
+
+    public static synchronized int beginOrResumeRewarding(MinecraftServer server) {
+        initStorage(server);
+        if (state.rewardPhaseStatus == RewardPhaseStatus.COMPLETED
+                || state.rewardPhaseStatus == RewardPhaseStatus.SKIPPED) return 0;
+        long now = System.currentTimeMillis();
+        if (state.rewardPhaseStatus != RewardPhaseStatus.ACTIVE || state.rewardEndsAtMillis <= 0L) {
+            state.rewardPhaseStatus = RewardPhaseStatus.ACTIVE;
+            state.rewardEndsAtMillis = now + SET_REWARD_SECONDS * 1000L;
+            saveState();
+        }
+        return (int) Math.max(0L, (state.rewardEndsAtMillis - now + 999L) / 1000L);
+    }
+
+    public static synchronized void completeRewarding(MinecraftServer server) {
+        initStorage(server);
+        state.rewardPhaseStatus = RewardPhaseStatus.COMPLETED;
+        state.rewardEndsAtMillis = -1L;
+        saveState();
+    }
+
+    public static synchronized boolean wasRewardingCompleted() {
+        return state.rewardPhaseStatus == RewardPhaseStatus.COMPLETED
+                || state.rewardPhaseStatus == RewardPhaseStatus.SKIPPED;
+    }
+
+    public static synchronized int getRewardSecondsRemaining() {
+        if (state.rewardPhaseStatus != RewardPhaseStatus.ACTIVE) return 0;
+        return (int) Math.max(0L, (state.rewardEndsAtMillis - System.currentTimeMillis() + 999L) / 1000L);
+    }
+
+    public static synchronized void skipRewardingForDebug(MinecraftServer server) {
+        initStorage(server);
+        state.completedGames = GAMES_PER_MAP;
+        state.rewardSummary = null;
+        state.leaderboardSnapshot = null;
+        state.rewardEndsAtMillis = -1L;
+        state.rewardPhaseStatus = RewardPhaseStatus.SKIPPED;
+        saveState();
+    }
+
+    public static synchronized boolean isSetReportDispatched() {
+        return state.setReportDispatched;
+    }
+
+    public static synchronized void markSetReportDispatched(MinecraftServer server) {
+        initStorage(server);
+        state.setReportDispatched = true;
+        saveState();
     }
 
     public static synchronized boolean isCompetitiveSet() {
@@ -163,8 +332,7 @@ public final class MapSetManager {
             return;
         }
         if (debug) {
-            state.completedGames = GAMES_PER_MAP;
-            saveState();
+            skipRewardingForDebug(server);
         }
 
         votes.clear();
@@ -366,8 +534,8 @@ public final class MapSetManager {
         }
     }
 
-    private static void saveState() {
-        if (statePath == null) return;
+    private static boolean saveState() {
+        if (statePath == null) return false;
         normalizeState();
         Path temp = statePath.resolveSibling(statePath.getFileName() + ".tmp");
 
@@ -381,16 +549,26 @@ public final class MapSetManager {
             } catch (AtomicMoveNotSupportedException exception) {
                 Files.move(temp, statePath, StandardCopyOption.REPLACE_EXISTING);
             }
+            return true;
         } catch (IOException exception) {
             TacticalTabletMod.LOGGER.error("Failed to save map set state at {}", statePath, exception);
+            return false;
         }
     }
 
     private static void normalizeState() {
-        state.dataVersion = DATA_VERSION;
         state.mapName = state.mapName == null ? "" : state.mapName.trim();
         state.lastRotation = state.lastRotation == null ? "" : state.lastRotation.trim();
         state.completedGames = Math.max(0, Math.min(GAMES_PER_MAP, state.completedGames));
+        if (state.setId == null || state.setId.isBlank()) state.setId = UUID.randomUUID().toString();
+        if (state.participants == null) state.participants = new LinkedHashMap<>();
+        if (state.rewardPhaseStatus == null
+                || (state.rewardPhaseStatus == RewardPhaseStatus.PENDING && state.rewardEndsAtMillis != 0L)) {
+            state.rewardPhaseStatus = state.rewardEndsAtMillis < 0L
+                    ? RewardPhaseStatus.COMPLETED
+                    : state.rewardEndsAtMillis > 0L ? RewardPhaseStatus.ACTIVE : RewardPhaseStatus.PENDING;
+        }
+        state.dataVersion = DATA_VERSION;
         if (state.competitiveSet && state.clanWarSet) {
             state.clanWarSet = false;
         }
@@ -444,5 +622,19 @@ public final class MapSetManager {
         boolean nextSetCompetitive;
         boolean clanWarSet;
         boolean nextSetClanWar;
+        String setId = UUID.randomUUID().toString();
+        Map<String, String> participants = new LinkedHashMap<>();
+        SetRewardSummary rewardSummary;
+        SetLeaderboardSnapshot leaderboardSnapshot;
+        long rewardEndsAtMillis;
+        RewardPhaseStatus rewardPhaseStatus = RewardPhaseStatus.PENDING;
+        boolean setReportDispatched;
+    }
+
+    private enum RewardPhaseStatus {
+        PENDING,
+        ACTIVE,
+        COMPLETED,
+        SKIPPED
     }
 }

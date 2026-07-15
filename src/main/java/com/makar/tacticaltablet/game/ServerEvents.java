@@ -17,6 +17,8 @@ import com.makar.tacticaltablet.game.respawn.PostRtpProtectionManager;
 import com.makar.tacticaltablet.game.teleport.SafeTeleport;
 import com.makar.tacticaltablet.game.team.TeamMatchManager;
 import com.makar.tacticaltablet.game.team.TeamId;
+import com.makar.tacticaltablet.game.set.SetMatchRuntime;
+import com.makar.tacticaltablet.game.set.CombatAssistTracker;
 import com.makar.tacticaltablet.game.zone.ZoneManager;
 import com.makar.tacticaltablet.integration.discord.MatchDamageAccounting;
 import com.makar.tacticaltablet.integration.discord.DiscordLeaderboardService;
@@ -118,6 +120,7 @@ public class ServerEvents {
             }
             LobbyManager.moveToLobby(player);
             MapSetManager.sync(player, MapSetManager.isVoting());
+            GameStateManager.showCurrentSetRewardOnJoin(player);
             ContractManager.ensureTracker(player);
             ContractManager.giveSelectionTrackerIfAvailable(player);
             TeamMatchManager.applyScoreboardTeams(player.server);
@@ -191,7 +194,8 @@ public class ServerEvents {
         long started = System.nanoTime();
 
         try {
-            if (GameStateManager.getMatchPhase() == MatchPhase.POST_GAME) {
+            if (GameStateManager.getMatchPhase() == MatchPhase.POST_GAME
+                    || GameStateManager.getMatchPhase() == MatchPhase.SET_REWARDING) {
                 event.setCanceled(true);
                 event.setAmount(0);
                 return;
@@ -266,6 +270,8 @@ public class ServerEvents {
                 actualHealthLost
         )) {
             DiscordLeaderboardService.recordMatchDamage(attacker, actualHealthLost);
+            SetMatchRuntime.recordEffectivePvpDamage(attacker.getUUID(), attacker.getGameProfile().getName(),
+                    victim.getUUID(), attacker.server.getTickCount());
         }
     }
 
@@ -317,7 +323,12 @@ public class ServerEvents {
             ModerModeManager.clear(player);
 
             if (runningMatchParticipant) {
+                TeamId disconnectedTeam = TeamMatchManager.getTeam(player);
+                SetMatchRuntime.recordPlayerEliminated(player.getUUID(), player.server.getTickCount());
                 LivesManager.handleDeath(player);
+                if (disconnectedTeam != null && !TeamMatchManager.hasAliveParticipant(player.server, disconnectedTeam)) {
+                    SetMatchRuntime.recordTeamEliminated(disconnectedTeam, player.server.getTickCount());
+                }
                 PlayerTabletState.reset(player);
             } else {
                 RtpTimerManager.cancel(player);
@@ -347,6 +358,7 @@ public class ServerEvents {
 
         try {
             boolean participating = isActiveMatchParticipant(victim);
+            if (participating && !SetMatchRuntime.claimDeath(victim.getUUID(), victim.server.getTickCount())) return;
             PlayerDeathFinalization.process(
                     participating,
                     () -> processPlayerDeath(victim, event.getSource()),
@@ -390,9 +402,20 @@ public class ServerEvents {
         CorpseLootManager.createCorpse(victim);
         PlayerProgressManager.addDeath(victim);
         DiscordLeaderboardService.recordMatchDeath(victim);
+        TeamId victimTeam = TeamMatchManager.getTeam(victim);
         LivesManager.handleDeath(victim);
+        if (LivesManager.isEliminated(victim)) {
+            SetMatchRuntime.recordPlayerEliminated(victim.getUUID(), victim.server.getTickCount());
+        }
+        if (victimTeam != null && !TeamMatchManager.hasAliveParticipant(victim.server, victimTeam)) {
+            SetMatchRuntime.recordTeamEliminated(victimTeam, victim.server.getTickCount());
+        }
 
-        processKillerConsequences(victim, source, killer);
+        try {
+            processKillerConsequences(victim, source, killer);
+        } finally {
+            SetMatchRuntime.clearVictimAttribution(victim.getUUID());
+        }
 
         ContractManager.onPlayerKilled(victim, killer);
         ExtractionPointManager.onPlayerDeathOrLogout(victim);
@@ -403,19 +426,22 @@ public class ServerEvents {
     }
 
     private static void processKillerConsequences(ServerPlayer victim, DamageSource source, ServerPlayer killer) {
-        if (killer == null) return;
-        if (!killer.getTags().contains("war.playing")) return;
-        if (killer.getUUID().equals(victim.getUUID())) return;
-
         Entity direct = source.getDirectEntity();
+        boolean victimOwnedProjectile = direct instanceof Projectile projectile
+                && projectile.getOwner() != null
+                && projectile.getOwner().getUUID().equals(victim.getUUID());
+        boolean teammates = killer != null && GameStateManager.getCurrentMode().isTeamMode()
+                && TeamMatchManager.areTeammates(killer, victim);
+        KillCreditPolicy.Outcome outcome = KillCreditPolicy.classify(
+                killer != null,
+                killer != null && killer.getTags().contains("war.playing"),
+                killer != null && killer.getUUID().equals(victim.getUUID()),
+                victimOwnedProjectile,
+                teammates
+        );
+        if (outcome == KillCreditPolicy.Outcome.IGNORE) return;
 
-        if (direct instanceof Projectile projectile) {
-            Entity owner = projectile.getOwner();
-            if (owner != null && owner.getUUID().equals(victim.getUUID())) return;
-        }
-
-        if (GameStateManager.getCurrentMode().isTeamMode()
-                && TeamMatchManager.areTeammates(killer, victim)) {
+        if (outcome == KillCreditPolicy.Outcome.TEAM_KILL) {
             int teamKills = DiscordLeaderboardService.recordTeamKill(killer.server, killer);
             killer.sendSystemMessage(Component.literal(
                     "[WAR] Тимкилл не засчитан. Тимкиллы за сет: "
@@ -430,6 +456,10 @@ public class ServerEvents {
         PlayerProgressManager.addKill(killer);
         DiscordLeaderboardService.recordMatchKill(killer);
         PlayerProgressManager.addCoins(killer, PlayerProgressManager.KILL_COIN_REWARD);
+        for (CombatAssistTracker.AssistCredit assist : SetMatchRuntime.resolveAssists(
+                victim.getUUID(), killer.getUUID(), victim.server.getTickCount())) {
+            DiscordLeaderboardService.recordMatchAssist(assist.playerId(), assist.playerName());
+        }
 
         String clazz = PlayerTabletState.getSelectedClass(killer);
         if (clazz == null || clazz.isBlank()) return;

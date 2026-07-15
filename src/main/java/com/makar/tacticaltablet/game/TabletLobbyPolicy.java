@@ -15,6 +15,7 @@ final class TabletLobbyPolicy {
                 || (clanWarSet && phase == MatchPhase.WAITING)
                 || phase == MatchPhase.VOTING
                 || phase == MatchPhase.TEAM_SELECT
-                || phase == MatchPhase.MAP_VOTING;
+                || phase == MatchPhase.MAP_VOTING
+                || phase == MatchPhase.SET_REWARDING;
     }
 }

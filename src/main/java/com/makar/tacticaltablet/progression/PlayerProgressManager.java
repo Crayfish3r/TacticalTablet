@@ -67,8 +67,7 @@ public class PlayerProgressManager {
     public static final int MAX_CLASS_XP = ClassTier.MAX_XP;
     public static final int BASE_UNLOCK_COST = 25;
 
-    public static final int KILL_COIN_REWARD = 2;
-    public static final int WIN_COIN_REWARD = 5;
+    public static final int KILL_COIN_REWARD = 5;
 
     private static final String[] INITIAL_BASE_CLASSES = new String[]{
             "stormtrooper",
@@ -611,6 +610,21 @@ public class PlayerProgressManager {
         PlayerProgress progress = getOrLoad(server, uuid, lastKnownName);
         progress.coins = Math.max(0, safeAdd(progress.coins, amount));
         return saveOffline(uuid, progress);
+    }
+
+    public static synchronized RepositoryResult applyIdempotentCoinCredit(
+            MinecraftServer server, UUID uuid, String lastKnownName, int amount, String idempotencyKey) {
+        if (server == null || uuid == null) return RepositoryResult.failed("Missing coin credit context", null);
+        PlayerProgress progress = getOrLoad(server, uuid, lastKnownName);
+        normalize(progress);
+        RepositoryResult result = PlayerTransactionReceiptLedger.applyCredit(progress, idempotencyKey, "set_reward", amount,
+                Clock.systemUTC(), () -> saveOffline(uuid, progress));
+        if (result.status() == RepositoryResult.Status.APPLIED
+                || result.status() == RepositoryResult.Status.ALREADY_APPLIED) {
+            ServerPlayer online = server.getPlayerList().getPlayer(uuid);
+            if (online != null) ClassXPManager.sync(online);
+        }
+        return result;
     }
 
     public static synchronized int getCoins(ServerPlayer player) {

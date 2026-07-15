@@ -99,6 +99,40 @@ final class PlayerTransactionReceiptLedger {
                 : RepositoryResult.conflict("Player balance does not match debit receipt");
     }
 
+    static RepositoryResult applyCredit(State state, String idempotencyKey, String operationType, int amount,
+                                        Clock clock, BooleanSupplier durableSave) {
+        Objects.requireNonNull(state, "state");
+        Objects.requireNonNull(clock, "clock");
+        Objects.requireNonNull(durableSave, "durableSave");
+        if (idempotencyKey == null || idempotencyKey.isBlank() || operationType == null
+                || operationType.isBlank() || operationType.length() > MAX_OPERATION_LENGTH || amount <= 0) {
+            return RepositoryResult.failed("Invalid coin credit receipt", null);
+        }
+        AppliedTransactionReceipt existing = findReceipt(state.receipts(), idempotencyKey);
+        if (existing != null) return operationType.equals(existing.operationType)
+                && Integer.toString(amount).equals(existing.payloadHash)
+                ? RepositoryResult.alreadyApplied() : RepositoryResult.conflict("Coin credit receipt mismatch");
+        int previousCoins = state.coins();
+        if (previousCoins > Integer.MAX_VALUE - amount) {
+            return RepositoryResult.failed("Coin credit would overflow player balance", null);
+        }
+        int newBalance = previousCoins + amount;
+        List<AppliedTransactionReceipt> previousReceipts = new ArrayList<>(state.receipts());
+        AppliedTransactionReceipt receipt = new AppliedTransactionReceipt();
+        receipt.transactionId = idempotencyKey;
+        receipt.operationType = operationType;
+        receipt.appliedAt = clock.millis();
+        receipt.expectedOldBalance = previousCoins;
+        receipt.newBalance = newBalance;
+        receipt.payloadHash = Integer.toString(amount);
+        state.coins(newBalance);
+        state.receipts().add(receipt);
+        if (durableSave.getAsBoolean()) return RepositoryResult.applied();
+        state.coins(previousCoins);
+        state.receipts(previousReceipts);
+        return RepositoryResult.failed("Failed to persist coin credit receipt", null);
+    }
+
     static AppliedTransactionReceipt receiptFor(CreateClanTransaction transaction, long appliedAt) {
         AppliedTransactionReceipt receipt = new AppliedTransactionReceipt();
         receipt.transactionId = transaction.transactionId().toString();
@@ -136,7 +170,7 @@ final class PlayerTransactionReceiptLedger {
                 && receipt.operationType.length() <= MAX_OPERATION_LENGTH
                 && receipt.expectedOldBalance >= 0
                 && receipt.newBalance >= 0
-                && receipt.expectedOldBalance > receipt.newBalance
+                && receipt.expectedOldBalance != receipt.newBalance
                 && receipt.payloadHash != null && !receipt.payloadHash.isBlank()
                 && receipt.payloadHash.length() <= MAX_HASH_LENGTH;
     }

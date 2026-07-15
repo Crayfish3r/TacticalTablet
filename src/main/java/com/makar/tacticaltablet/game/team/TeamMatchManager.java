@@ -109,6 +109,10 @@ public final class TeamMatchManager {
         return player == null ? null : playerTeams.get(player.getUUID());
     }
 
+    public static TeamId getTeam(UUID playerId) {
+        return playerId == null ? null : playerTeams.get(playerId);
+    }
+
     public static List<ServerPlayer> getOnlineTeamMembers(MinecraftServer server, TeamId teamId) {
         List<ServerPlayer> result = new ArrayList<>();
         if (server == null || teamId == null) return result;
@@ -412,6 +416,10 @@ public final class TeamMatchManager {
 
     private static boolean hasAliveOnlineMember(MinecraftServer server, TeamId teamId) {
         return getAliveOnlineMemberCount(server, teamId) > 0;
+    }
+
+    public static boolean hasAliveParticipant(MinecraftServer server, TeamId teamId) {
+        return server != null && teamId != null && hasAliveOnlineMember(server, teamId);
     }
 
     private static int getAliveOnlineMemberCount(MinecraftServer server, TeamId teamId) {

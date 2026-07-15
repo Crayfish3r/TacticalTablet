@@ -6,6 +6,7 @@ public record MatchPlayerStatsSnapshot(
         UUID playerId,
         String playerName,
         int kills,
+        int assists,
         int deaths,
         double actualHealthDamage,
         int actualCoinBalance,
@@ -15,6 +16,7 @@ public record MatchPlayerStatsSnapshot(
     public MatchPlayerStatsSnapshot {
         playerName = playerName == null || playerName.isBlank() ? "unknown" : playerName;
         kills = Math.max(0, kills);
+        assists = Math.max(0, assists);
         deaths = Math.max(0, deaths);
         actualHealthDamage = Math.max(0.0D, actualHealthDamage);
         actualCoinBalance = Math.max(0, actualCoinBalance);

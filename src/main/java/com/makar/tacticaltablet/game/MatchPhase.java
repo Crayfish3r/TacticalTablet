@@ -8,7 +8,8 @@ public enum MatchPhase {
     RUNNING,
     POST_GAME,
     MAP_VOTING,
-    RESTARTING;
+    RESTARTING,
+    SET_REWARDING;
 
     public static MatchPhase byId(int id) {
         MatchPhase[] values = values();

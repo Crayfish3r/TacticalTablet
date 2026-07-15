@@ -4,11 +4,13 @@ import com.makar.tacticaltablet.airdrop.AirdropManager;
 import com.makar.tacticaltablet.clan.ClanManager;
 import com.makar.tacticaltablet.game.GameStateManager;
 import com.makar.tacticaltablet.game.MapSetManager;
+import com.makar.tacticaltablet.game.set.SetMatchRuntime;
 import com.makar.tacticaltablet.game.clanwar.ClanWarManager;
 import com.makar.tacticaltablet.game.lives.LivesManager;
 import com.makar.tacticaltablet.game.lobby.LobbyManager;
 import com.makar.tacticaltablet.game.extraction.ExtractionPointManager;
 import com.makar.tacticaltablet.game.teleport.SafeTeleport;
+import com.makar.tacticaltablet.game.MapSetManager;
 import com.makar.tacticaltablet.game.team.TeamId;
 import com.makar.tacticaltablet.game.team.TeamMatchManager;
 import com.makar.tacticaltablet.game.zone.ZoneManager;
@@ -268,6 +270,9 @@ public class RtpTimerManager {
 
         player.removeTag("in_lobby");
         player.addTag("war.playing");
+        MapSetManager.recordParticipant(player.server, player.getUUID(), player.getGameProfile().getName());
+        SetMatchRuntime.registerParticipant(player.getUUID(), player.getGameProfile().getName(),
+                TeamMatchManager.getTeam(player));
         VoiceChatTeamManager.assignPlayerToVoiceGroup(player);
         player.displayClientMessage(Component.literal(
                 "[WAR] Защита после высадки: " + (POST_RTP_PROTECTION_TICKS / 20) + " сек."
