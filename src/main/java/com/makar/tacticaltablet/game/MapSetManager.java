@@ -40,12 +40,12 @@ import java.util.Set;
 
 public final class MapSetManager {
 
-    public static final int GAMES_PER_MAP = 4;
+    public static final int GAMES_PER_MAP = 5;
     public static final int MAP_VOTE_SECONDS = 30;
     public static final int RESTART_COUNTDOWN_SECONDS = 10;
     public static final int SET_REWARD_SECONDS = 15;
 
-    private static final int DATA_VERSION = 4;
+    private static final int DATA_VERSION = MapSetProgressionPolicy.CURRENT_DATA_VERSION;
     private static final String STATE_FILE = "map_set_state.json";
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
     private static final Random RANDOM = new Random();
@@ -121,18 +121,18 @@ public final class MapSetManager {
     }
 
     public static synchronized int getCurrentGameNumber() {
-        return Math.min(GAMES_PER_MAP, Math.max(1, state.completedGames + 1));
+        return MapSetProgressionPolicy.currentGameNumber(state.completedGames, GAMES_PER_MAP);
     }
 
     public static synchronized int getCompletedGames() {
-        return Math.max(0, Math.min(GAMES_PER_MAP, state.completedGames));
+        return MapSetProgressionPolicy.normalizeCompletedGames(state.completedGames, GAMES_PER_MAP);
     }
 
     public static synchronized boolean onGameCompleted(MinecraftServer server) {
         initStorage(server);
-        state.completedGames = Math.min(GAMES_PER_MAP, state.completedGames + 1);
+        state.completedGames = MapSetProgressionPolicy.completedAfterGame(state.completedGames, GAMES_PER_MAP);
         saveState();
-        return state.completedGames >= GAMES_PER_MAP;
+        return MapSetProgressionPolicy.isComplete(state.completedGames, GAMES_PER_MAP);
     }
 
     public static synchronized boolean ensureSetCompleted(MinecraftServer server) {
@@ -146,7 +146,7 @@ public final class MapSetManager {
     }
 
     public static synchronized boolean isSetComplete() {
-        return state.completedGames >= GAMES_PER_MAP;
+        return MapSetProgressionPolicy.isComplete(state.completedGames, GAMES_PER_MAP);
     }
 
     public static synchronized UUID getSetId() {
@@ -160,7 +160,8 @@ public final class MapSetManager {
     }
 
     public static synchronized void recordParticipant(MinecraftServer server, UUID playerId, String name) {
-        if (server == null || playerId == null || state.completedGames >= GAMES_PER_MAP) return;
+        if (server == null || playerId == null
+                || MapSetProgressionPolicy.isComplete(state.completedGames, GAMES_PER_MAP)) return;
         initStorage(server);
         state.participants.put(playerId.toString(), name == null ? "" : name);
         saveState();
@@ -346,7 +347,8 @@ public final class MapSetManager {
 
         broadcast(server, debug
                 ? "[WAR] Отладочное голосование за следующую карту началось. После выбора сервер будет перезапущен."
-                : "[WAR] Сет из 4 игр завершён. Выберите следующую карту — осталось 30 секунд.");
+                : "[WAR] Сет из " + GAMES_PER_MAP
+                + " игр завершён. Выберите следующую карту — осталось 30 секунд.");
         syncAll(server, true);
     }
 
@@ -526,6 +528,11 @@ public final class MapSetManager {
                     if (loaded != null) state = loaded;
                 }
             }
+            if (state.dataVersion < DATA_VERSION && !backupStateBeforeMigration(state.dataVersion)) {
+                normalizeState();
+                statePath = null;
+                return;
+            }
             normalizeState();
             saveState();
         } catch (IOException | RuntimeException exception) {
@@ -556,24 +563,60 @@ public final class MapSetManager {
         }
     }
 
+    private static boolean backupStateBeforeMigration(int sourceDataVersion) {
+        if (statePath == null || !Files.exists(statePath)) return true;
+
+        int safeSourceVersion = Math.max(0, sourceDataVersion);
+        Path backup = statePath.resolveSibling(
+                statePath.getFileName() + ".v" + safeSourceVersion + ".pre-v" + DATA_VERSION + ".bak");
+        if (Files.exists(backup)) return true;
+
+        try {
+            Files.copy(statePath, backup);
+            return true;
+        } catch (IOException exception) {
+            TacticalTabletMod.LOGGER.error(
+                    "Failed to back up map set state before migrating data version {} to {}",
+                    safeSourceVersion,
+                    DATA_VERSION,
+                    exception
+            );
+            return false;
+        }
+    }
+
     private static void normalizeState() {
-        state.mapName = state.mapName == null ? "" : state.mapName.trim();
-        state.lastRotation = state.lastRotation == null ? "" : state.lastRotation.trim();
-        state.completedGames = Math.max(0, Math.min(GAMES_PER_MAP, state.completedGames));
-        if (state.setId == null || state.setId.isBlank()) state.setId = UUID.randomUUID().toString();
-        if (state.participants == null) state.participants = new LinkedHashMap<>();
-        if (state.rewardPhaseStatus == null
-                || (state.rewardPhaseStatus == RewardPhaseStatus.PENDING && state.rewardEndsAtMillis != 0L)) {
-            state.rewardPhaseStatus = state.rewardEndsAtMillis < 0L
+        normalizeState(state);
+    }
+
+    static void normalizeState(SetState candidate) {
+        candidate.mapName = candidate.mapName == null ? "" : candidate.mapName.trim();
+        candidate.lastRotation = candidate.lastRotation == null ? "" : candidate.lastRotation.trim();
+        MapSetProgressionPolicy.Migration migration = MapSetProgressionPolicy.migrate(
+                candidate.dataVersion,
+                candidate.completedGames,
+                GAMES_PER_MAP
+        );
+        candidate.completedGames = migration.completedGames();
+        candidate.dataVersion = migration.dataVersion();
+        if (candidate.setId == null || candidate.setId.isBlank()) {
+            candidate.setId = UUID.randomUUID().toString();
+        }
+        if (candidate.participants == null) candidate.participants = new LinkedHashMap<>();
+        if (candidate.rewardPhaseStatus == null
+                || (candidate.rewardPhaseStatus == RewardPhaseStatus.PENDING
+                && candidate.rewardEndsAtMillis != 0L)) {
+            candidate.rewardPhaseStatus = candidate.rewardEndsAtMillis < 0L
                     ? RewardPhaseStatus.COMPLETED
-                    : state.rewardEndsAtMillis > 0L ? RewardPhaseStatus.ACTIVE : RewardPhaseStatus.PENDING;
+                    : candidate.rewardEndsAtMillis > 0L
+                    ? RewardPhaseStatus.ACTIVE
+                    : RewardPhaseStatus.PENDING;
         }
-        state.dataVersion = DATA_VERSION;
-        if (state.competitiveSet && state.clanWarSet) {
-            state.clanWarSet = false;
+        if (candidate.competitiveSet && candidate.clanWarSet) {
+            candidate.clanWarSet = false;
         }
-        if (state.nextSetCompetitive && state.nextSetClanWar) {
-            state.nextSetClanWar = false;
+        if (candidate.nextSetCompetitive && candidate.nextSetClanWar) {
+            candidate.nextSetClanWar = false;
         }
     }
 
@@ -613,7 +656,7 @@ public final class MapSetManager {
         FAILED
     }
 
-    private static final class SetState {
+    static final class SetState {
         int dataVersion = DATA_VERSION;
         String mapName = "";
         String lastRotation = "";
@@ -631,7 +674,7 @@ public final class MapSetManager {
         boolean setReportDispatched;
     }
 
-    private enum RewardPhaseStatus {
+    enum RewardPhaseStatus {
         PENDING,
         ACTIVE,
         COMPLETED,

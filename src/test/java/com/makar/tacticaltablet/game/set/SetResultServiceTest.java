@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class SetResultServiceTest {
     @Test
-    void snapshotSumsAllFourGamesAndDoesNotDuplicateAGame() {
+    void snapshotSumsAllSetGamesAndDoesNotDuplicateAGame() {
         UUID id = UUID.randomUUID();
         Map<UUID, String> participants = Map.of(id, "Player");
         List<GamePerformance> games = List.of(
@@ -19,13 +19,14 @@ class SetResultServiceTest {
                 game(2, id, "Player", 2, 2, 1, 40, 1),
                 game(3, id, "Player", 4, 1, 0, 20, 1),
                 game(4, id, "Player", 1, 3, 1, 20, 0),
-                game(4, id, "Player", 1, 99, 99, 999, 0));
+                game(4, id, "Player", 1, 99, 99, 999, 0),
+                game(5, id, "Player", 0, 0, 0, 0, 0));
 
         SetPlayerResult result = SetResultService.createSnapshot(UUID.randomUUID(), participants, games)
                 .orderedResults().get(0);
 
         assertEquals(56, result.totalScore());
-        assertEquals(4, result.games().size());
+        assertEquals(5, result.games().size());
     }
 
     @Test
@@ -35,7 +36,8 @@ class SetResultServiceTest {
                 List.of(game(1, id, "Offline", 1, 0, 0, 0, 0))).orderedResults().get(0);
 
         assertEquals(12, result.totalScore());
-        assertEquals(List.of(1, 0, 0, 0), result.games().stream().map(GamePerformance::placement).toList());
+        assertEquals(List.of(1, 0, 0, 0, 0),
+                result.games().stream().map(GamePerformance::placement).toList());
     }
 
     @Test

@@ -37,12 +37,12 @@ public final class SetResultService {
         List<SetPlayerResult> results = new ArrayList<>();
         for (Map.Entry<UUID, String> participant : safeParticipants.entrySet()) {
             Map<Integer, GamePerformance> played = gamesByPlayer.getOrDefault(participant.getKey(), Map.of());
-            List<GamePerformance> fourGames = new ArrayList<>();
+            List<GamePerformance> setGames = new ArrayList<>();
             for (int game = 1; game <= MapSetManager.GAMES_PER_MAP; game++) {
-                fourGames.add(played.getOrDefault(game,
+                setGames.add(played.getOrDefault(game,
                         GamePerformance.missed(game, participant.getKey(), participant.getValue())));
             }
-            results.add(SetPlayerResult.fromGames(participant.getKey(), participant.getValue(), fourGames));
+            results.add(SetPlayerResult.fromGames(participant.getKey(), participant.getValue(), setGames));
         }
         results.sort(SetScoringRules.SET_RESULT_COMPARATOR);
         return new SetLeaderboardSnapshot(setId, safeParticipants.size(), results);
