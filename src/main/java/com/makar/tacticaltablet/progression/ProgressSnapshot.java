@@ -19,7 +19,7 @@ record ProgressSnapshot(String key, long revision, Data data) {
             int wins, int kills, int deaths, int matchesPlayed, int coins, int battlePassXp,
             boolean xpBoost, boolean sadTromboneKills,
             Map<String, Integer> purchasedClasses, Map<String, Integer> donations, Map<String, Integer> stats,
-            List<AppliedTransactionReceipt> appliedTransactionReceipts,
+            List<ProgressReceipt> appliedTransactionReceipts,
             long firstSeen, long lastSeen
     ) {
         Data {

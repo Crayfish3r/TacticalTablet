@@ -9,6 +9,7 @@ import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -17,6 +18,7 @@ import java.util.Set;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class PlayerProgressPersistenceTest {
 
@@ -52,6 +54,24 @@ class PlayerProgressPersistenceTest {
     }
 
     @Test
+    void snapshotDefensivelyCopiesReceiptValues() {
+        ProgressReceipt receipt = new ProgressReceipt("receipt", "credit", 1L, 0, 5, "5");
+        List<ProgressReceipt> receipts = new ArrayList<>(List.of(receipt));
+        ProgressSnapshot.Data data = new ProgressSnapshot.Data(
+                11, "player", "uuid",
+                Map.of(), Map.of(), Map.of(),
+                0, 0, 0, 0, 0, 0,
+                false, false,
+                Map.of(), Map.of(), Map.of(), receipts, 0L, 0L
+        );
+        receipts.clear();
+
+        assertEquals(List.of(receipt), data.appliedTransactionReceipts());
+        assertThrows(UnsupportedOperationException.class,
+                () -> data.appliedTransactionReceipts().add(receipt));
+    }
+
+    @Test
     void backupCopyExcludesTemporaryFiles() throws Exception {
         Path source = temporaryDirectory.resolve("players");
         Path target = temporaryDirectory.resolve("backup");
@@ -60,7 +80,7 @@ class PlayerProgressPersistenceTest {
         Files.writeString(source.resolve("player.json"), "{}");
         Files.writeString(source.resolve("player.json.tmp"), "incomplete");
 
-        PlayerProgressManager.copyJsonFiles(source, target);
+        ProgressRepository.copyJsonFiles(source, target);
 
         assertTrue(Files.exists(target.resolve("player.json")));
         assertFalse(Files.exists(target.resolve("player.json.tmp")));

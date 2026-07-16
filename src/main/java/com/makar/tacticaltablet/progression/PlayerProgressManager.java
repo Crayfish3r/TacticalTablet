@@ -4,33 +4,18 @@ import com.makar.tacticaltablet.core.TacticalTabletMod;
 import com.makar.tacticaltablet.clan.transaction.CreateClanTransaction;
 import com.makar.tacticaltablet.clan.transaction.RepositoryResult;
 import com.makar.tacticaltablet.game.MapSetManager;
-import com.makar.tacticaltablet.storage.AtomicFileStore;
-import com.makar.tacticaltablet.storage.BackupCoordinator;
-import com.makar.tacticaltablet.storage.FileSaveResult;
 import com.makar.tacticaltablet.storage.ModPersistenceExecutor;
 import com.makar.tacticaltablet.storage.SaveTicket;
 import com.makar.tacticaltablet.storage.DurableSaveResult;
 
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
-import com.google.gson.JsonSyntaxException;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.storage.LevelResource;
 
-import java.io.IOException;
-import java.io.Reader;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.DirectoryStream;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.time.Instant;
 import java.time.Duration;
 import java.time.Clock;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
-import java.util.Comparator;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -44,19 +29,8 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.BooleanSupplier;
-import java.util.stream.Stream;
 
 public class PlayerProgressManager {
-
-    private static final Gson GSON = new GsonBuilder()
-            .setPrettyPrinting()
-            .disableHtmlEscaping()
-            .create();
-
-    private static final String DATA_DIRECTORY = "tacticaltablet_data";
-    private static final String PLAYERS_DIRECTORY = "players";
-    private static final String BACKUPS_DIRECTORY = "backups";
-    private static final String SEASON_FILE = "season.json";
 
     private static final int DATA_VERSION = 11;
     public static final int BASIC_TIER = ClassTier.BASIC.id();
@@ -148,13 +122,7 @@ public class PlayerProgressManager {
 
     private static final int AUTOSAVE_INTERVAL_TICKS = 20 * 60;
     private static final int BACKUP_INTERVAL_TICKS = 20 * 60 * 30;
-    private static final int MAX_BACKUP_FOLDERS = 48;
-    private static final int PERSISTENCE_QUEUE_LIMIT = 512;
     private static final Duration SHUTDOWN_FLUSH_TIMEOUT = Duration.ofSeconds(10);
-
-    private static final DateTimeFormatter BACKUP_FORMAT = DateTimeFormatter
-            .ofPattern("yyyy-MM-dd_HH-mm-ss")
-            .withZone(ZoneId.systemDefault());
     private static final ProgressionRules PROGRESSION_RULES = new ProgressionRules(
             MONSTER_TIER,
             MAX_CLASS_XP,
@@ -168,21 +136,25 @@ public class PlayerProgressManager {
             Set.of(EXCLUSIVE_CLASSES),
             BASE_UNLOCK_COST
     ));
+    private static final ProgressRepository.Configuration REPOSITORY_CONFIGURATION =
+            new ProgressRepository.Configuration(
+                    DATA_VERSION,
+                    MAX_CLASS_XP,
+                    Set.of(INITIAL_BASE_CLASSES),
+                    Set.of(BASE_CLASSES),
+                    Set.of(SHOP_CLASSES),
+                    Set.of(EXCLUSIVE_CLASSES),
+                    Set.of(ALL_CLASSES)
+            );
 
     private static final Map<String, PlayerProgress> cache = new HashMap<>();
     private static final Map<String, Boolean> dirty = new HashMap<>();
     private static final Map<String, Long> snapshotRevisions = new HashMap<>();
-    private static final BackupCoordinator backupCoordinator = new BackupCoordinator();
-    private static final AtomicFileStore FILE_STORE = new AtomicFileStore();
-
-    private static Path dataRoot;
-    private static Path playersRoot;
-    private static Path backupsRoot;
     private static int autosaveTicks;
     private static int backupTicks;
     private static long nextSnapshotRevision;
     private static long nextBackupRevision;
-    private static ModPersistenceExecutor persistenceExecutor;
+    private static ProgressRepository progressRepository;
 
     public enum PurchaseResult {
         PURCHASED,
@@ -319,10 +291,13 @@ public class PlayerProgressManager {
 
         String key = getPlayerKey(player);
         PlayerProgress progress = cache.get(key);
-        boolean fileExists = Files.exists(getPlayerFile(key));
+        boolean fileExists = progressRepository != null && progressRepository.exists(key);
+        boolean repositoryRequiresSave = false;
 
         if (progress == null) {
-            progress = readOrCreateProgress(player, key);
+            LoadedFromRepository loaded = readOrCreateProgress(player, key);
+            progress = loaded.progress();
+            repositoryRequiresSave = loaded.requiresSave();
             cache.put(key, progress);
         }
 
@@ -335,7 +310,7 @@ public class PlayerProgressManager {
             changed = true;
         }
 
-        if (changed || !fileExists) {
+        if (changed || repositoryRequiresSave || !fileExists) {
             markDirty(key);
             savePlayer(player);
         }
@@ -361,7 +336,7 @@ public class PlayerProgressManager {
     }
 
     private static void saveAll(boolean finalSnapshots) {
-        if (playersRoot == null) return;
+        if (progressRepository == null) return;
 
         for (Map.Entry<String, PlayerProgress> entry : cache.entrySet()) {
             String key = entry.getKey();
@@ -374,21 +349,18 @@ public class PlayerProgressManager {
     }
 
     public static synchronized void resetStorage() {
-        if (persistenceExecutor != null) {
-            persistenceExecutor.stopAccepting();
-            persistenceExecutor.close();
+        if (progressRepository != null) {
+            progressRepository.stopAccepting();
+            progressRepository.close();
         }
         cache.clear();
         dirty.clear();
         snapshotRevisions.clear();
-        dataRoot = null;
-        playersRoot = null;
-        backupsRoot = null;
         autosaveTicks = 0;
         backupTicks = 0;
         nextSnapshotRevision = 0L;
         nextBackupRevision = 0L;
-        persistenceExecutor = null;
+        progressRepository = null;
     }
 
     public static synchronized int getXP(ServerPlayer player, String clazz) {
@@ -718,26 +690,16 @@ public class PlayerProgressManager {
             }
         }
 
-        if (playersRoot == null || !Files.isDirectory(playersRoot)) {
-            return Optional.empty();
-        }
-
-        try (DirectoryStream<Path> stream = Files.newDirectoryStream(playersRoot, "*.json")) {
-            for (Path file : stream) {
-                PlayerProgress progress = readProgressFile(file);
-                if (progress == null || progress.name == null) continue;
-                if (!progress.name.toLowerCase(Locale.ROOT).equals(normalized)) continue;
-
-                String key = stripJsonExtension(file.getFileName().toString());
-                UUID uuid = parseProgressUuid(key, progress);
+        if (progressRepository == null) return Optional.empty();
+        for (ProgressRepository.LoadedProfile loaded : progressRepository.loadAll()) {
+                PlayerProgress progress = fromData(loaded.data());
+                if (progress.name == null || !progress.name.toLowerCase(Locale.ROOT).equals(normalized)) continue;
+                UUID uuid = parseProgressUuid(loaded.sourceKey(), progress);
                 if (uuid == null) continue;
 
-                normalize(progress);
+                String key = getPlayerKey(progress, uuid);
                 cache.putIfAbsent(key, progress);
                 return Optional.of(new KnownPlayer(uuid, progress.name));
-            }
-        } catch (IOException exception) {
-            TacticalTabletMod.LOGGER.error("Failed to scan Tactical Tablet progress players", exception);
         }
 
         return Optional.empty();
@@ -1047,7 +1009,7 @@ public class PlayerProgressManager {
     }
 
     public static synchronized void tick(MinecraftServer server) {
-        if (server == null || dataRoot == null || persistenceExecutor == null) return;
+        if (server == null || progressRepository == null) return;
 
         autosaveTicks++;
         backupTicks++;
@@ -1108,8 +1070,8 @@ public class PlayerProgressManager {
     }
 
     public static synchronized void backupNow() {
-        if (playersRoot == null || backupsRoot == null || persistenceExecutor == null) return;
-        if (!backupCoordinator.tryStart()) return;
+        if (progressRepository == null) return;
+        if (!progressRepository.tryStartBackup()) return;
 
         List<ProgressSnapshot> snapshots = new ArrayList<>();
         for (Map.Entry<String, PlayerProgress> entry : cache.entrySet()) {
@@ -1120,18 +1082,10 @@ public class PlayerProgressManager {
             enqueueSnapshot(entry.getKey(), progress, snapshots.get(snapshots.size() - 1));
         }
 
-        BackupSnapshot backup = new BackupSnapshot(
-                dataRoot,
-                playersRoot,
-                backupsRoot,
-                BACKUP_FORMAT.format(Instant.now()) + "_" + (nextBackupRevision + 1),
-                List.copyOf(snapshots),
-                ++nextBackupRevision
-        );
-        ModPersistenceExecutor.SubmitResult result = persistenceExecutor.submit(new BackupWriteTask(backup));
+        ModPersistenceExecutor.SubmitResult result = progressRepository.backup(
+                List.copyOf(snapshots), ++nextBackupRevision);
         if (result.status() == ModPersistenceExecutor.SubmitStatus.BACKPRESSURED
                 || result.status() == ModPersistenceExecutor.SubmitStatus.CLOSED) {
-            backupCoordinator.finish();
             TacticalTabletMod.LOGGER.warn("Could not queue Tactical Tablet progress backup: {}", result.diagnostic());
         }
     }
@@ -1143,19 +1097,19 @@ public class PlayerProgressManager {
 
     /** Queues final immutable snapshots, then waits only a bounded time during server shutdown. */
     public static synchronized void flushForShutdown() {
-        if (persistenceExecutor == null) return;
-        persistenceExecutor.stopAccepting();
+        if (progressRepository == null) return;
+        progressRepository.stopAccepting();
         saveAll(true);
-        boolean completed = persistenceExecutor.flush(SHUTDOWN_FLUSH_TIMEOUT);
+        boolean completed = progressRepository.flush(SHUTDOWN_FLUSH_TIMEOUT);
         if (!completed) {
             TacticalTabletMod.LOGGER.error("Timed out after {} ms while flushing Tactical Tablet progress persistence; {} target(s) remain queued",
-                    SHUTDOWN_FLUSH_TIMEOUT.toMillis(), persistenceExecutor.pendingTargets());
+                    SHUTDOWN_FLUSH_TIMEOUT.toMillis(), progressRepository.pendingTargets());
         }
-        persistenceExecutor.close();
+        progressRepository.close();
     }
 
     public static synchronized Path getDataRoot() {
-        return dataRoot;
+        return progressRepository == null ? null : progressRepository.dataRoot();
     }
 
     private static PlayerProgress getOrLoad(MinecraftServer server, UUID uuid, String lastKnownName) {
@@ -1193,40 +1147,13 @@ public class PlayerProgressManager {
             return new LoadedProgress(getPlayerKey(cached, uuid), cached);
         }
 
-        String legacyKey = compactUuid(uuid);
-        Path legacyFile = getPlayerFile(legacyKey);
-        if (Files.exists(legacyFile)) {
-            PlayerProgress progress = readProgressFile(legacyFile);
-            if (progress != null) {
-                normalize(progress);
-                String key = getPlayerKey(progress, uuid);
-                cache.put(key, progress);
-                return new LoadedProgress(key, progress);
-            }
-        }
-
-        if (playersRoot == null || !Files.isDirectory(playersRoot)) {
-            return null;
-        }
-
-        try (DirectoryStream<Path> stream = Files.newDirectoryStream(playersRoot, "*.json")) {
-            for (Path file : stream) {
-                PlayerProgress progress = readProgressFile(file);
-                if (progress == null) continue;
-
-                UUID progressUuid = parseProgressUuid(stripJsonExtension(file.getFileName().toString()), progress);
-                if (!uuid.equals(progressUuid)) continue;
-
-                normalize(progress);
-                String key = getPlayerKey(progress, uuid);
-                cache.put(key, progress);
-                return new LoadedProgress(key, progress);
-            }
-        } catch (IOException exception) {
-            TacticalTabletMod.LOGGER.error("Failed to scan Tactical Tablet progress players", exception);
-        }
-
-        return null;
+        if (progressRepository == null) return null;
+        Optional<ProgressRepository.LoadedProfile> loaded = progressRepository.findByUuid(uuid);
+        if (loaded.isEmpty()) return null;
+        PlayerProgress progress = fromData(loaded.get().data());
+        String key = getPlayerKey(progress, uuid);
+        cache.put(key, progress);
+        return new LoadedProgress(key, progress);
     }
 
     private static PlayerProgress getOrLoad(ServerPlayer player, String key) {
@@ -1246,44 +1173,31 @@ public class PlayerProgressManager {
             return cached;
         }
 
-        PlayerProgress progress = readOrCreateProgress(player, key);
+        PlayerProgress progress = readOrCreateProgress(player, key).progress();
         updateIdentity(progress, player);
         normalize(progress);
         cache.put(getPlayerKey(progress, player.getUUID()), progress);
         return progress;
     }
 
-    private static PlayerProgress readOrCreateProgress(ServerPlayer player, String key) {
-        Path file = getPlayerFile(key);
-
-        if (Files.exists(file)) {
-            try (Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
-                PlayerProgress progress = GSON.fromJson(reader, PlayerProgress.class);
-                return progress == null ? createProgress(player) : progress;
-            } catch (JsonSyntaxException | IOException exception) {
-                TacticalTabletMod.LOGGER.error("Failed to read Tactical Tablet progress file {}", file, exception);
-                backupCorruptFile(file);
+    private static LoadedFromRepository readOrCreateProgress(ServerPlayer player, String key) {
+        if (progressRepository != null) {
+            Optional<ProgressRepository.LoadedProfile> preferred = progressRepository.loadByKey(key);
+            if (preferred.isPresent()) {
+                return new LoadedFromRepository(fromData(preferred.get().data()), preferred.get().requiresSave());
+            }
+            String legacyKey = compactUuid(player.getUUID());
+            if (!legacyKey.equals(key)) {
+                Optional<ProgressRepository.LoadedProfile> legacy = progressRepository.loadByKey(legacyKey);
+                if (legacy.isPresent()) {
+                    TacticalTabletMod.LOGGER.info(
+                            "Migrating Tactical Tablet progress for {} from UUID key {} to name key {}",
+                            player.getGameProfile().getName(), legacyKey + ".json", key + ".json");
+                    return new LoadedFromRepository(fromData(legacy.get().data()), true);
+                }
             }
         }
-
-        Path legacyFile = getLegacyPlayerFile(player);
-        if (legacyFile != null && !legacyFile.equals(file) && Files.exists(legacyFile)) {
-            try (Reader reader = Files.newBufferedReader(legacyFile, StandardCharsets.UTF_8)) {
-                PlayerProgress progress = GSON.fromJson(reader, PlayerProgress.class);
-                TacticalTabletMod.LOGGER.info(
-                        "Migrating Tactical Tablet progress for {} from UUID key {} to name key {}",
-                        player.getGameProfile().getName(),
-                        legacyFile.getFileName(),
-                        file.getFileName()
-                );
-                return progress == null ? createProgress(player) : progress;
-            } catch (JsonSyntaxException | IOException exception) {
-                TacticalTabletMod.LOGGER.error("Failed to read legacy Tactical Tablet progress file {}", legacyFile, exception);
-                backupCorruptFile(legacyFile);
-            }
-        }
-
-        return createProgress(player);
+        return new LoadedFromRepository(createProgress(player), false);
     }
 
     private static PlayerProgress createProgress(ServerPlayer player) {
@@ -1357,7 +1271,7 @@ public class PlayerProgressManager {
     }
 
     private static void init(MinecraftServer server) {
-        if (server == null || dataRoot != null) return;
+        if (server == null || progressRepository != null) return;
 
         Path worldRoot = server.getWorldPath(LevelResource.ROOT).toAbsolutePath().normalize();
         Path serverRoot = worldRoot.getParent();
@@ -1366,75 +1280,18 @@ public class PlayerProgressManager {
             serverRoot = worldRoot;
         }
 
-        dataRoot = serverRoot.resolve(DATA_DIRECTORY);
-        playersRoot = dataRoot.resolve(PLAYERS_DIRECTORY);
-        backupsRoot = dataRoot.resolve(BACKUPS_DIRECTORY);
-        persistenceExecutor = new ModPersistenceExecutor(
-                "TacticalTablet-Persistence",
-                PERSISTENCE_QUEUE_LIMIT,
-                message -> TacticalTabletMod.LOGGER.warn("{}", message)
-        );
-
-        try {
-            Files.createDirectories(playersRoot);
-            Files.createDirectories(backupsRoot);
-            migratePlayerFilesToNameKeys();
-            ensureSeasonFile();
-        } catch (IOException exception) {
-            TacticalTabletMod.LOGGER.error("Failed to initialize Tactical Tablet progress storage", exception);
-        }
-    }
-
-    private static void migratePlayerFilesToNameKeys() throws IOException {
-        if (!Files.isDirectory(playersRoot)) return;
-
-        try (DirectoryStream<Path> stream = Files.newDirectoryStream(playersRoot, "*.json")) {
-            for (Path source : stream) {
-                String sourceKey = stripJsonExtension(source.getFileName().toString());
-                PlayerProgress progress = readProgressFile(source);
-                if (progress == null) continue;
-
-                UUID uuid = parseProgressUuid(sourceKey, progress);
-                if (uuid == null) continue;
-
-                updateIdentity(progress, uuid, progress.name);
-                normalize(progress);
-
-                String targetKey = getPlayerKey(progress, uuid);
-                if (targetKey.isBlank() || targetKey.equals(sourceKey)) continue;
-
-                Path target = getPlayerFile(targetKey);
-                if (Files.exists(target)) {
-                    TacticalTabletMod.LOGGER.warn(
-                            "Cannot migrate Tactical Tablet progress file {} to {} because target already exists",
-                            source.getFileName(),
-                            target.getFileName()
-                    );
-                    continue;
+        progressRepository = new ProgressRepository(
+                serverRoot,
+                REPOSITORY_CONFIGURATION,
+                new ProgressRepository.RepositoryLog() {
+                    public void info(String message) { TacticalTabletMod.LOGGER.info("{}", message); }
+                    public void warn(String message) { TacticalTabletMod.LOGGER.warn("{}", message); }
+                    public void error(String message, Throwable exception) {
+                        TacticalTabletMod.LOGGER.error(message, exception);
+                    }
                 }
-
-                writeJsonAtomically(target, progress);
-                Files.deleteIfExists(source);
-                TacticalTabletMod.LOGGER.info(
-                        "Migrated Tactical Tablet progress file {} to {}",
-                        source.getFileName(),
-                        target.getFileName()
-                );
-            }
-        }
-    }
-
-    private static void ensureSeasonFile() throws IOException {
-        Path seasonFile = dataRoot.resolve(SEASON_FILE);
-
-        if (Files.exists(seasonFile)) return;
-
-        Map<String, Object> season = new HashMap<>();
-        season.put("dataVersion", DATA_VERSION);
-        season.put("season", 1);
-        season.put("createdAt", Instant.now().toString());
-
-        writeJsonAtomically(seasonFile, season);
+        );
+        progressRepository.initialize();
     }
 
     private static void saveDirty() {
@@ -1467,14 +1324,11 @@ public class PlayerProgressManager {
     }
 
     private static SaveTicket enqueueSnapshot(String key, PlayerProgress progress, ProgressSnapshot snapshot, boolean finalSnapshot) {
-        if (persistenceExecutor == null || playersRoot == null) {
+        if (progressRepository == null) {
             markDirty(key);
             return null;
         }
-        Path target = getPlayerFile(key);
-        SaveTicket ticket = finalSnapshot
-                ? persistenceExecutor.enqueueFinalSnapshot(new PlayerWriteTask(target, snapshot))
-                : persistenceExecutor.enqueueSnapshot(new PlayerWriteTask(target, snapshot));
+        SaveTicket ticket = progressRepository.save(snapshot, finalSnapshot);
         DurableSaveResult immediate = ticket.completion().toCompletableFuture().getNow(null);
         if (immediate == null || immediate.status() == DurableSaveResult.Status.WRITTEN) {
             snapshotRevisions.put(key, snapshot.revision());
@@ -1493,11 +1347,11 @@ public class PlayerProgressManager {
     }
 
     private static void reconcileCompletedWrites() {
-        if (persistenceExecutor == null) return;
+        if (progressRepository == null) return;
         for (String key : dirty.keySet().toArray(new String[0])) {
             Long revision = snapshotRevisions.get(key);
             if (revision == null) continue;
-            if (persistenceExecutor.completedRevision(getPlayerFile(key)) >= revision) {
+            if (progressRepository.completedRevision(key) >= revision) {
                 dirty.remove(key);
             }
         }
@@ -1522,10 +1376,39 @@ public class PlayerProgressManager {
                 Map.copyOf(progress.purchasedClasses),
                 Map.copyOf(progress.donations),
                 Map.copyOf(progress.stats),
-                List.copyOf(progress.appliedTransactionReceipts),
+                progress.appliedTransactionReceipts.stream()
+                        .map(AppliedTransactionReceipt::toProgressReceipt)
+                        .toList(),
                 progress.firstSeen,
                 progress.lastSeen
         ));
+    }
+
+    private static PlayerProgress fromData(ProgressSnapshot.Data data) {
+        PlayerProgress progress = new PlayerProgress();
+        progress.dataVersion = data.dataVersion();
+        progress.name = data.name();
+        progress.uuid = data.uuid();
+        progress.classes = new HashMap<>(data.classes());
+        progress.classTiers = new HashMap<>(data.classTiers());
+        progress.unlockedBaseClasses = new HashMap<>(data.unlockedBaseClasses());
+        progress.wins = data.wins();
+        progress.kills = data.kills();
+        progress.deaths = data.deaths();
+        progress.matchesPlayed = data.matchesPlayed();
+        progress.coins = data.coins();
+        progress.battlePassXp = data.battlePassXp();
+        progress.xpBoost = data.xpBoost();
+        progress.sadTromboneKills = data.sadTromboneKills();
+        progress.purchasedClasses = new HashMap<>(data.purchasedClasses());
+        progress.donations = new HashMap<>(data.donations());
+        progress.stats = new HashMap<>(data.stats());
+        progress.appliedTransactionReceipts = data.appliedTransactionReceipts().stream()
+                .map(AppliedTransactionReceipt::from)
+                .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+        progress.firstSeen = data.firstSeen();
+        progress.lastSeen = data.lastSeen();
+        return progress;
     }
 
     private static void markDirty(String key) {
@@ -1680,13 +1563,6 @@ public class PlayerProgressManager {
         return getPlayerKey(player.getGameProfile().getName(), player.getUUID());
     }
 
-    private static Path getLegacyPlayerFile(ServerPlayer player) {
-        String legacyKey = compactUuid(player);
-        if (legacyKey.isBlank()) return null;
-
-        return getPlayerFile(legacyKey);
-    }
-
     private static String getPlayerKey(PlayerProgress progress, UUID fallbackUuid) {
         String key = getPlayerKey(progress == null ? "" : progress.name, fallbackUuid);
         if (!key.isBlank()) return key;
@@ -1712,10 +1588,6 @@ public class PlayerProgressManager {
         return uuid.toString().replace("-", "");
     }
 
-    private static Path getPlayerFile(String key) {
-        return playersRoot.resolve(key + ".json");
-    }
-
     private static boolean saveOffline(UUID uuid, PlayerProgress progress) {
         if (uuid == null || progress == null) return false;
 
@@ -1724,7 +1596,7 @@ public class PlayerProgressManager {
 
         String key = getPlayerKey(progress, uuid);
         if (key.isBlank()) return false;
-        if (persistenceExecutor == null) {
+        if (progressRepository == null) {
             TacticalTabletMod.LOGGER.error("Cannot durably save Tactical Tablet progress for {}: persistence executor is unavailable", key);
             markDirty(key);
             return false;
@@ -1758,16 +1630,6 @@ public class PlayerProgressManager {
         return false;
     }
 
-    private static PlayerProgress readProgressFile(Path file) {
-        try (Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
-            return GSON.fromJson(reader, PlayerProgress.class);
-        } catch (JsonSyntaxException | IOException exception) {
-            TacticalTabletMod.LOGGER.error("Failed to read Tactical Tablet progress file {}", file, exception);
-            backupCorruptFile(file);
-            return null;
-        }
-    }
-
     private static UUID parseProgressUuid(String key, PlayerProgress progress) {
         UUID uuid = parseCompactUuid(progress == null ? "" : progress.uuid);
         if (uuid != null) return uuid;
@@ -1791,227 +1653,8 @@ public class PlayerProgressManager {
         }
     }
 
-    private static String stripJsonExtension(String fileName) {
-        return fileName != null && fileName.endsWith(".json")
-                ? fileName.substring(0, fileName.length() - 5)
-                : fileName;
-    }
-
-    private static void writeJsonAtomically(Path file, Object value) throws IOException {
-        FileSaveResult result = FILE_STORE.write(file, writer -> GSON.toJson(value, writer));
-        if (result.status() != FileSaveResult.Status.SUCCESS) {
-            throw new IOException(result.diagnostic(), result.exception().orElse(null));
-        }
-    }
-
-    static void copyJsonFiles(Path sourceRoot, Path targetRoot) throws IOException {
-        if (!Files.isDirectory(sourceRoot)) return;
-
-        try (DirectoryStream<Path> stream = Files.newDirectoryStream(sourceRoot, "*.json")) {
-            for (Path source : stream) {
-                Files.copy(
-                        source,
-                        targetRoot.resolve(source.getFileName().toString()),
-                        StandardCopyOption.REPLACE_EXISTING
-                );
-            }
-        }
-    }
-
-    private static void backupCorruptFile(Path file) {
-        if (file == null || !Files.exists(file) || backupsRoot == null) return;
-
-        String timestamp = BACKUP_FORMAT.format(Instant.now());
-        Path target = backupsRoot.resolve("corrupt_" + timestamp + "_" + file.getFileName());
-
-        try {
-            Files.copy(file, target, StandardCopyOption.REPLACE_EXISTING);
-        } catch (IOException exception) {
-            TacticalTabletMod.LOGGER.error("Failed to back up corrupt Tactical Tablet progress file {}", file, exception);
-        }
-    }
-
-    private static void cleanOldBackups() throws IOException {
-        if (!Files.isDirectory(backupsRoot)) return;
-
-        try (Stream<Path> stream = Files.list(backupsRoot)) {
-            Path[] backups = stream
-                    .filter(Files::isDirectory)
-                    .filter(path -> !path.getFileName().toString().startsWith("."))
-                    .sorted(Comparator.comparing((Path path) -> path.getFileName().toString()).reversed())
-                    .toArray(Path[]::new);
-
-            for (int i = MAX_BACKUP_FOLDERS; i < backups.length; i++) {
-                deleteRecursively(backups[i]);
-            }
-        }
-    }
-
-    private static void deleteRecursively(Path root) throws IOException {
-        if (!Files.exists(root)) return;
-
-        try (Stream<Path> stream = Files.walk(root)) {
-            Path[] paths = stream
-                    .sorted(Comparator.reverseOrder())
-                    .toArray(Path[]::new);
-
-            for (Path path : paths) {
-                Files.deleteIfExists(path);
-            }
-        }
-    }
-
     private static int safeAdd(int current, int amount) {
         return ProgressPolicy.saturatingAdd(current, amount);
-    }
-
-    private static final class PlayerWriteTask implements ModPersistenceExecutor.WriteTask {
-        private final Path target;
-        private final ProgressSnapshot snapshot;
-
-        private PlayerWriteTask(Path target, ProgressSnapshot snapshot) {
-            this.target = target;
-            this.snapshot = snapshot;
-        }
-
-        @Override
-        public Path target() {
-            return target;
-        }
-
-        @Override
-        public long revision() {
-            return snapshot.revision();
-        }
-
-        @Override
-        public FileSaveResult write() {
-            return FILE_STORE.write(target, writer -> GSON.toJson(snapshot.data(), writer));
-        }
-    }
-
-    private record BackupSnapshot(
-            Path dataRoot,
-            Path playersRoot,
-            Path backupsRoot,
-            String timestamp,
-            List<ProgressSnapshot> players,
-            long revision
-    ) {
-        BackupSnapshot {
-            players = List.copyOf(players);
-        }
-    }
-
-    private static final class BackupWriteTask implements ModPersistenceExecutor.WriteTask {
-        private final BackupSnapshot snapshot;
-
-        private BackupWriteTask(BackupSnapshot snapshot) {
-            this.snapshot = snapshot;
-        }
-
-        @Override
-        public Path target() {
-            return snapshot.backupsRoot().resolve(snapshot.timestamp());
-        }
-
-        @Override
-        public long revision() {
-            return snapshot.revision();
-        }
-
-        @Override
-        public FileSaveResult write() {
-            try {
-                createBackup(snapshot);
-                return FileSaveResult.success(target());
-            } catch (IOException | RuntimeException exception) {
-                return FileSaveResult.failure(target(), "Failed to create progress backup", exception);
-            } finally {
-                backupCoordinator.finish();
-            }
-        }
-    }
-
-    private static void createBackup(BackupSnapshot snapshot) throws IOException {
-        Path completed = snapshot.backupsRoot().resolve(snapshot.timestamp());
-        Path temporary = snapshot.backupsRoot().resolve("." + snapshot.timestamp() + ".incomplete");
-        Path temporaryPlayers = temporary.resolve(PLAYERS_DIRECTORY);
-        Files.createDirectories(temporaryPlayers);
-
-        // Existing offline players are copied first; active players are then replaced by the agreed snapshots.
-        copyJsonFiles(snapshot.playersRoot(), temporaryPlayers);
-        List<String> files = new ArrayList<>();
-        for (ProgressSnapshot player : snapshot.players()) {
-            Path target = temporaryPlayers.resolve(player.key() + ".json");
-            FileSaveResult result = FILE_STORE.write(target, writer -> GSON.toJson(player.data(), writer));
-            if (result.status() != FileSaveResult.Status.SUCCESS) {
-                throw new IOException(result.diagnostic(), result.exception().orElse(null));
-            }
-            files.add(PLAYERS_DIRECTORY + "/" + target.getFileName());
-        }
-
-        Path season = snapshot.dataRoot().resolve(SEASON_FILE);
-        if (Files.isRegularFile(season)) {
-            Files.copy(season, temporary.resolve(SEASON_FILE), StandardCopyOption.REPLACE_EXISTING);
-            files.add(SEASON_FILE);
-        }
-        copyBackupFile(snapshot.dataRoot().resolve("clans.json"), temporary.resolve("clans.json"), "clans.json", files);
-        copyBackupTree(snapshot.dataRoot().resolve("transactions"), temporary.resolve("transactions"), "transactions", files);
-        copyBackupTree(snapshot.dataRoot().resolve("migrations"), temporary.resolve("migrations"), "migrations", files);
-        try (DirectoryStream<Path> stream = Files.newDirectoryStream(temporaryPlayers, "*.json")) {
-            for (Path file : stream) {
-                String entry = PLAYERS_DIRECTORY + "/" + file.getFileName();
-                if (!files.contains(entry)) files.add(entry);
-            }
-        }
-        Map<String, Object> manifest = new HashMap<>();
-        manifest.put("schemaVersion", DATA_VERSION);
-        manifest.put("generationId", snapshot.revision());
-        manifest.put("timestamp", snapshot.timestamp());
-        manifest.put("files", List.copyOf(files));
-        Map<String, Long> sizes = new HashMap<>();
-        for (String file : files) sizes.put(file, Files.size(temporary.resolve(file)));
-        manifest.put("sizes", Map.copyOf(sizes));
-        FileSaveResult manifestWrite = FILE_STORE.write(temporary.resolve("manifest.json"), writer -> GSON.toJson(manifest, writer));
-        if (manifestWrite.status() != FileSaveResult.Status.SUCCESS) {
-            throw new IOException(manifestWrite.diagnostic(), manifestWrite.exception().orElse(null));
-        }
-        try {
-            Files.move(temporary, completed, StandardCopyOption.ATOMIC_MOVE);
-        } catch (java.nio.file.AtomicMoveNotSupportedException exception) {
-            Files.move(temporary, completed);
-        }
-        cleanOldBackups();
-    }
-
-    private static void copyBackupFile(Path source, Path target, String relative, List<String> files) throws IOException {
-        if (!Files.isRegularFile(source, java.nio.file.LinkOption.NOFOLLOW_LINKS)
-                || Files.isSymbolicLink(source) || excludedBackupFile(source)) return;
-        Files.createDirectories(target.getParent());
-        Files.copy(source, target, StandardCopyOption.REPLACE_EXISTING);
-        files.add(relative);
-    }
-
-    private static void copyBackupTree(Path sourceRoot, Path targetRoot, String prefix, List<String> files) throws IOException {
-        if (!Files.isDirectory(sourceRoot, java.nio.file.LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(sourceRoot)) return;
-        try (Stream<Path> stream = Files.walk(sourceRoot)) {
-            for (Path source : stream.filter(path -> !path.equals(sourceRoot)).toList()) {
-                if (!Files.isRegularFile(source, java.nio.file.LinkOption.NOFOLLOW_LINKS)
-                        || Files.isSymbolicLink(source) || excludedBackupFile(source)) continue;
-                Path relative = sourceRoot.relativize(source);
-                Path target = targetRoot.resolve(relative).normalize();
-                if (!target.startsWith(targetRoot)) continue;
-                Files.createDirectories(target.getParent());
-                Files.copy(source, target, StandardCopyOption.REPLACE_EXISTING);
-                files.add(prefix + "/" + relative.toString().replace('\\', '/'));
-            }
-        }
-    }
-
-    private static boolean excludedBackupFile(Path file) {
-        String name = file.getFileName().toString();
-        return name.endsWith(".tmp") || name.contains(".incomplete");
     }
 
     private static final class PlayerProgress implements PlayerTransactionReceiptLedger.State, MutableProgressState {
@@ -2195,6 +1838,9 @@ public class PlayerProgressManager {
     }
 
     private record LoadedProgress(String key, PlayerProgress progress) {
+    }
+
+    private record LoadedFromRepository(PlayerProgress progress, boolean requiresSave) {
     }
 
     public record KnownPlayer(UUID uuid, String name) {
