@@ -876,7 +876,8 @@ public class GameStateManager {
 
     private static List<SetRewardService.PayoutResult> awardSetAndLogFailures(
             MinecraftServer server, SetRewardSummary summary) {
-        List<SetRewardService.PayoutResult> payouts = SetRewardService.award(server, summary);
+        List<SetRewardService.PayoutResult> payouts = SetRewardService.award(
+                server, summary, MapSetManager.isCompetitiveSet());
         for (SetRewardService.PayoutResult payout : payouts) {
             if (payout.result().status() == com.makar.tacticaltablet.clan.transaction.RepositoryResult.Status.FAILED
                     || payout.result().status() == com.makar.tacticaltablet.clan.transaction.RepositoryResult.Status.CONFLICT) {

@@ -76,6 +76,25 @@ class SetResultServiceTest {
         assertEquals(List.of("P0", "P1", "P2"), summary.placements().stream().map(SetPlacement::playerName).toList());
     }
 
+    @Test
+    void competitiveSummaryKeepsThePodiumButHasNoFinalCoinReward() {
+        Map<UUID, String> participants = new LinkedHashMap<>();
+        java.util.ArrayList<GamePerformance> games = new java.util.ArrayList<>();
+        for (int i = 0; i < 6; i++) {
+            UUID id = new UUID(1, i + 1);
+            participants.put(id, "Competitive" + i);
+            games.add(game(1, id, "Competitive" + i, i + 1, 6 - i, 0, 0, 0));
+        }
+
+        SetRewardSummary summary = SetResultService.createRewardSummary(
+                SetResultService.createSnapshot(UUID.randomUUID(), participants, games), true);
+
+        assertEquals(0, summary.rewardCoins());
+        assertEquals(3, summary.placements().size());
+        assertEquals(List.of("Competitive0", "Competitive1", "Competitive2"),
+                summary.placements().stream().map(SetPlacement::playerName).toList());
+    }
+
     private static GamePerformance game(int number, UUID id, String name, int placement,
                                         int kills, int assists, double damage, int deaths) {
         return new GamePerformance(number, id, name, placement, kills, assists, damage, deaths, "");

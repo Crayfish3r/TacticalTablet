@@ -16,6 +16,7 @@ import com.makar.tacticaltablet.game.set.MatchPlacementTracker;
 import com.makar.tacticaltablet.game.set.SetLeaderboardSnapshot;
 import com.makar.tacticaltablet.game.set.SetMatchRuntime;
 import com.makar.tacticaltablet.game.set.SetPlayerResult;
+import com.makar.tacticaltablet.game.set.SetPlacement;
 import com.makar.tacticaltablet.game.set.SetScoringRules;
 import com.makar.tacticaltablet.game.set.SetDiscordFormatter;
 import com.makar.tacticaltablet.integration.discord.DiscordWebhookClient.DiscordEmbed;
@@ -298,7 +299,8 @@ public final class DiscordLeaderboardService {
         SetLeaderboardSnapshot snapshot = SetResultService.createSnapshot(
                 MapSetManager.getSetId(), MapSetManager.getParticipantNames(),
                 SetResultService.flatten(currentSetGames));
-        SetRewardSummary summary = SetResultService.createRewardSummary(snapshot);
+        SetRewardSummary summary = SetResultService.createRewardSummary(
+                snapshot, MapSetManager.isCompetitiveSet());
         if (!MapSetManager.saveCompletedSetResults(server, snapshot, summary)) {
             TacticalTabletMod.LOGGER.error("Failed to persist set reward summary for set {}", summary.setId());
             return null;
@@ -501,12 +503,14 @@ public final class DiscordLeaderboardService {
         }
 
         SetLeaderboardSnapshot snapshot = MapSetManager.getLeaderboardSnapshot();
+        boolean competitiveSet = currentSetCompetitive || MapSetManager.isCompetitiveSet();
         List<DiscordEmbed> embeds = buildSetEmbeds(
-                (currentSetCompetitive ? "Итоги рейтингового матча" : "Итоги сета")
+                (competitiveSet ? "Итоги рейтингового матча" : "Итоги сета")
                         + " из " + currentSetMatches + " игр - " + config.getServerName(),
                 currentMapName(server),
                 currentSetStartedAtMillis,
                 currentSetAirdrops,
+                competitiveSet,
                 summary,
                 snapshot
         );
@@ -758,6 +762,7 @@ public final class DiscordLeaderboardService {
             String mapName,
             long startedAtMillis,
             int airdrops,
+            boolean competitiveSet,
             SetRewardSummary summary,
             SetLeaderboardSnapshot snapshot
     ) {
@@ -770,19 +775,14 @@ public final class DiscordLeaderboardService {
         if (summary != null) {
             description.append("**Уникальные участники:** `").append(summary.participantCount()).append("`\n");
             if (!summary.placements().isEmpty()) {
-                description.append("**Награждённые места:**\n");
+                description.append(competitiveSet ? "**Итоговые места:**\n" : "**Награждённые места:**\n");
                 for (var placement : summary.placements()) {
-                    description.append(placement.place()).append(". **").append(placement.playerName()).append("** — `")
-                            .append(summary.rewardCoins()).append(" coins`  Очки `").append(placement.totalScore())
-                            .append("`  Победы `").append(placement.wins())
-                            .append("`  Убийства `").append(placement.kills()).append("`  Помощи `")
-                            .append(placement.assists()).append("`  PvP-урон `")
-                            .append(formatDamage(placement.damage())).append("`  Смерти `")
-                            .append(placement.deaths()).append("`\n");
+                    description.append(formatSetPlacement(
+                            placement, summary.rewardCoins(), competitiveSet));
                 }
             }
         }
-        int color = currentSetCompetitive ? RANKED_MATCH_COLOR : MATCH_COLOR;
+        int color = competitiveSet ? RANKED_MATCH_COLOR : MATCH_COLOR;
         List<String> pages = SetDiscordFormatter.formatLeaderboardPages(snapshot, 3400);
         List<DiscordEmbed> embeds = new ArrayList<>();
         embeds.add(new DiscordEmbed(title, description + pages.get(0), color, "Тактический планшет"));
@@ -791,6 +791,25 @@ public final class DiscordLeaderboardService {
                     "Тактический планшет"));
         }
         return List.copyOf(embeds);
+    }
+
+    static String formatSetPlacement(
+            SetPlacement placement,
+            int rewardCoins,
+            boolean competitiveSet
+    ) {
+        StringBuilder line = new StringBuilder()
+                .append(placement.place()).append(". **").append(placement.playerName()).append("**");
+        if (!competitiveSet) {
+            line.append(" — `").append(rewardCoins).append(" coins`");
+        }
+        return line.append("  Очки `").append(placement.totalScore())
+                .append("`  Победы `").append(placement.wins())
+                .append("`  Убийства `").append(placement.kills()).append("`  Помощи `")
+                .append(placement.assists()).append("`  PvP-урон `")
+                .append(formatDamage(placement.damage())).append("`  Смерти `")
+                .append(placement.deaths()).append("`\n")
+                .toString();
     }
 
     private static DiscordEmbed buildClanWarSetEmbed(

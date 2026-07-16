@@ -17,7 +17,7 @@ class SetScoringIntegrationArchitectureTest {
         String mapSet = source("src/main/java/com/makar/tacticaltablet/game/MapSetManager.java");
 
         assertTrue(discord.contains("SetResultService.createSnapshot"));
-        assertTrue(discord.contains("SetResultService.createRewardSummary(snapshot)"));
+        assertTrue(discord.contains("SetResultService.createRewardSummary(\n                snapshot, MapSetManager.isCompetitiveSet())"));
         assertTrue(discord.contains("MapSetManager.saveCompletedSetResults(server, snapshot, summary)"));
         assertTrue(discord.contains("SetLeaderboardSnapshot snapshot = MapSetManager.getLeaderboardSnapshot()"));
         assertTrue(result.contains("SetScoringRules.SET_RESULT_COMPARATOR"));

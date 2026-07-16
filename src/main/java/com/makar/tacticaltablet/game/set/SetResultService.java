@@ -49,8 +49,17 @@ public final class SetResultService {
     }
 
     public static SetRewardSummary createRewardSummary(SetLeaderboardSnapshot snapshot) {
+        return createRewardSummary(snapshot, false);
+    }
+
+    public static SetRewardSummary createRewardSummary(
+            SetLeaderboardSnapshot snapshot,
+            boolean competitiveSet
+    ) {
         if (snapshot == null) return null;
-        int reward = SetRewardService.calculateSetWinnerReward(snapshot.participantCount());
+        int reward = competitiveSet
+                ? 0
+                : SetRewardService.calculateSetWinnerReward(snapshot.participantCount());
         int count = Math.min(SetRewardService.rewardedPlaces(snapshot.participantCount()),
                 snapshot.orderedResults().size());
         List<SetPlacement> placements = new ArrayList<>();

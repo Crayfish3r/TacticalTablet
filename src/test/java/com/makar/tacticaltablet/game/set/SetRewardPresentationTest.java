@@ -4,9 +4,11 @@ import net.minecraft.network.chat.Component;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SetRewardPresentationTest {
@@ -26,6 +28,20 @@ class SetRewardPresentationTest {
         assertTrue(subtitle.getString().contains("1. Gold"));
         assertTrue(subtitle.getString().contains("2. Silver"));
         assertTrue(subtitle.getString().contains("3. Bronze"));
+    }
+
+    @Test
+    void competitiveZeroPayoutPresentationShowsResultsWithoutPromisingCoins() {
+        SetRewardSummary summary = new SetRewardSummary(UUID.randomUUID(), 8, 0, List.of(
+                placement(1, "Winner"), placement(2, "Second"), placement(3, "Third")));
+
+        String title = SetRewardPresentation.title(summary).getString();
+        String subtitle = SetRewardPresentation.subtitle(summary).getString();
+
+        assertTrue(title.contains("СЕТА"));
+        assertTrue(subtitle.contains("1. Winner"));
+        assertTrue(SetRewardPresentation.chat(summary, Set.of()).isEmpty());
+        assertFalse((title + subtitle).toLowerCase(java.util.Locale.ROOT).contains("coin"));
     }
 
     private static SetPlacement placement(int place, String name) {

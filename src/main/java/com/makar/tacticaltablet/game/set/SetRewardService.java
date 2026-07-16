@@ -20,7 +20,15 @@ public final class SetRewardService {
     }
 
     public static List<PayoutResult> award(MinecraftServer server, SetRewardSummary summary) {
-        if (server == null || summary == null || summary.rewardCoins() <= 0) return List.of();
+        return award(server, summary, false);
+    }
+
+    public static List<PayoutResult> award(
+            MinecraftServer server,
+            SetRewardSummary summary,
+            boolean competitiveSet
+    ) {
+        if (server == null || !shouldAwardFinalCoins(competitiveSet, summary)) return List.of();
         List<PayoutResult> results = new ArrayList<>();
         for (SetPlacement placement : summary.placements()) {
             String key = idempotencyKey(summary.setId(), placement);
@@ -29,6 +37,10 @@ public final class SetRewardService {
             results.add(new PayoutResult(placement, result));
         }
         return List.copyOf(results);
+    }
+
+    public static boolean shouldAwardFinalCoins(boolean competitiveSet, SetRewardSummary summary) {
+        return !competitiveSet && summary != null && summary.rewardCoins() > 0;
     }
 
     public static String idempotencyKey(java.util.UUID setId, SetPlacement placement) {
