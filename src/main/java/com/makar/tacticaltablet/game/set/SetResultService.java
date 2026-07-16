@@ -68,7 +68,9 @@ public final class SetResultService {
             placements.add(new SetPlacement(i + 1, player.playerId(), player.playerName(), player.totalScore(),
                     player.wins(), player.kills(), player.assists(), player.effectivePvpDamage(), player.deaths()));
         }
-        return new SetRewardSummary(snapshot.setId(), snapshot.participantCount(), reward, placements);
+        Map<Integer, Integer> payouts = SetRewardDistribution.distribute(reward, count);
+        return SetRewardSummary.withPerPlacePayouts(
+                snapshot.setId(), snapshot.participantCount(), reward, placements, payouts);
     }
 
     public static List<GamePerformance> flatten(Map<String, List<GamePerformance>> gamesByPlayer) {

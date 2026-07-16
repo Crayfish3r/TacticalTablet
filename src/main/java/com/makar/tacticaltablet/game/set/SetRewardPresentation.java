@@ -24,7 +24,9 @@ public final class SetRewardPresentation {
         for (int i = 0; i < summary.placements().size(); i++) {
             if (i > 0) result.append(Component.literal("   "));
             SetPlacement placement = summary.placements().get(i);
-            result.append(Component.literal(placement.place() + ". " + placement.playerName())
+            int coins = summary.coinsForPlace(placement.place());
+            String amount = coins > 0 ? " — " + coins + " coins" : "";
+            result.append(Component.literal(placement.place() + ". " + placement.playerName() + amount)
                     .withStyle(style -> style.withColor(color(placement.place()))));
         }
         return result;
@@ -46,7 +48,7 @@ public final class SetRewardPresentation {
             SetPlacement winner = paid.get(0);
             return List.of(Component.literal("[WAR] Победитель сета: ")
                     .append(Component.literal(winner.playerName()).withStyle(style -> style.withColor(GOLD)))
-                    .append(Component.literal(". Награда: " + summary.rewardCoins() + " coins. Участников: "
+                    .append(Component.literal(". Награда: " + summary.coinsForPlace(winner.place()) + " coins. Участников: "
                             + summary.participantCount() + ".")));
         }
         java.util.ArrayList<Component> lines = new java.util.ArrayList<>();
@@ -54,7 +56,7 @@ public final class SetRewardPresentation {
         for (SetPlacement placement : paid) {
             lines.add(Component.literal(placement.place() + ". ")
                     .append(Component.literal(placement.playerName()).withStyle(style -> style.withColor(color(placement.place()))))
-                    .append(Component.literal(" — " + summary.rewardCoins() + " coins")));
+                    .append(Component.literal(" — " + summary.coinsForPlace(placement.place()) + " coins")));
         }
         lines.add(Component.literal("Участников сета: " + summary.participantCount()));
         return List.copyOf(lines);

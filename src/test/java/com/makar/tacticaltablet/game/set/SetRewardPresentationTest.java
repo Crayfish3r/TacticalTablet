@@ -4,6 +4,7 @@ import net.minecraft.network.chat.Component;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -14,8 +15,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class SetRewardPresentationTest {
     @Test
     void threePlacePodiumUsesGoldSilverAndBronzeComponents() {
-        SetRewardSummary summary = new SetRewardSummary(UUID.randomUUID(), 8, 45, List.of(
-                placement(1, "Gold"), placement(2, "Silver"), placement(3, "Bronze")));
+        SetRewardSummary summary = SetRewardSummary.withPerPlacePayouts(UUID.randomUUID(), 8, 45, List.of(
+                placement(1, "Gold"), placement(2, "Silver"), placement(3, "Bronze")),
+                Map.of(1, 74, 2, 41, 3, 20));
 
         Component subtitle = SetRewardPresentation.subtitle(summary);
         List<Component> namedComponents = subtitle.getSiblings().stream()
@@ -28,12 +30,21 @@ class SetRewardPresentationTest {
         assertTrue(subtitle.getString().contains("1. Gold"));
         assertTrue(subtitle.getString().contains("2. Silver"));
         assertTrue(subtitle.getString().contains("3. Bronze"));
+        assertTrue(subtitle.getString().contains("1. Gold — 74 coins"));
+        assertTrue(subtitle.getString().contains("2. Silver — 41 coins"));
+        assertTrue(subtitle.getString().contains("3. Bronze — 20 coins"));
+
+        List<String> chat = SetRewardPresentation.chat(summary).stream().map(Component::getString).toList();
+        assertTrue(chat.stream().anyMatch(line -> line.contains("Gold — 74 coins")));
+        assertTrue(chat.stream().anyMatch(line -> line.contains("Silver — 41 coins")));
+        assertTrue(chat.stream().anyMatch(line -> line.contains("Bronze — 20 coins")));
     }
 
     @Test
     void competitiveZeroPayoutPresentationShowsResultsWithoutPromisingCoins() {
-        SetRewardSummary summary = new SetRewardSummary(UUID.randomUUID(), 8, 0, List.of(
-                placement(1, "Winner"), placement(2, "Second"), placement(3, "Third")));
+        SetRewardSummary summary = SetRewardSummary.withPerPlacePayouts(UUID.randomUUID(), 8, 0, List.of(
+                placement(1, "Winner"), placement(2, "Second"), placement(3, "Third")),
+                Map.of(1, 0, 2, 0, 3, 0));
 
         String title = SetRewardPresentation.title(summary).getString();
         String subtitle = SetRewardPresentation.subtitle(summary).getString();

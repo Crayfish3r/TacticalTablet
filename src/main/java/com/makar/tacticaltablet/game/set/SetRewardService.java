@@ -31,16 +31,18 @@ public final class SetRewardService {
         if (server == null || !shouldAwardFinalCoins(competitiveSet, summary)) return List.of();
         List<PayoutResult> results = new ArrayList<>();
         for (SetPlacement placement : summary.placements()) {
+            int coins = summary.coinsForPlace(placement.place());
+            if (coins <= 0) continue;
             String key = idempotencyKey(summary.setId(), placement);
             RepositoryResult result = PlayerProgressManager.applyIdempotentCoinCredit(
-                    server, placement.playerId(), placement.playerName(), summary.rewardCoins(), key);
-            results.add(new PayoutResult(placement, result));
+                    server, placement.playerId(), placement.playerName(), coins, key);
+            results.add(new PayoutResult(placement, coins, result));
         }
         return List.copyOf(results);
     }
 
     public static boolean shouldAwardFinalCoins(boolean competitiveSet, SetRewardSummary summary) {
-        return !competitiveSet && summary != null && summary.rewardCoins() > 0;
+        return !competitiveSet && summary != null && summary.hasPositivePayout();
     }
 
     public static String idempotencyKey(java.util.UUID setId, SetPlacement placement) {
@@ -63,5 +65,5 @@ public final class SetRewardService {
         return Set.copyOf(places);
     }
 
-    public record PayoutResult(SetPlacement placement, RepositoryResult result) { }
+    public record PayoutResult(SetPlacement placement, int coins, RepositoryResult result) { }
 }

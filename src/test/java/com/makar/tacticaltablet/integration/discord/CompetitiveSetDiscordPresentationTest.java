@@ -26,7 +26,21 @@ class CompetitiveSetDiscordPresentationTest {
         assertTrue(line.contains("35 coins"));
     }
 
+    @Test
+    void casualPodiumLinesShowTheAmountPassedForEachPlace() {
+        assertTrue(DiscordLeaderboardService.formatSetPlacement(placement(1, "First"), 58, false)
+                .contains("1. **First** — `58 coins`"));
+        assertTrue(DiscordLeaderboardService.formatSetPlacement(placement(2, "Second"), 31, false)
+                .contains("2. **Second** — `31 coins`"));
+        assertTrue(DiscordLeaderboardService.formatSetPlacement(placement(3, "Third"), 16, false)
+                .contains("3. **Third** — `16 coins`"));
+    }
+
     private static SetPlacement placement() {
-        return new SetPlacement(1, UUID.randomUUID(), "Winner", 42, 2, 3, 4, 55.5D, 1);
+        return placement(1, "Winner");
+    }
+
+    private static SetPlacement placement(int place, String name) {
+        return new SetPlacement(place, UUID.randomUUID(), name, 42, 2, 3, 4, 55.5D, 1);
     }
 }

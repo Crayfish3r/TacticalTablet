@@ -778,7 +778,7 @@ public final class DiscordLeaderboardService {
                 description.append(competitiveSet ? "**Итоговые места:**\n" : "**Награждённые места:**\n");
                 for (var placement : summary.placements()) {
                     description.append(formatSetPlacement(
-                            placement, summary.rewardCoins(), competitiveSet));
+                            placement, summary.coinsForPlace(placement.place()), competitiveSet));
                 }
             }
         }

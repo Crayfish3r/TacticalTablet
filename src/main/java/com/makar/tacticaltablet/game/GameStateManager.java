@@ -881,8 +881,8 @@ public class GameStateManager {
         for (SetRewardService.PayoutResult payout : payouts) {
             if (payout.result().status() == com.makar.tacticaltablet.clan.transaction.RepositoryResult.Status.FAILED
                     || payout.result().status() == com.makar.tacticaltablet.clan.transaction.RepositoryResult.Status.CONFLICT) {
-                TacticalTabletMod.LOGGER.error("Failed set reward {} place {} for {}: {}", summary.setId(),
-                        payout.placement().place(), payout.placement().playerId(), payout.result().diagnostic());
+                TacticalTabletMod.LOGGER.error("Failed set reward {} place {} ({} coins) for {}: {}", summary.setId(),
+                        payout.placement().place(), payout.coins(), payout.placement().playerId(), payout.result().diagnostic());
             }
         }
         return payouts;

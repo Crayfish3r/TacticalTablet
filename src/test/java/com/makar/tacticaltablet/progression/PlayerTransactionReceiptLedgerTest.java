@@ -2,10 +2,14 @@ package com.makar.tacticaltablet.progression;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonObject;
 import com.makar.tacticaltablet.clan.transaction.ClanCreationPayload;
 import com.makar.tacticaltablet.clan.transaction.CreateClanTransaction;
 import com.makar.tacticaltablet.clan.transaction.RepositoryResult;
 import com.makar.tacticaltablet.clan.transaction.TransactionState;
+import com.makar.tacticaltablet.game.set.SetPlacement;
+import com.makar.tacticaltablet.game.set.SetRewardService;
+import com.makar.tacticaltablet.game.set.SetRewardSummary;
 import org.junit.jupiter.api.Test;
 
 import java.time.Clock;
@@ -13,6 +17,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -186,6 +191,83 @@ class PlayerTransactionReceiptLedgerTest {
 
         assertEquals(RepositoryResult.Status.CONFLICT, mismatch.status());
         assertEquals(45, state.coins());
+    }
+
+    @Test
+    void legacyPartialPayoutRestartKeepsOldAmountsAndDoesNotDuplicateFirstPlace() {
+        UUID setId = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+        List<SetPlacement> placements = List.of(placement(1), placement(2), placement(3));
+        JsonObject oldJson = GSON.toJsonTree(new SetRewardSummary(setId, 6, 35, placements)).getAsJsonObject();
+        oldJson.remove("payoutPolicyVersion");
+        oldJson.remove("coinsByPlace");
+        SetRewardSummary restartedSummary = GSON.fromJson(oldJson, SetRewardSummary.class);
+        TestState first = new TestState(0, new ArrayList<>());
+        TestState second = new TestState(0, new ArrayList<>());
+        TestState third = new TestState(0, new ArrayList<>());
+
+        String firstKey = SetRewardService.idempotencyKey(setId, placements.get(0));
+        PlayerTransactionReceiptLedger.applyCredit(first, firstKey, "set_reward", 35, CLOCK, () -> true);
+        first = reload(first);
+        RepositoryResult firstReplay = PlayerTransactionReceiptLedger.applyCredit(first, firstKey, "set_reward",
+                restartedSummary.coinsForPlace(1), CLOCK, () -> true);
+        RepositoryResult secondResult = PlayerTransactionReceiptLedger.applyCredit(second,
+                SetRewardService.idempotencyKey(setId, placements.get(1)), "set_reward",
+                restartedSummary.coinsForPlace(2), CLOCK, () -> true);
+        RepositoryResult thirdResult = PlayerTransactionReceiptLedger.applyCredit(third,
+                SetRewardService.idempotencyKey(setId, placements.get(2)), "set_reward",
+                restartedSummary.coinsForPlace(3), CLOCK, () -> true);
+
+        assertEquals(RepositoryResult.Status.ALREADY_APPLIED, firstReplay.status());
+        assertEquals(RepositoryResult.Status.APPLIED, secondResult.status());
+        assertEquals(RepositoryResult.Status.APPLIED, thirdResult.status());
+        assertEquals(35, first.coins());
+        assertEquals(35, second.coins());
+        assertEquals(35, third.coins());
+    }
+
+    @Test
+    void perPlaceFailureIsIndependentAndRetryUsesTheSavedOriginalAmount() {
+        UUID setId = UUID.fromString("cccccccc-cccc-cccc-cccc-cccccccccccc");
+        List<SetPlacement> placements = List.of(placement(1), placement(2), placement(3));
+        SetRewardSummary summary = SetRewardSummary.withPerPlacePayouts(
+                setId, 6, 35, placements, Map.of(1, 58, 2, 31, 3, 16));
+        TestState first = new TestState(0, new ArrayList<>());
+        TestState second = new TestState(0, new ArrayList<>());
+        TestState third = new TestState(0, new ArrayList<>());
+
+        String firstKey = SetRewardService.idempotencyKey(setId, placements.get(0));
+        String secondKey = SetRewardService.idempotencyKey(setId, placements.get(1));
+        String thirdKey = SetRewardService.idempotencyKey(setId, placements.get(2));
+        RepositoryResult firstResult = PlayerTransactionReceiptLedger.applyCredit(
+                first, firstKey, "set_reward", summary.coinsForPlace(1), CLOCK, () -> true);
+        RepositoryResult failedSecond = PlayerTransactionReceiptLedger.applyCredit(
+                second, secondKey, "set_reward", summary.coinsForPlace(2), CLOCK, () -> false);
+        RepositoryResult thirdResult = PlayerTransactionReceiptLedger.applyCredit(
+                third, thirdKey, "set_reward", summary.coinsForPlace(3), CLOCK, () -> true);
+        RepositoryResult retriedSecond = PlayerTransactionReceiptLedger.applyCredit(
+                second, secondKey, "set_reward", summary.coinsForPlace(2), CLOCK, () -> true);
+        RepositoryResult repeatedFirst = PlayerTransactionReceiptLedger.applyCredit(
+                first, firstKey, "set_reward", summary.coinsForPlace(1), CLOCK, () -> true);
+
+        assertEquals(RepositoryResult.Status.APPLIED, firstResult.status());
+        assertEquals(RepositoryResult.Status.FAILED, failedSecond.status());
+        assertEquals(RepositoryResult.Status.APPLIED, thirdResult.status());
+        assertEquals(RepositoryResult.Status.APPLIED, retriedSecond.status());
+        assertEquals(RepositoryResult.Status.ALREADY_APPLIED, repeatedFirst.status());
+        assertEquals(58, first.coins());
+        assertEquals(31, second.coins());
+        assertEquals(16, third.coins());
+    }
+
+    private static TestState reload(TestState state) {
+        TestState loaded = GSON.fromJson(GSON.toJson(state), TestState.class);
+        loaded.receipts(PlayerTransactionReceiptLedger.normalizeReceipts(loaded.receipts()));
+        return loaded;
+    }
+
+    private static SetPlacement placement(int place) {
+        UUID playerId = new UUID(0L, place);
+        return new SetPlacement(place, playerId, "P" + place, 0, 0, 0, 0, 0.0D, 0);
     }
 
     private static void assertConflictWithMutatedReceipt(

@@ -8,6 +8,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SetResultServiceTest {
     @Test
@@ -77,6 +78,47 @@ class SetResultServiceTest {
     }
 
     @Test
+    void legacySummaryWithoutPerPlacePolicyKeepsItsSharedCoinAmount() {
+        SetRewardSummary summary = new SetRewardSummary(UUID.randomUUID(), 6, 35, List.of(
+                placement(1), placement(2), placement(3)));
+
+        assertEquals(35, summary.rewardCoins());
+        assertTrue(summary.usesLegacyEqualPayouts());
+        assertEquals(List.of(35, 35, 35), summary.placements().stream()
+                .map(placement -> summary.coinsForPlace(placement.place())).toList());
+        assertEquals(3, summary.placements().size());
+    }
+
+    @Test
+    void casualSummariesPersistRequiredPerPlacePayoutsForSixSevenAndEightParticipants() {
+        assertEquals(Map.of(1, 58, 2, 31, 3, 16), rewardSummary(6, false).coinsByPlace());
+        assertEquals(Map.of(1, 66, 2, 36, 3, 18), rewardSummary(7, false).coinsByPlace());
+        assertEquals(Map.of(1, 74, 2, 41, 3, 20), rewardSummary(8, false).coinsByPlace());
+    }
+
+    @Test
+    void casualSummaryWithOneRewardedPlaceKeepsTheExistingBaseReward() {
+        SetRewardSummary summary = rewardSummary(5, false);
+
+        assertEquals(30, summary.rewardCoins());
+        assertEquals(Map.of(1, 30), summary.coinsByPlace());
+        assertEquals(1, summary.placements().size());
+    }
+
+    @Test
+    void offlineParticipantsRemainEligibleForSavedPerPlacePayouts() {
+        LinkedHashMap<UUID, String> participants = new LinkedHashMap<>();
+        for (int i = 0; i < 6; i++) participants.put(new UUID(3, i + 1), "Offline" + i);
+
+        SetRewardSummary summary = SetResultService.createRewardSummary(
+                SetResultService.createSnapshot(UUID.randomUUID(), participants, List.of()), false);
+
+        assertEquals(3, summary.placements().size());
+        assertEquals(Map.of(1, 58, 2, 31, 3, 16), summary.coinsByPlace());
+        assertTrue(summary.placements().stream().allMatch(placement -> placement.playerId() != null));
+    }
+
+    @Test
     void competitiveSummaryKeepsThePodiumButHasNoFinalCoinReward() {
         Map<UUID, String> participants = new LinkedHashMap<>();
         java.util.ArrayList<GamePerformance> games = new java.util.ArrayList<>();
@@ -90,6 +132,7 @@ class SetResultServiceTest {
                 SetResultService.createSnapshot(UUID.randomUUID(), participants, games), true);
 
         assertEquals(0, summary.rewardCoins());
+        assertEquals(Map.of(1, 0, 2, 0, 3, 0), summary.coinsByPlace());
         assertEquals(3, summary.placements().size());
         assertEquals(List.of("Competitive0", "Competitive1", "Competitive2"),
                 summary.placements().stream().map(SetPlacement::playerName).toList());
@@ -98,5 +141,21 @@ class SetResultServiceTest {
     private static GamePerformance game(int number, UUID id, String name, int placement,
                                         int kills, int assists, double damage, int deaths) {
         return new GamePerformance(number, id, name, placement, kills, assists, damage, deaths, "");
+    }
+
+    private static SetPlacement placement(int place) {
+        return new SetPlacement(place, UUID.randomUUID(), "P" + place, 0, 0, 0, 0, 0.0D, 0);
+    }
+
+    private static SetRewardSummary rewardSummary(int participantCount, boolean competitive) {
+        Map<UUID, String> participants = new LinkedHashMap<>();
+        java.util.ArrayList<GamePerformance> games = new java.util.ArrayList<>();
+        for (int i = 0; i < participantCount; i++) {
+            UUID id = new UUID(2, i + 1);
+            participants.put(id, "P" + i);
+            games.add(game(1, id, "P" + i, i + 1, participantCount - i, 0, 0, 0));
+        }
+        return SetResultService.createRewardSummary(
+                SetResultService.createSnapshot(UUID.randomUUID(), participants, games), competitive);
     }
 }

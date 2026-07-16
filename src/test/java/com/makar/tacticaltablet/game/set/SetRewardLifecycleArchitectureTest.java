@@ -56,6 +56,14 @@ class SetRewardLifecycleArchitectureTest {
         assertTrue(!debugSkip.contains("SetRewardService"));
     }
 
+    @Test
+    void joinDuringRewardPhaseReusesThePerPlaceSubtitle() throws IOException {
+        String source = Files.readString(GAME);
+        String join = block(source, "public static void showCurrentSetRewardOnJoin", "private static String describeVoteModes");
+
+        assertTrue(join.contains("SetRewardPresentation.subtitle(summary)"));
+    }
+
     private static String block(String source, String startNeedle, String endNeedle) {
         int start = source.indexOf(startNeedle);
         int end = source.indexOf(endNeedle, start);
