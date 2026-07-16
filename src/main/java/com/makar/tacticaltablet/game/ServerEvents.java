@@ -582,7 +582,7 @@ public class ServerEvents {
         if (!(event.getEntity() instanceof ServerPlayer player)) return;
         if (!PrefixManager.getRole(player).visible()) return;
 
-        event.setDisplayName(PrefixManager.buildDisplayName(player));
+        event.setDisplayName(PrefixManager.buildTabDisplayName(player));
     }
 
     private static void syncPrefixes(net.minecraft.server.MinecraftServer server) {

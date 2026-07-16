@@ -86,13 +86,19 @@ public final class NameTagManager {
 
         configurePrivateTeam(privateTeam);
 
+        boolean membershipChanged = false;
         PlayerTeam currentTeam = scoreboard.getPlayersTeam(playerName);
         if (currentTeam != null && currentTeam != privateTeam) {
             scoreboard.removePlayerFromTeam(playerName, currentTeam);
+            membershipChanged = true;
         }
 
         if (!privateTeam.getPlayers().contains(playerName)) {
             scoreboard.addPlayerToTeam(playerName, privateTeam);
+            membershipChanged = true;
+        }
+        if (membershipChanged) {
+            player.refreshTabListName();
         }
     }
 
@@ -112,6 +118,7 @@ public final class NameTagManager {
 
         if (isManagedTeam(currentTeam)) {
             scoreboard.removePlayerFromTeam(playerName, currentTeam);
+            player.refreshTabListName();
         }
     }
 

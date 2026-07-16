@@ -10,10 +10,12 @@ import com.google.gson.JsonSyntaxException;
 import com.makar.tacticaltablet.core.TacticalTabletMod;
 import com.makar.tacticaltablet.tablet.net.PacketHandler;
 
+import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.storage.LevelResource;
+import net.minecraft.world.scores.PlayerTeam;
 
 import java.io.IOException;
 import java.io.Reader;
@@ -252,9 +254,20 @@ public final class PrefixManager {
         }
     }
 
-    public static synchronized Component buildDisplayName(ServerPlayer player) {
+    public static synchronized Component buildTabDisplayName(ServerPlayer player) {
         if (player == null) return Component.empty();
-        return PrefixDisplayHelper.appendSuffix(cleanPlayerName(player), getRole(player));
+
+        PlayerTeam team = player.getScoreboard().getPlayersTeam(player.getScoreboardName());
+        ChatFormatting teamColor = team == null ? ChatFormatting.RESET : team.getColor();
+        return PrefixDisplayHelper.buildTabName(cleanPlayerName(player), teamColor, getRole(player));
+    }
+
+    /**
+     * @deprecated Use {@link #buildTabDisplayName(ServerPlayer)} for TAB-specific formatting.
+     */
+    @Deprecated(forRemoval = false)
+    public static synchronized Component buildDisplayName(ServerPlayer player) {
+        return buildTabDisplayName(player);
     }
 
     public static synchronized Component buildChatName(ServerPlayer player) {

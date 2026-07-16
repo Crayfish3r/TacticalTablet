@@ -284,12 +284,18 @@ public final class TeamMatchManager {
             PlayerTeam team = scoreboard.getPlayerTeam(teamId.scoreboardName());
             if (team == null) continue;
 
+            boolean membershipChanged = false;
             PlayerTeam current = scoreboard.getPlayersTeam(player.getScoreboardName());
             if (current != null && current != team) {
                 scoreboard.removePlayerFromTeam(player.getScoreboardName(), current);
+                membershipChanged = true;
             }
             if (!team.getPlayers().contains(player.getScoreboardName())) {
                 scoreboard.addPlayerToTeam(player.getScoreboardName(), team);
+                membershipChanged = true;
+            }
+            if (membershipChanged) {
+                player.refreshTabListName();
             }
         }
     }
@@ -299,17 +305,23 @@ public final class TeamMatchManager {
 
         Scoreboard scoreboard = server.getScoreboard();
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            boolean membershipChanged = false;
             PlayerTeam current = scoreboard.getPlayersTeam(player.getScoreboardName());
             if (isManagedTeam(current)) {
                 scoreboard.removePlayerFromTeam(player.getScoreboardName(), current);
+                membershipChanged = true;
             }
 
             String originalTeamName = originalScoreboardTeams.remove(player.getUUID());
             if (originalTeamName != null && !originalTeamName.isBlank()) {
                 PlayerTeam original = scoreboard.getPlayerTeam(originalTeamName);
-                if (original != null) {
+                if (original != null && !original.getPlayers().contains(player.getScoreboardName())) {
                     scoreboard.addPlayerToTeam(player.getScoreboardName(), original);
+                    membershipChanged = true;
                 }
+            }
+            if (membershipChanged) {
+                player.refreshTabListName();
             }
         }
 

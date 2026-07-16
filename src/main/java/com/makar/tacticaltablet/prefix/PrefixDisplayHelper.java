@@ -46,6 +46,27 @@ public final class PrefixDisplayHelper {
         return result.append(badge);
     }
 
+    public static Component buildTabName(Component playerName, ChatFormatting teamColor, PrefixRole role) {
+        return buildTabName(playerName, teamColor, buildBadge(role));
+    }
+
+    public static Component buildTabName(Component playerName, ChatFormatting teamColor, Component badge) {
+        MutableComponent result = Component.empty();
+        MutableComponent styledPlayerName = playerName == null
+                ? Component.empty()
+                : playerName.copy();
+
+        if (teamColor != null && teamColor != ChatFormatting.RESET) {
+            styledPlayerName.withStyle(teamColor);
+        }
+
+        result.append(styledPlayerName);
+        if (badge != null && !badge.getString().isBlank()) {
+            result.append(badge.copy());
+        }
+        return result;
+    }
+
     public static Component plainSystem(String text) {
         return Component.literal(text == null ? "" : text).withStyle(ChatFormatting.GRAY);
     }
