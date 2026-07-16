@@ -81,7 +81,7 @@ class ProgressRepositoryArchitectureTest {
         String mod = Files.readString(Path.of(
                 "src/main/java/com/makar/tacticaltablet/core/TacticalTabletMod.java")).replace("\r\n", "\n");
 
-        assertTrue(packet.contains("PlayerProgressManager.purchaseClass(player, kit)"));
+        assertTrue(packet.contains("PlayerProgressManager.applyTabletClassPurchase(player, kit, result ->"));
         assertFalse(packet.contains("ProgressRepository"));
         assertTrue(mod.contains("MinecraftForge.EVENT_BUS.register(ServerEvents.class);"));
     }

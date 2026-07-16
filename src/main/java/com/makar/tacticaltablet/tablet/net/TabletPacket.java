@@ -165,21 +165,18 @@ public class TabletPacket {
             LobbyManager.sync(player);
             return;
         }
-        PlayerProgressManager.PurchaseResult result = PlayerProgressManager.purchaseClass(player, kit);
-
-        switch (result) {
-            case PURCHASED -> {
-                player.sendSystemMessage(Component.literal("[WAR] Куплен класс " + getDisplayName(kit)
-                        + " за " + PlayerProgressManager.getShopPrice(kit) + " монет."));
-                PlayerProgressManager.savePlayer(player);
+        PlayerProgressManager.applyTabletClassPurchase(player, kit, result -> {
+            switch (result) {
+                case PURCHASED -> {
+                    player.sendSystemMessage(Component.literal("[WAR] Куплен класс " + getDisplayName(kit)
+                            + " за " + PlayerProgressManager.getShopPrice(kit) + " монет."));
+                }
+                case ALREADY_OWNED -> player.sendSystemMessage(Component.literal("[WAR] Класс " + getDisplayName(kit) + " уже куплен."));
+                case NOT_ENOUGH_COINS -> player.sendSystemMessage(Component.literal("[WAR] Не хватает монет для " + getDisplayName(kit)
+                        + ". Нужно " + PlayerProgressManager.getShopPrice(kit) + " монет."));
+                case NOT_PURCHASABLE -> player.sendSystemMessage(Component.literal("[WAR] Этот класс нельзя купить."));
             }
-            case ALREADY_OWNED -> player.sendSystemMessage(Component.literal("[WAR] Класс " + getDisplayName(kit) + " уже куплен."));
-            case NOT_ENOUGH_COINS -> player.sendSystemMessage(Component.literal("[WAR] Не хватает монет для " + getDisplayName(kit)
-                    + ". Нужно " + PlayerProgressManager.getShopPrice(kit) + " монет."));
-            case NOT_PURCHASABLE -> player.sendSystemMessage(Component.literal("[WAR] Этот класс нельзя купить."));
-        }
-
-        LobbyManager.sync(player);
+        });
     }
 
     private void handleBaseUnlock(ServerPlayer player, int classActionId) {
@@ -189,20 +186,18 @@ public class TabletPacket {
             return;
         }
 
-        PlayerProgressManager.ProgressionResult result = PlayerProgressManager.unlockBaseClass(player, kit);
-        switch (result) {
-            case SUCCESS -> {
-                player.sendSystemMessage(Component.literal("[WAR] Открыт класс " + getDisplayName(kit)
-                        + " за " + PlayerProgressManager.BASE_UNLOCK_COST + " монет."));
-                PlayerProgressManager.savePlayer(player);
+        PlayerProgressManager.applyTabletBaseUnlock(player, kit, result -> {
+            switch (result) {
+                case SUCCESS -> {
+                    player.sendSystemMessage(Component.literal("[WAR] Открыт класс " + getDisplayName(kit)
+                            + " за " + PlayerProgressManager.BASE_UNLOCK_COST + " монет."));
+                }
+                case ALREADY_UNLOCKED -> player.sendSystemMessage(Component.literal("[WAR] Класс " + getDisplayName(kit) + " уже открыт."));
+                case NOT_ENOUGH_COINS -> player.sendSystemMessage(Component.literal("[WAR] Не хватает монет для открытия " + getDisplayName(kit)
+                        + ". Нужно " + PlayerProgressManager.BASE_UNLOCK_COST + " монет."));
+                default -> player.sendSystemMessage(Component.literal("[WAR] Этот класс нельзя открыть через планшет."));
             }
-            case ALREADY_UNLOCKED -> player.sendSystemMessage(Component.literal("[WAR] Класс " + getDisplayName(kit) + " уже открыт."));
-            case NOT_ENOUGH_COINS -> player.sendSystemMessage(Component.literal("[WAR] Не хватает монет для открытия " + getDisplayName(kit)
-                    + ". Нужно " + PlayerProgressManager.BASE_UNLOCK_COST + " монет."));
-            default -> player.sendSystemMessage(Component.literal("[WAR] Этот класс нельзя открыть через планшет."));
-        }
-
-        LobbyManager.sync(player);
+        });
     }
 
     private void handleTierUpgrade(ServerPlayer player, int classActionId, int targetTier) {
@@ -212,24 +207,22 @@ public class TabletPacket {
             return;
         }
 
-        PlayerProgressManager.ProgressionResult result = PlayerProgressManager.upgradeClassTier(player, kit, targetTier);
         String tierName = PlayerProgressManager.getTierDisplayName(targetTier);
-        switch (result) {
-            case SUCCESS -> {
-                player.sendSystemMessage(Component.literal("[WAR] Класс " + getDisplayName(kit)
-                        + " улучшен до " + tierName + " за " + PlayerProgressManager.getUpgradeCost(targetTier) + " монет."));
-                PlayerProgressManager.savePlayer(player);
+        PlayerProgressManager.applyTabletTierUpgrade(player, kit, targetTier, result -> {
+            switch (result) {
+                case SUCCESS -> {
+                    player.sendSystemMessage(Component.literal("[WAR] Класс " + getDisplayName(kit)
+                            + " улучшен до " + tierName + " за " + PlayerProgressManager.getUpgradeCost(targetTier) + " монет."));
+                }
+                case LOCKED -> player.sendSystemMessage(Component.literal("[WAR] Сначала открой класс " + getDisplayName(kit) + "."));
+                case NOT_ENOUGH_XP -> player.sendSystemMessage(Component.literal("[WAR] Недостаточно опыта для улучшения " + getDisplayName(kit) + "."));
+                case NOT_ENOUGH_COINS -> player.sendSystemMessage(Component.literal("[WAR] Не хватает монет для улучшения " + getDisplayName(kit)
+                        + ". Нужно " + PlayerProgressManager.getUpgradeCost(targetTier) + " монет."));
+                case MAX_TIER -> player.sendSystemMessage(Component.literal("[WAR] Класс " + getDisplayName(kit) + " уже максимального уровня."));
+                case WRONG_TIER -> player.sendSystemMessage(Component.literal("[WAR] Это улучшение сейчас недоступно."));
+                default -> player.sendSystemMessage(Component.literal("[WAR] Этот класс нельзя улучшить."));
             }
-            case LOCKED -> player.sendSystemMessage(Component.literal("[WAR] Сначала открой класс " + getDisplayName(kit) + "."));
-            case NOT_ENOUGH_XP -> player.sendSystemMessage(Component.literal("[WAR] Недостаточно опыта для улучшения " + getDisplayName(kit) + "."));
-            case NOT_ENOUGH_COINS -> player.sendSystemMessage(Component.literal("[WAR] Не хватает монет для улучшения " + getDisplayName(kit)
-                    + ". Нужно " + PlayerProgressManager.getUpgradeCost(targetTier) + " монет."));
-            case MAX_TIER -> player.sendSystemMessage(Component.literal("[WAR] Класс " + getDisplayName(kit) + " уже максимального уровня."));
-            case WRONG_TIER -> player.sendSystemMessage(Component.literal("[WAR] Это улучшение сейчас недоступно."));
-            default -> player.sendSystemMessage(Component.literal("[WAR] Этот класс нельзя улучшить."));
-        }
-
-        LobbyManager.sync(player);
+        });
     }
 
     private void handleRtp(ServerPlayer player) {

@@ -29,6 +29,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 
 public class PlayerProgressManager {
 
@@ -136,6 +137,9 @@ public class PlayerProgressManager {
             Set.of(EXCLUSIVE_CLASSES),
             BASE_UNLOCK_COST
     ));
+    private static final ProgressApplicationService PROGRESS_APPLICATION_SERVICE =
+            new ProgressApplicationService(PROGRESS_SERVICE);
+    private static final ProgressSyncService PROGRESS_SYNC_SERVICE = new ProgressSyncService();
     private static final ProgressRepository.Configuration REPOSITORY_CONFIGURATION =
             new ProgressRepository.Configuration(
                     DATA_VERSION,
@@ -518,6 +522,32 @@ public class PlayerProgressManager {
         return mapProgressionStatus(result.status());
     }
 
+    public static synchronized ProgressionResult applyTabletBaseUnlock(
+            ServerPlayer player,
+            String clazz,
+            Consumer<ProgressionResult> response
+    ) {
+        Objects.requireNonNull(response, "response");
+        if (player == null || clazz == null) {
+            ProgressionResult result = ProgressionResult.INVALID_CLASS;
+            response.accept(result);
+            if (player != null) PROGRESS_SYNC_SERVICE.syncTablet(player);
+            return result;
+        }
+
+        String key = getPlayerKey(player);
+        PlayerProgress progress = getOrLoad(player, key);
+        ProgressApplicationResult<BaseUnlockResult> application =
+                PROGRESS_APPLICATION_SERVICE.unlockBaseClass(
+                        progress,
+                        normalizeClass(clazz),
+                        progressContext(),
+                        tabletSideEffects(player, key),
+                        result -> response.accept(mapProgressionStatus(result.status()))
+                );
+        return mapProgressionStatus(application.outcome().status());
+    }
+
     public static synchronized ProgressionResult upgradeClassTier(ServerPlayer player, String clazz, int targetTier) {
         if (player == null || clazz == null) return ProgressionResult.INVALID_CLASS;
         if (MapSetManager.isCompetitiveSet()) return ProgressionResult.WRONG_TIER;
@@ -535,6 +565,33 @@ public class PlayerProgressManager {
 
         markDirty(key);
         return mapProgressionStatus(result.status());
+    }
+
+    public static synchronized ProgressionResult applyTabletTierUpgrade(
+            ServerPlayer player,
+            String clazz,
+            int targetTier,
+            Consumer<ProgressionResult> response
+    ) {
+        Objects.requireNonNull(response, "response");
+        if (player == null || clazz == null) {
+            ProgressionResult result = ProgressionResult.INVALID_CLASS;
+            response.accept(result);
+            if (player != null) PROGRESS_SYNC_SERVICE.syncTablet(player);
+            return result;
+        }
+
+        String key = getPlayerKey(player);
+        PlayerProgress progress = getOrLoad(player, key);
+        ProgressApplicationResult<TierUpgradeResult> application = PROGRESS_APPLICATION_SERVICE.upgradeTier(
+                progress,
+                normalizeClass(clazz),
+                targetTier,
+                progressContext(),
+                tabletSideEffects(player, key),
+                result -> response.accept(mapProgressionStatus(result.status()))
+        );
+        return mapProgressionStatus(application.outcome().status());
     }
 
     public static synchronized void addCoins(ServerPlayer player, int amount) {
@@ -801,6 +858,32 @@ public class PlayerProgressManager {
         return legacyResult;
     }
 
+    public static synchronized PurchaseResult applyTabletClassPurchase(
+            ServerPlayer player,
+            String clazz,
+            Consumer<PurchaseResult> response
+    ) {
+        Objects.requireNonNull(response, "response");
+        if (player == null || clazz == null) {
+            PurchaseResult result = PurchaseResult.NOT_PURCHASABLE;
+            response.accept(result);
+            if (player != null) PROGRESS_SYNC_SERVICE.syncTablet(player);
+            return result;
+        }
+
+        String key = getPlayerKey(player);
+        PlayerProgress progress = getOrLoad(player, key);
+        ProgressApplicationResult<ProgressPurchaseResult> application =
+                PROGRESS_APPLICATION_SERVICE.purchaseClass(
+                        progress,
+                        normalizeClass(clazz),
+                        progressContext(),
+                        tabletSideEffects(player, key),
+                        result -> response.accept(mapPurchaseResult(result))
+                );
+        return mapPurchaseResult(application.outcome());
+    }
+
     static PurchaseResult mapPurchaseResult(ProgressPurchaseResult result) {
         if (result.successful()) return PurchaseResult.PURCHASED;
         return switch (result.failure()) {
@@ -826,6 +909,25 @@ public class PlayerProgressManager {
 
     private static ProgressContext progressContext() {
         return new ProgressContext(MapSetManager.isCompetitiveSet());
+    }
+
+    private static ProgressApplicationService.SideEffects tabletSideEffects(ServerPlayer player, String key) {
+        return new ProgressApplicationService.SideEffects() {
+            @Override
+            public void markDirty() {
+                PlayerProgressManager.markDirty(key);
+            }
+
+            @Override
+            public void queueSave() {
+                PlayerProgressManager.savePlayer(player);
+            }
+
+            @Override
+            public void sync() {
+                PROGRESS_SYNC_SERVICE.syncTablet(player);
+            }
+        };
     }
 
     public static synchronized boolean isExclusiveClassGranted(ServerPlayer player, String clazz) {

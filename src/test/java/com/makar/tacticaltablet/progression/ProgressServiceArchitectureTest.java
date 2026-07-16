@@ -47,10 +47,11 @@ class ProgressServiceArchitectureTest {
     void packetHandlerStillUsesLegacyFacadeEntryPoints() throws IOException {
         String source = normalizedSource("tablet/net/TabletPacket.java");
 
-        assertTrue(source.contains("PlayerProgressManager.purchaseClass(player, kit)"));
-        assertTrue(source.contains("PlayerProgressManager.unlockBaseClass(player, kit)"));
-        assertTrue(source.contains("PlayerProgressManager.upgradeClassTier(player, kit, targetTier)"));
+        assertTrue(source.contains("PlayerProgressManager.applyTabletClassPurchase(player, kit, result ->"));
+        assertTrue(source.contains("PlayerProgressManager.applyTabletBaseUnlock(player, kit, result ->"));
+        assertTrue(source.contains("PlayerProgressManager.applyTabletTierUpgrade(player, kit, targetTier, result ->"));
         assertFalse(source.contains("ProgressService"));
+        assertFalse(source.contains("PlayerProgressManager.savePlayer(player)"));
     }
 
     @Test
@@ -63,6 +64,9 @@ class ProgressServiceArchitectureTest {
                 "purchaseClass",
                 "unlockBaseClass",
                 "upgradeClassTier",
+                "applyTabletClassPurchase",
+                "applyTabletBaseUnlock",
+                "applyTabletTierUpgrade",
                 "applyIdempotentCoinCredit",
                 "grantExclusiveClass"
         );
