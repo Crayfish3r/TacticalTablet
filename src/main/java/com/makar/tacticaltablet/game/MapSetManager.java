@@ -5,6 +5,7 @@ import com.google.gson.GsonBuilder;
 import com.makar.tacticaltablet.core.TacticalTabletMod;
 import com.makar.tacticaltablet.map.MapRotationManager;
 import com.makar.tacticaltablet.progression.ClassXPManager;
+import com.makar.tacticaltablet.progression.CompetitiveClassTierPolicy;
 import com.makar.tacticaltablet.progression.PlayerProgressManager;
 import com.makar.tacticaltablet.game.set.SetRewardSummary;
 import com.makar.tacticaltablet.game.set.SetLeaderboardSnapshot;
@@ -310,9 +311,11 @@ public final class MapSetManager {
         if (server == null) return;
 
         int game = getCurrentGameNumber();
-        Component title = Component.literal(game + "-я игра началась");
+        Component title = Component.literal(state.competitiveSet
+                ? "Соревновательная игра " + game + " из " + GAMES_PER_MAP
+                : game + "-я игра началась");
         Component subtitle = Component.literal(state.competitiveSet
-                ? "Соревновательный сет • игра " + game + " из " + GAMES_PER_MAP
+                ? "Единый уровень классов: " + CompetitiveClassTierPolicy.tierForGame(game).displayName()
                 : "Игра " + game + " из " + GAMES_PER_MAP);
 
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {

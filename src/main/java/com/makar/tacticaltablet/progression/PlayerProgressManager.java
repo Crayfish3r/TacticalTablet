@@ -466,8 +466,8 @@ public class PlayerProgressManager {
     public static synchronized int getLevel(ServerPlayer player, String clazz) {
         String normalizedClass = normalizeClass(clazz);
 
-        if (MapSetManager.isCompetitiveSet()) {
-            return isBaseProgressionClass(normalizedClass) ? EPIC_TIER : BASIC_TIER;
+        if (isCompetitiveClassTierLadderActive()) {
+            return isBaseProgressionClass(normalizedClass) ? getCurrentCompetitiveClassTier() : BASIC_TIER;
         }
 
         if (isShopClass(normalizedClass)) {
@@ -1102,9 +1102,7 @@ public class PlayerProgressManager {
         PlayerProgress progress = getOrLoad(player, getPlayerKey(player));
         for (String clazz : BASE_CLASSES) {
             String normalizedClass = normalizeClass(clazz);
-            result.put(normalizedClass, MapSetManager.isCompetitiveSet()
-                    ? EPIC_TIER
-                    : getStoredTier(progress, normalizedClass));
+            result.put(normalizedClass, getEffectiveBaseTier(progress, normalizedClass));
         }
         for (String clazz : SHOP_CLASSES) {
             String normalizedClass = normalizeClass(clazz);
@@ -1186,12 +1184,18 @@ public class PlayerProgressManager {
         if (player == null) return result;
 
         PlayerProgress progress = getOrLoad(player, getPlayerKey(player));
+        boolean competitiveTierLadder = isCompetitiveClassTierLadderActive();
+        int competitiveTierXp = competitiveTierLadder
+                ? ClassTier.clamp(getCurrentCompetitiveClassTier()).requiredXp()
+                : 0;
 
         for (String clazz : ALL_CLASSES) {
             String normalizedClass = normalizeClass(clazz);
             int xp = isShopClass(normalizedClass)
                     ? 0
-                    : MapSetManager.isCompetitiveSet() ? ClassTier.EPIC.requiredXp() : progress.classes.getOrDefault(normalizedClass, 0);
+                    : competitiveTierLadder && isBaseProgressionClass(normalizedClass)
+                            ? competitiveTierXp
+                            : progress.classes.getOrDefault(normalizedClass, 0);
             result.put(normalizedClass, xp);
         }
 
@@ -1206,8 +1210,8 @@ public class PlayerProgressManager {
 
         for (String clazz : ALL_CLASSES) {
             String normalizedClass = normalizeClass(clazz);
-            int level = MapSetManager.isCompetitiveSet()
-                    ? isBaseProgressionClass(normalizedClass) ? EPIC_TIER : BASIC_TIER
+            int level = isCompetitiveClassTierLadderActive()
+                    ? isBaseProgressionClass(normalizedClass) ? getCurrentCompetitiveClassTier() : BASIC_TIER
                     : isShopClass(normalizedClass)
                             ? progress.purchasedClasses.getOrDefault(normalizedClass, 0) > 0 ? getShopFixedLevel(normalizedClass) : BASIC_TIER
                             : getStoredTier(progress, normalizedClass);
@@ -1727,6 +1731,26 @@ public class PlayerProgressManager {
     private static int getStoredTier(PlayerProgress progress, String clazz) {
         if (progress == null) return BASIC_TIER;
         return clampTier(progress.classTiers.getOrDefault(normalizeClass(clazz), BASIC_TIER));
+    }
+
+    private static int getEffectiveBaseTier(PlayerProgress progress, String clazz) {
+        return CompetitiveClassTierPolicy.effectiveBaseTier(
+                MapSetManager.isCompetitiveSet(),
+                MapSetManager.isClanWarSet(),
+                MapSetManager.getCurrentGameNumber(),
+                getStoredTier(progress, clazz)
+        );
+    }
+
+    private static boolean isCompetitiveClassTierLadderActive() {
+        return CompetitiveClassTierPolicy.isActive(
+                MapSetManager.isCompetitiveSet(),
+                MapSetManager.isClanWarSet()
+        );
+    }
+
+    private static int getCurrentCompetitiveClassTier() {
+        return CompetitiveClassTierPolicy.tierForGame(MapSetManager.getCurrentGameNumber()).id();
     }
 
     private static int clampTier(int tier) {

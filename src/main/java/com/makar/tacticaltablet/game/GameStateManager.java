@@ -383,6 +383,7 @@ public class GameStateManager {
                     server, normalizedWinners, completingSet, false);
             setComplete = MapSetManager.onGameCompleted(server);
         }
+        ClassXPManager.syncAll(server);
 
         if (setComplete && !clanWarSet && setSummary != null) {
             awardSetAndLogFailures(server, setSummary);
