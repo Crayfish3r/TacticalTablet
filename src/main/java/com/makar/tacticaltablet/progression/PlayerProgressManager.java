@@ -30,6 +30,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 public class PlayerProgressManager {
 
@@ -522,30 +523,34 @@ public class PlayerProgressManager {
         return mapProgressionStatus(result.status());
     }
 
-    public static synchronized ProgressionResult applyTabletBaseUnlock(
+    public static ProgressionResult applyTabletBaseUnlock(
             ServerPlayer player,
             String clazz,
             Consumer<ProgressionResult> response
     ) {
         Objects.requireNonNull(response, "response");
+        PreparedProgressOperation<ProgressionResult> operation = withProgressLock(
+                () -> prepareTabletBaseUnlock(player, clazz));
+        return PROGRESS_APPLICATION_SERVICE.executePostLockEffects(
+                operation, response, tabletPostLockEffects(player));
+    }
+
+    private static PreparedProgressOperation<ProgressionResult> prepareTabletBaseUnlock(
+            ServerPlayer player,
+            String clazz
+    ) {
         if (player == null || clazz == null) {
             ProgressionResult result = ProgressionResult.INVALID_CLASS;
-            response.accept(result);
-            if (player != null) PROGRESS_SYNC_SERVICE.syncTablet(player);
-            return result;
+            return PreparedProgressOperation.withoutSave(
+                    result, player == null ? ProgressSyncMode.NONE : ProgressSyncMode.TABLET);
         }
 
         String key = getPlayerKey(player);
         PlayerProgress progress = getOrLoad(player, key);
-        ProgressApplicationResult<BaseUnlockResult> application =
-                PROGRESS_APPLICATION_SERVICE.unlockBaseClass(
-                        progress,
-                        normalizeClass(clazz),
-                        progressContext(),
-                        tabletSideEffects(player, key),
-                        result -> response.accept(mapProgressionStatus(result.status()))
-                );
-        return mapProgressionStatus(application.outcome().status());
+        ProgressApplicationResult<BaseUnlockResult> application = PROGRESS_APPLICATION_SERVICE.prepareBaseUnlock(
+                progress, normalizeClass(clazz), progressContext());
+        ProgressionResult result = mapProgressionStatus(application.outcome().status());
+        return prepareTabletOperation(player, key, progress, result, application.changed());
     }
 
     public static synchronized ProgressionResult upgradeClassTier(ServerPlayer player, String clazz, int targetTier) {
@@ -567,31 +572,37 @@ public class PlayerProgressManager {
         return mapProgressionStatus(result.status());
     }
 
-    public static synchronized ProgressionResult applyTabletTierUpgrade(
+    public static ProgressionResult applyTabletTierUpgrade(
             ServerPlayer player,
             String clazz,
             int targetTier,
             Consumer<ProgressionResult> response
     ) {
         Objects.requireNonNull(response, "response");
+        PreparedProgressOperation<ProgressionResult> operation = withProgressLock(
+                () -> prepareTabletTierUpgrade(player, clazz, targetTier));
+        return PROGRESS_APPLICATION_SERVICE.executePostLockEffects(
+                operation, response, tabletPostLockEffects(player));
+    }
+
+    private static PreparedProgressOperation<ProgressionResult> prepareTabletTierUpgrade(
+            ServerPlayer player,
+            String clazz,
+            int targetTier
+    ) {
         if (player == null || clazz == null) {
             ProgressionResult result = ProgressionResult.INVALID_CLASS;
-            response.accept(result);
-            if (player != null) PROGRESS_SYNC_SERVICE.syncTablet(player);
-            return result;
+            return PreparedProgressOperation.withoutSave(
+                    result, player == null ? ProgressSyncMode.NONE : ProgressSyncMode.TABLET);
         }
 
         String key = getPlayerKey(player);
         PlayerProgress progress = getOrLoad(player, key);
-        ProgressApplicationResult<TierUpgradeResult> application = PROGRESS_APPLICATION_SERVICE.upgradeTier(
-                progress,
-                normalizeClass(clazz),
-                targetTier,
-                progressContext(),
-                tabletSideEffects(player, key),
-                result -> response.accept(mapProgressionStatus(result.status()))
-        );
-        return mapProgressionStatus(application.outcome().status());
+        ProgressApplicationResult<TierUpgradeResult> application =
+                PROGRESS_APPLICATION_SERVICE.prepareTierUpgrade(
+                        progress, normalizeClass(clazz), targetTier, progressContext());
+        ProgressionResult result = mapProgressionStatus(application.outcome().status());
+        return prepareTabletOperation(player, key, progress, result, application.changed());
     }
 
     public static synchronized void addCoins(ServerPlayer player, int amount) {
@@ -858,30 +869,35 @@ public class PlayerProgressManager {
         return legacyResult;
     }
 
-    public static synchronized PurchaseResult applyTabletClassPurchase(
+    public static PurchaseResult applyTabletClassPurchase(
             ServerPlayer player,
             String clazz,
             Consumer<PurchaseResult> response
     ) {
         Objects.requireNonNull(response, "response");
+        PreparedProgressOperation<PurchaseResult> operation = withProgressLock(
+                () -> prepareTabletClassPurchase(player, clazz));
+        return PROGRESS_APPLICATION_SERVICE.executePostLockEffects(
+                operation, response, tabletPostLockEffects(player));
+    }
+
+    private static PreparedProgressOperation<PurchaseResult> prepareTabletClassPurchase(
+            ServerPlayer player,
+            String clazz
+    ) {
         if (player == null || clazz == null) {
             PurchaseResult result = PurchaseResult.NOT_PURCHASABLE;
-            response.accept(result);
-            if (player != null) PROGRESS_SYNC_SERVICE.syncTablet(player);
-            return result;
+            return PreparedProgressOperation.withoutSave(
+                    result, player == null ? ProgressSyncMode.NONE : ProgressSyncMode.TABLET);
         }
 
         String key = getPlayerKey(player);
         PlayerProgress progress = getOrLoad(player, key);
         ProgressApplicationResult<ProgressPurchaseResult> application =
-                PROGRESS_APPLICATION_SERVICE.purchaseClass(
-                        progress,
-                        normalizeClass(clazz),
-                        progressContext(),
-                        tabletSideEffects(player, key),
-                        result -> response.accept(mapPurchaseResult(result))
-                );
-        return mapPurchaseResult(application.outcome());
+                PROGRESS_APPLICATION_SERVICE.prepareClassPurchase(
+                        progress, normalizeClass(clazz), progressContext());
+        PurchaseResult result = mapPurchaseResult(application.outcome());
+        return prepareTabletOperation(player, key, progress, result, application.changed());
     }
 
     static PurchaseResult mapPurchaseResult(ProgressPurchaseResult result) {
@@ -911,23 +927,53 @@ public class PlayerProgressManager {
         return new ProgressContext(MapSetManager.isCompetitiveSet());
     }
 
-    private static ProgressApplicationService.SideEffects tabletSideEffects(ServerPlayer player, String key) {
+    private static <T> PreparedProgressOperation<T> prepareTabletOperation(
+            ServerPlayer player,
+            String key,
+            PlayerProgress progress,
+            T result,
+            boolean changed
+    ) {
+        if (!changed) {
+            return PreparedProgressOperation.withoutSave(result, ProgressSyncMode.TABLET);
+        }
+        markDirty(key);
+        QueuedProgressSave save = prepareQueuedTabletSave(player, key, progress);
+        return PreparedProgressOperation.withSave(result, save, ProgressSyncMode.TABLET);
+    }
+
+    private static QueuedProgressSave prepareQueuedTabletSave(
+            ServerPlayer player,
+            String key,
+            PlayerProgress progress
+    ) {
+        updateIdentity(progress, player);
+        progress.lastSeen = Instant.now().toEpochMilli();
+        normalize(progress);
+        return new QueuedProgressSave(snapshot(key, progress, ++nextSnapshotRevision));
+    }
+
+    private static ProgressApplicationService.SideEffects tabletPostLockEffects(ServerPlayer player) {
         return new ProgressApplicationService.SideEffects() {
             @Override
-            public void markDirty() {
-                PlayerProgressManager.markDirty(key);
+            public void enqueueSave(QueuedProgressSave save) {
+                enqueuePreparedTabletSave(save);
             }
 
             @Override
-            public void queueSave() {
-                PlayerProgressManager.savePlayer(player);
-            }
-
-            @Override
-            public void sync() {
-                PROGRESS_SYNC_SERVICE.syncTablet(player);
+            public void sync(ProgressSyncMode mode) {
+                if (mode == ProgressSyncMode.TABLET) {
+                    PROGRESS_SYNC_SERVICE.syncTablet(player);
+                }
             }
         };
+    }
+
+    static <T> T withProgressLock(Supplier<T> preparation) {
+        Objects.requireNonNull(preparation, "preparation");
+        synchronized (PlayerProgressManager.class) {
+            return preparation.get();
+        }
     }
 
     public static synchronized boolean isExclusiveClassGranted(ServerPlayer player, String clazz) {
@@ -1446,6 +1492,50 @@ public class PlayerProgressManager {
             case WRITTEN -> { }
         }
         return ticket;
+    }
+
+    private static SaveTicket enqueuePreparedTabletSave(QueuedProgressSave preparedSave) {
+        ProgressSnapshot preparedSnapshot = preparedSave.snapshot();
+        ProgressRepository repository = withProgressLock(() -> {
+            if (progressRepository == null) {
+                markDirty(preparedSnapshot.key());
+                return null;
+            }
+            return progressRepository;
+        });
+        if (repository == null) return null;
+
+        SaveTicket ticket = repository.save(preparedSnapshot, false);
+        DurableSaveResult immediate = ticket.completion().toCompletableFuture().getNow(null);
+        withProgressLock(() -> {
+            recordPreparedTabletSaveResult(preparedSnapshot, immediate);
+            return null;
+        });
+        return ticket;
+    }
+
+    private static void recordPreparedTabletSaveResult(
+            ProgressSnapshot preparedSnapshot,
+            DurableSaveResult immediate
+    ) {
+        String key = preparedSnapshot.key();
+        if (immediate == null || immediate.status() == DurableSaveResult.Status.WRITTEN) {
+            snapshotRevisions.merge(key, preparedSnapshot.revision(), Math::max);
+            markDirty(key);
+            return;
+        }
+        switch (immediate.status()) {
+            case STALE_REJECTED, SUPERSEDED -> { }
+            case QUEUE_REJECTED, EXECUTOR_STOPPED, FAILED -> {
+                markDirty(key);
+                TacticalTabletMod.LOGGER.warn(
+                        "Could not queue Tactical Tablet progress save for {}: {}",
+                        key,
+                        immediate.diagnostic()
+                );
+            }
+            case WRITTEN -> { }
+        }
     }
 
     private static void reconcileCompletedWrites() {

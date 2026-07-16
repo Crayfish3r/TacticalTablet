@@ -9,6 +9,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ProgressApplicationServiceTest {
@@ -24,39 +25,49 @@ class ProgressApplicationServiceTest {
     );
 
     @Test
-    void successfulPurchasePreservesDirtyResponseSaveSyncOrder() {
+    void successfulPurchasePreservesDirtyResponseSaveSyncOrderAndLockScope() {
         TestMutableProgressState state = new TestMutableProgressState(100);
         RecordingSideEffects effects = new RecordingSideEffects();
+        List<String> events = effects.events;
 
-        ProgressApplicationResult<ProgressPurchaseResult> application = APPLICATION.purchaseClass(
-                state,
-                "sniper",
-                new ProgressContext(false),
-                effects,
-                result -> {
-                    assertTrue(result.successful());
-                    assertEquals(50, state.coins());
-                    assertEquals(1, state.purchase("sniper").value());
-                    effects.events.add("response");
-                }
+        PreparedProgressOperation<ProgressPurchaseResult> operation = PlayerProgressManager.withProgressLock(() -> {
+            assertTrue(Thread.holdsLock(PlayerProgressManager.class));
+            ProgressApplicationResult<ProgressPurchaseResult> application =
+                    APPLICATION.prepareClassPurchase(state, "sniper", new ProgressContext(false));
+            events.add("mutation");
+            if (application.changed()) events.add("dirty/revision");
+            return PreparedProgressOperation.withSave(
+                    application.outcome(), save(1, state.coins()), ProgressSyncMode.TABLET);
+        });
+
+        ProgressPurchaseResult result = APPLICATION.executePostLockEffects(
+                operation,
+                response -> {
+                    assertFalse(Thread.holdsLock(PlayerProgressManager.class));
+                    events.add("response");
+                },
+                effects
         );
 
-        assertTrue(application.changed());
-        assertTrue(application.outcome().successful());
-        assertEquals(List.of("dirty", "response", "save", "sync"), effects.events);
+        assertTrue(result.successful());
+        assertEquals(50, state.coins());
+        assertEquals(1, state.purchase("sniper").value());
+        assertEquals(List.of("mutation", "dirty/revision", "response", "save", "sync"), events);
     }
 
     @Test
     void rejectedPurchaseRespondsAndSyncsWithoutDirtyOrSave() {
         TestMutableProgressState state = new TestMutableProgressState(49);
         RecordingSideEffects effects = new RecordingSideEffects();
+        ProgressApplicationResult<ProgressPurchaseResult> application = PlayerProgressManager.withProgressLock(() ->
+                APPLICATION.prepareClassPurchase(state, "sniper", new ProgressContext(false)));
+        PreparedProgressOperation<ProgressPurchaseResult> operation = PreparedProgressOperation.withoutSave(
+                application.outcome(), ProgressSyncMode.TABLET);
 
-        ProgressApplicationResult<ProgressPurchaseResult> application = APPLICATION.purchaseClass(
-                state,
-                "sniper",
-                new ProgressContext(false),
-                effects,
-                result -> effects.events.add("response:" + result.failure())
+        APPLICATION.executePostLockEffects(
+                operation,
+                result -> effects.events.add("response:" + result.failure()),
+                effects
         );
 
         assertFalse(application.changed());
@@ -66,94 +77,155 @@ class ProgressApplicationServiceTest {
     }
 
     @Test
-    void alreadyOwnedPurchaseDoesNotDuplicateMutationSaveOrSync() {
-        TestMutableProgressState state = new TestMutableProgressState(100);
-        state.purchase("sniper", 1);
-        RecordingSideEffects effects = new RecordingSideEffects();
+    void baseUnlockAndTierUpgradeUseTheSamePreparedBoundary() {
+        TestMutableProgressState unlockState = new TestMutableProgressState(100);
+        ProgressApplicationResult<BaseUnlockResult> unlock = PlayerProgressManager.withProgressLock(() ->
+                APPLICATION.prepareBaseUnlock(unlockState, "medic", new ProgressContext(false)));
 
-        APPLICATION.purchaseClass(
-                state,
-                "sniper",
-                new ProgressContext(false),
-                effects,
-                result -> effects.events.add("response:" + result.failure())
-        );
+        TestMutableProgressState tierState = new TestMutableProgressState(500);
+        tierState.baseUnlock("medic", 1);
+        tierState.tier("medic", ClassTier.BASIC.id());
+        tierState.experience("medic", 0);
+        ProgressApplicationResult<TierUpgradeResult> tier = PlayerProgressManager.withProgressLock(() ->
+                APPLICATION.prepareTierUpgrade(
+                        tierState, "medic", ClassTier.RARE.id(), new ProgressContext(false)));
 
-        assertEquals(100, state.coins());
-        assertEquals(1, state.purchase("sniper").value());
-        assertEquals(List.of("response:ALREADY_OWNED", "sync"), effects.events);
+        assertTrue(unlock.changed());
+        assertEquals(0, unlockState.coins());
+        assertEquals(1, unlockState.baseUnlock("medic").value());
+        assertFalse(tier.changed());
+        assertEquals(ProgressionStatus.NOT_ENOUGH_XP, tier.outcome().status());
+        assertEquals(ClassTier.BASIC.id(), tierState.tier("medic").value());
     }
 
     @Test
-    void baseUnlockUsesTheSameApplicationSideEffectBoundary() {
+    void successfulBaseUnlockPreservesMutationDirtyResponseSaveSyncOrder() {
         TestMutableProgressState state = new TestMutableProgressState(100);
         RecordingSideEffects effects = new RecordingSideEffects();
+        PreparedProgressOperation<BaseUnlockResult> operation = PlayerProgressManager.withProgressLock(() -> {
+            ProgressApplicationResult<BaseUnlockResult> result = APPLICATION.prepareBaseUnlock(
+                    state, "medic", new ProgressContext(false));
+            effects.events.add("mutation");
+            effects.events.add("dirty/revision");
+            return PreparedProgressOperation.withSave(
+                    result.outcome(), save(1, state.coins()), ProgressSyncMode.TABLET);
+        });
 
-        ProgressApplicationResult<BaseUnlockResult> application = APPLICATION.unlockBaseClass(
-                state,
-                "medic",
-                new ProgressContext(false),
-                effects,
-                result -> effects.events.add("response:" + result.status())
-        );
+        APPLICATION.executePostLockEffects(
+                operation, result -> effects.events.add("response"), effects);
 
-        assertTrue(application.changed());
-        assertEquals(0, state.coins());
-        assertEquals(1, state.baseUnlock("medic").value());
-        assertEquals(List.of("dirty", "response:SUCCESS", "save", "sync"), effects.events);
+        assertEquals(List.of("mutation", "dirty/revision", "response", "save", "sync"), effects.events);
     }
 
     @Test
-    void tierFailureKeepsStateAndOnlyRespondsThenSyncs() {
+    void successfulTierUpgradePreservesMutationDirtyResponseSaveSyncOrder() {
         TestMutableProgressState state = new TestMutableProgressState(500);
         state.baseUnlock("medic", 1);
         state.tier("medic", ClassTier.BASIC.id());
-        state.experience("medic", 0);
+        state.experience("medic", ClassTier.RARE.requiredXp());
         RecordingSideEffects effects = new RecordingSideEffects();
+        PreparedProgressOperation<TierUpgradeResult> operation = PlayerProgressManager.withProgressLock(() -> {
+            ProgressApplicationResult<TierUpgradeResult> result = APPLICATION.prepareTierUpgrade(
+                    state, "medic", ClassTier.RARE.id(), new ProgressContext(false));
+            effects.events.add("mutation");
+            effects.events.add("dirty/revision");
+            return PreparedProgressOperation.withSave(
+                    result.outcome(), save(1, state.coins()), ProgressSyncMode.TABLET);
+        });
 
-        ProgressApplicationResult<TierUpgradeResult> application = APPLICATION.upgradeTier(
-                state,
-                "medic",
-                ClassTier.RARE.id(),
-                new ProgressContext(false),
-                effects,
-                result -> effects.events.add("response:" + result.status())
-        );
+        APPLICATION.executePostLockEffects(
+                operation, result -> effects.events.add("response"), effects);
 
-        assertFalse(application.changed());
-        assertEquals(ClassTier.BASIC.id(), state.tier("medic").value());
-        assertEquals(500, state.coins());
-        assertEquals(List.of("response:NOT_ENOUGH_XP", "sync"), effects.events);
+        assertEquals(List.of("mutation", "dirty/revision", "response", "save", "sync"), effects.events);
     }
 
     @Test
-    void separateApplicationsDoNotRetainPlayerState() {
-        TestMutableProgressState first = new TestMutableProgressState(100);
-        TestMutableProgressState second = new TestMutableProgressState(100);
+    void responseExceptionPreventsSaveAndSyncAndIsNotHidden() {
+        RecordingSideEffects effects = new RecordingSideEffects();
+        PreparedProgressOperation<String> operation = PreparedProgressOperation.withSave(
+                "success", save(1, 50), ProgressSyncMode.TABLET);
 
-        APPLICATION.purchaseClass(first, "sniper", new ProgressContext(false),
-                new RecordingSideEffects(), ignored -> { });
+        IllegalStateException failure = assertThrows(IllegalStateException.class, () ->
+                APPLICATION.executePostLockEffects(operation, result -> {
+                    effects.events.add("response");
+                    throw new IllegalStateException("response failed");
+                }, effects));
 
-        assertEquals(50, first.coins());
-        assertEquals(100, second.coins());
-        assertEquals(0, second.purchase("sniper").value());
+        assertEquals("response failed", failure.getMessage());
+        assertEquals(List.of("response"), effects.events);
+    }
+
+    @Test
+    void saveExceptionPreventsSyncAndIsNotHidden() {
+        List<String> events = new ArrayList<>();
+        ProgressApplicationService.SideEffects effects = new ProgressApplicationService.SideEffects() {
+            public void enqueueSave(QueuedProgressSave save) {
+                assertFalse(Thread.holdsLock(PlayerProgressManager.class));
+                events.add("save");
+                throw new IllegalStateException("save failed");
+            }
+            public void sync(ProgressSyncMode mode) { events.add("sync"); }
+        };
+        PreparedProgressOperation<String> operation = PreparedProgressOperation.withSave(
+                "success", save(1, 50), ProgressSyncMode.TABLET);
+
+        IllegalStateException failure = assertThrows(IllegalStateException.class, () ->
+                APPLICATION.executePostLockEffects(
+                        operation, result -> events.add("response"), effects));
+
+        assertEquals("save failed", failure.getMessage());
+        assertEquals(List.of("response", "save"), events);
+    }
+
+    @Test
+    void syncExceptionOccursAfterSaveAndIsNotHidden() {
+        List<String> events = new ArrayList<>();
+        ProgressApplicationService.SideEffects effects = new ProgressApplicationService.SideEffects() {
+            public void enqueueSave(QueuedProgressSave save) { events.add("save"); }
+            public void sync(ProgressSyncMode mode) {
+                assertFalse(Thread.holdsLock(PlayerProgressManager.class));
+                events.add("sync");
+                throw new IllegalStateException("sync failed");
+            }
+        };
+        PreparedProgressOperation<String> operation = PreparedProgressOperation.withSave(
+                "success", save(1, 50), ProgressSyncMode.TABLET);
+
+        IllegalStateException failure = assertThrows(IllegalStateException.class, () ->
+                APPLICATION.executePostLockEffects(
+                        operation, result -> events.add("response"), effects));
+
+        assertEquals("sync failed", failure.getMessage());
+        assertEquals(List.of("response", "save", "sync"), events);
+    }
+
+    static QueuedProgressSave save(long revision, int coins) {
+        return new QueuedProgressSave(new ProgressSnapshot(
+                "player",
+                revision,
+                new ProgressSnapshot.Data(
+                        11, "Player", "00000000000000000000000000000000",
+                        Map.of(), Map.of(), Map.of(),
+                        0, 0, 0, 0, coins, 0,
+                        false, false,
+                        Map.of(), Map.of(), Map.of(), List.of(),
+                        1L, 2L
+                )
+        ));
     }
 
     private static final class RecordingSideEffects implements ProgressApplicationService.SideEffects {
         private final List<String> events = new ArrayList<>();
 
         @Override
-        public void markDirty() {
-            events.add("dirty");
-        }
-
-        @Override
-        public void queueSave() {
+        public void enqueueSave(QueuedProgressSave save) {
+            assertFalse(Thread.holdsLock(PlayerProgressManager.class));
             events.add("save");
         }
 
         @Override
-        public void sync() {
+        public void sync(ProgressSyncMode mode) {
+            assertFalse(Thread.holdsLock(PlayerProgressManager.class));
             events.add("sync");
         }
     }

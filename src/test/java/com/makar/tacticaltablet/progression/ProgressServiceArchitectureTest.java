@@ -64,9 +64,6 @@ class ProgressServiceArchitectureTest {
                 "purchaseClass",
                 "unlockBaseClass",
                 "upgradeClassTier",
-                "applyTabletClassPurchase",
-                "applyTabletBaseUnlock",
-                "applyTabletTierUpgrade",
                 "applyIdempotentCoinCredit",
                 "grantExclusiveClass"
         );
@@ -78,6 +75,27 @@ class ProgressServiceArchitectureTest {
             assertTrue(Modifier.isSynchronized(method.getModifiers()), method::toString);
         }
         assertTrue(checked >= criticalNames.size());
+    }
+
+    @Test
+    void tabletApplicationFacadesUseExplicitMonitorInsteadOfMethodWideSynchronization() throws Exception {
+        for (String name : Set.of(
+                "applyTabletClassPurchase",
+                "applyTabletBaseUnlock",
+                "applyTabletTierUpgrade"
+        )) {
+            Method method = java.util.Arrays.stream(PlayerProgressManager.class.getDeclaredMethods())
+                    .filter(candidate -> candidate.getName().equals(name))
+                    .findFirst()
+                    .orElseThrow();
+            assertTrue(Modifier.isStatic(method.getModifiers()), method::toString);
+            assertFalse(Modifier.isSynchronized(method.getModifiers()), method::toString);
+        }
+
+        String source = normalizedSource("progression/PlayerProgressManager.java");
+        assertTrue(source.contains("synchronized (PlayerProgressManager.class)"));
+        assertTrue(source.contains("withProgressLock("));
+        assertTrue(source.contains("executePostLockEffects("));
     }
 
     @Test

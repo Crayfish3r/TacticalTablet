@@ -47,6 +47,38 @@ class ProgressFlowArchitectureTest {
         assertFalse(application.contains("@SubscribeEvent"));
         assertFalse(application.contains("sendSystemMessage"));
         assertFalse(application.contains("ProgressRepository"));
+        assertFalse(application.contains("net.minecraft."));
+        assertFalse(application.contains("net.minecraftforge."));
+    }
+
+    @Test
+    void preparedPlanCannotRetainMutableAggregateOrCache() throws IOException {
+        String plan = source("progression/PreparedProgressOperation.java");
+
+        assertFalse(plan.contains("MutableProgressState"));
+        assertFalse(plan.contains("PlayerProgressManager"));
+        assertFalse(plan.contains("ServerPlayer"));
+        assertFalse(plan.contains("Map<"));
+        assertTrue(plan.contains("ProgressSnapshot snapshot"));
+    }
+
+    @Test
+    void managerPreparesSnapshotBeforeExecutingResponseSaveAndSyncOutsideMonitor() throws IOException {
+        String manager = source("progression/PlayerProgressManager.java");
+        int publicFacade = manager.indexOf("public static PurchaseResult applyTabletClassPurchase(");
+        int explicitLock = manager.indexOf("withProgressLock(", publicFacade);
+        int postLockExecution = manager.indexOf("executePostLockEffects(", explicitLock);
+        int snapshotPreparation = manager.indexOf("new QueuedProgressSave(snapshot(");
+        int repositorySave = manager.indexOf("repository.save(preparedSnapshot, false)");
+
+        assertTrue(publicFacade >= 0);
+        assertTrue(explicitLock > publicFacade);
+        assertTrue(postLockExecution > explicitLock);
+        assertTrue(snapshotPreparation >= 0);
+        assertTrue(repositorySave >= 0);
+        assertFalse(manager.contains("public static synchronized PurchaseResult applyTabletClassPurchase("));
+        assertFalse(manager.contains("public static synchronized ProgressionResult applyTabletBaseUnlock("));
+        assertFalse(manager.contains("public static synchronized ProgressionResult applyTabletTierUpgrade("));
     }
 
     @Test

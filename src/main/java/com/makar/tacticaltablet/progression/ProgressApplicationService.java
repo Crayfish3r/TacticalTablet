@@ -4,8 +4,8 @@ import java.util.Objects;
 import java.util.function.Consumer;
 
 /**
- * Coordinates one progression mutation with the side effects still owned by the synchronized facade.
- * Thread safety is deliberately supplied by {@link PlayerProgressManager}; this service owns no locks or cache.
+ * Prepares progression mutations and executes an immutable post-lock plan. Thread safety for preparation is
+ * deliberately supplied by {@link PlayerProgressManager}; this service owns no locks or cache.
  */
 public final class ProgressApplicationService {
     private final ProgressService progressService;
@@ -14,62 +14,53 @@ public final class ProgressApplicationService {
         this.progressService = Objects.requireNonNull(progressService, "progressService");
     }
 
-    ProgressApplicationResult<ProgressPurchaseResult> purchaseClass(
+    ProgressApplicationResult<ProgressPurchaseResult> prepareClassPurchase(
             MutableProgressState progress,
             String classId,
-            ProgressContext context,
-            SideEffects sideEffects,
-            Consumer<ProgressPurchaseResult> response
+            ProgressContext context
     ) {
         ProgressPurchaseResult result = progressService.purchaseClass(progress, classId, context);
-        complete(result, result.successful(), sideEffects, response);
         return new ProgressApplicationResult<>(result, result.successful());
     }
 
-    ProgressApplicationResult<BaseUnlockResult> unlockBaseClass(
+    ProgressApplicationResult<BaseUnlockResult> prepareBaseUnlock(
             MutableProgressState progress,
             String classId,
-            ProgressContext context,
-            SideEffects sideEffects,
-            Consumer<BaseUnlockResult> response
+            ProgressContext context
     ) {
         BaseUnlockResult result = progressService.unlockBaseClass(progress, classId, context);
-        complete(result, result.changed(), sideEffects, response);
         return new ProgressApplicationResult<>(result, result.changed());
     }
 
-    ProgressApplicationResult<TierUpgradeResult> upgradeTier(
+    ProgressApplicationResult<TierUpgradeResult> prepareTierUpgrade(
             MutableProgressState progress,
             String classId,
             int targetTier,
-            ProgressContext context,
-            SideEffects sideEffects,
-            Consumer<TierUpgradeResult> response
+            ProgressContext context
     ) {
         TierUpgradeResult result = progressService.upgradeTier(progress, classId, targetTier, context);
-        complete(result, result.changed(), sideEffects, response);
         return new ProgressApplicationResult<>(result, result.changed());
     }
 
-    private <T> void complete(
-            T result,
-            boolean changed,
-            SideEffects sideEffects,
-            Consumer<T> response
+    <T> T executePostLockEffects(
+            PreparedProgressOperation<T> operation,
+            Consumer<T> response,
+            SideEffects sideEffects
     ) {
+        Objects.requireNonNull(operation, "operation");
         Objects.requireNonNull(sideEffects, "sideEffects");
         Objects.requireNonNull(response, "response");
-        if (changed) sideEffects.markDirty();
-        response.accept(result);
-        if (changed) sideEffects.queueSave();
-        sideEffects.sync();
+        response.accept(operation.result());
+        operation.queuedSave().ifPresent(sideEffects::enqueueSave);
+        if (operation.syncMode() != ProgressSyncMode.NONE) {
+            sideEffects.sync(operation.syncMode());
+        }
+        return operation.result();
     }
 
     interface SideEffects {
-        void markDirty();
+        void enqueueSave(QueuedProgressSave save);
 
-        void queueSave();
-
-        void sync();
+        void sync(ProgressSyncMode mode);
     }
 }
