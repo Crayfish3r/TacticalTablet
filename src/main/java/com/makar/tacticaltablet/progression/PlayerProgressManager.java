@@ -155,6 +155,19 @@ public class PlayerProgressManager {
     private static final DateTimeFormatter BACKUP_FORMAT = DateTimeFormatter
             .ofPattern("yyyy-MM-dd_HH-mm-ss")
             .withZone(ZoneId.systemDefault());
+    private static final ProgressionRules PROGRESSION_RULES = new ProgressionRules(
+            MONSTER_TIER,
+            MAX_CLASS_XP,
+            java.util.Arrays.stream(ClassTier.values()).map(ClassTier::requiredXp).toList()
+    );
+    private static final ProgressService PROGRESS_SERVICE = new ProgressService(new ProgressCatalog(
+            Set.of(INITIAL_BASE_CLASSES),
+            Set.of(BASE_CLASSES),
+            SHOP_CLASS_PRICES,
+            SHOP_CLASS_LEVELS,
+            Set.of(EXCLUSIVE_CLASSES),
+            BASE_UNLOCK_COST
+    ));
 
     private static final Map<String, PlayerProgress> cache = new HashMap<>();
     private static final Map<String, Boolean> dirty = new HashMap<>();
@@ -214,7 +227,7 @@ public class PlayerProgressManager {
     }
 
     public static int normalizePersistedXp(int xp) {
-        return Math.max(0, Math.min(MAX_CLASS_XP, xp));
+        return ProgressPolicy.normalizeExperience(xp, MAX_CLASS_XP);
     }
 
     /** Value-only migration contract for persisted class entries. It never remaps a valid tier ID from v10. */
@@ -393,13 +406,10 @@ public class PlayerProgressManager {
 
         String key = getPlayerKey(player);
         PlayerProgress progress = getOrLoad(player, key);
-        int current = progress.classes.getOrDefault(normalizedClass, 0);
-        int tier = getStoredTier(progress, normalizedClass);
-        int capped = Math.min(getXpCapForTier(tier), safeAdd(current, amount));
-
-        progress.classes.put(normalizedClass, capped);
+        ExperienceMutationResult result = PROGRESS_SERVICE.addExperience(
+                progress, normalizedClass, amount, PROGRESSION_RULES);
         markDirty(key);
-        return Math.max(0, capped - current);
+        return result.awardedExperience();
     }
 
     public static synchronized boolean isXpBoostEnabled(ServerPlayer player) {
@@ -413,9 +423,7 @@ public class PlayerProgressManager {
 
         String key = getPlayerKey(player);
         PlayerProgress progress = getOrLoad(player, key);
-        if (progress.xpBoost == enabled) return;
-
-        progress.xpBoost = enabled;
+        if (!PROGRESS_SERVICE.setFlag(progress, MutableProgressState.Flag.XP_BOOST, enabled)) return;
         markDirty(key);
     }
 
@@ -429,12 +437,10 @@ public class PlayerProgressManager {
         if (server == null || uuid == null) return;
 
         PlayerProgress progress = getOrLoad(server, uuid, lastKnownName);
-        if (progress.xpBoost == enabled) {
+        if (!PROGRESS_SERVICE.setFlag(progress, MutableProgressState.Flag.XP_BOOST, enabled)) {
             saveOffline(uuid, progress);
             return;
         }
-
-        progress.xpBoost = enabled;
         saveOffline(uuid, progress);
     }
 
@@ -449,9 +455,7 @@ public class PlayerProgressManager {
 
         String key = getPlayerKey(player);
         PlayerProgress progress = getOrLoad(player, key);
-        if (progress.sadTromboneKills == enabled) return;
-
-        progress.sadTromboneKills = enabled;
+        if (!PROGRESS_SERVICE.setFlag(progress, MutableProgressState.Flag.SAD_TROMBONE_KILLS, enabled)) return;
         markDirty(key);
     }
 
@@ -465,12 +469,10 @@ public class PlayerProgressManager {
         if (server == null || uuid == null) return;
 
         PlayerProgress progress = getOrLoad(server, uuid, lastKnownName);
-        if (progress.sadTromboneKills == enabled) {
+        if (!PROGRESS_SERVICE.setFlag(progress, MutableProgressState.Flag.SAD_TROMBONE_KILLS, enabled)) {
             saveOffline(uuid, progress);
             return;
         }
-
-        progress.sadTromboneKills = enabled;
         saveOffline(uuid, progress);
     }
 
@@ -480,11 +482,7 @@ public class PlayerProgressManager {
         String normalizedClass = normalizeClass(clazz);
         String key = getPlayerKey(player);
         PlayerProgress progress = getOrLoad(player, key);
-        int value = isShopClass(normalizedClass) ? 0 : normalizePersistedXp(amount);
-        if (isBaseProgressionClass(normalizedClass)) {
-            value = Math.min(value, getXpCapForTier(getStoredTier(progress, normalizedClass)));
-        }
-        progress.classes.put(normalizedClass, value);
+        PROGRESS_SERVICE.setExperience(progress, normalizedClass, amount, PROGRESSION_RULES);
         markDirty(key);
     }
 
@@ -508,12 +506,7 @@ public class PlayerProgressManager {
     }
 
     public static int getLevelForXP(int xp) {
-        int normalizedXp = normalizePersistedXp(xp);
-        ClassTier result = ClassTier.BASIC;
-        for (ClassTier tier : ClassTier.values()) {
-            if (normalizedXp >= tier.requiredXp()) result = tier;
-        }
-        return result.id();
+        return ProgressPolicy.calculateLevel(xp, PROGRESSION_RULES);
     }
 
     public static synchronized boolean isBaseClassUnlocked(ServerPlayer player, String clazz) {
@@ -545,20 +538,12 @@ public class PlayerProgressManager {
 
         String key = getPlayerKey(player);
         PlayerProgress progress = getOrLoad(player, key);
-        if (isBaseClassUnlocked(progress, normalizedClass)) {
-            return ProgressionResult.ALREADY_UNLOCKED;
-        }
+        BaseUnlockResult result = PROGRESS_SERVICE.unlockBaseClass(
+                progress, normalizedClass, progressContext());
+        if (!result.changed()) return mapProgressionStatus(result.status());
 
-        if (progress.coins < BASE_UNLOCK_COST) {
-            return ProgressionResult.NOT_ENOUGH_COINS;
-        }
-
-        progress.coins -= BASE_UNLOCK_COST;
-        progress.unlockedBaseClasses.put(normalizedClass, 1);
-        progress.classes.putIfAbsent(normalizedClass, 0);
-        progress.classTiers.putIfAbsent(normalizedClass, BASIC_TIER);
         markDirty(key);
-        return ProgressionResult.SUCCESS;
+        return mapProgressionStatus(result.status());
     }
 
     public static synchronized ProgressionResult upgradeClassTier(ServerPlayer player, String clazz, int targetTier) {
@@ -572,22 +557,12 @@ public class PlayerProgressManager {
 
         String key = getPlayerKey(player);
         PlayerProgress progress = getOrLoad(player, key);
-        if (!isBaseClassUnlocked(progress, normalizedClass)) {
-            return ProgressionResult.LOCKED;
-        }
+        TierUpgradeResult result = PROGRESS_SERVICE.upgradeTier(
+                progress, normalizedClass, targetTier, progressContext());
+        if (!result.changed()) return mapProgressionStatus(result.status());
 
-        int currentTier = getStoredTier(progress, normalizedClass);
-        int currentXp = progress.classes.getOrDefault(normalizedClass, 0);
-        ProgressionResult validation = evaluateTierUpgrade(currentTier, currentXp, progress.coins, targetTier);
-        if (validation != ProgressionResult.SUCCESS) return validation;
-
-        int cost = getUpgradeCost(targetTier);
-        progress.coins -= cost;
-        progress.classTiers.put(normalizedClass, targetTier);
-        // XP is accumulated independently from the purchased tier and is never reset on upgrade.
-        progress.classes.put(normalizedClass, currentXp);
         markDirty(key);
-        return ProgressionResult.SUCCESS;
+        return mapProgressionStatus(result.status());
     }
 
     public static synchronized void addCoins(ServerPlayer player, int amount) {
@@ -595,7 +570,7 @@ public class PlayerProgressManager {
 
         String key = getPlayerKey(player);
         PlayerProgress progress = getOrLoad(player, key);
-        progress.coins = Math.max(0, safeAdd(progress.coins, amount));
+        PROGRESS_SERVICE.addCoins(progress, amount);
         markDirty(key);
     }
 
@@ -608,7 +583,7 @@ public class PlayerProgressManager {
         if (server == null || uuid == null || amount == 0) return false;
 
         PlayerProgress progress = getOrLoad(server, uuid, lastKnownName);
-        progress.coins = Math.max(0, safeAdd(progress.coins, amount));
+        PROGRESS_SERVICE.addCoins(progress, amount);
         return saveOffline(uuid, progress);
     }
 
@@ -617,14 +592,28 @@ public class PlayerProgressManager {
         if (server == null || uuid == null) return RepositoryResult.failed("Missing coin credit context", null);
         PlayerProgress progress = getOrLoad(server, uuid, lastKnownName);
         normalize(progress);
-        RepositoryResult result = PlayerTransactionReceiptLedger.applyCredit(progress, idempotencyKey, "set_reward", amount,
-                Clock.systemUTC(), () -> saveOffline(uuid, progress));
+        IdempotentCreditResult credit = PROGRESS_SERVICE.applyIdempotentCredit(
+                progress, idempotencyKey, "set_reward", amount, Clock.systemUTC());
+        RepositoryResult result = mapCreditResult(credit);
+        if (credit.status() == IdempotentCreditStatus.APPLIED && !saveOffline(uuid, progress)) {
+            credit.rollback().ifPresent(rollback -> PROGRESS_SERVICE.rollbackIdempotentCredit(progress, rollback));
+            return RepositoryResult.failed("Failed to persist coin credit receipt", null);
+        }
         if (result.status() == RepositoryResult.Status.APPLIED
                 || result.status() == RepositoryResult.Status.ALREADY_APPLIED) {
             ServerPlayer online = server.getPlayerList().getPlayer(uuid);
             if (online != null) ClassXPManager.sync(online);
         }
         return result;
+    }
+
+    static RepositoryResult mapCreditResult(IdempotentCreditResult result) {
+        return switch (result.status()) {
+            case APPLIED -> RepositoryResult.applied();
+            case ALREADY_APPLIED -> RepositoryResult.alreadyApplied();
+            case CONFLICT -> RepositoryResult.conflict(result.diagnostic());
+            case FAILED -> RepositoryResult.failed(result.diagnostic(), null);
+        };
     }
 
     public static synchronized int getCoins(ServerPlayer player) {
@@ -639,7 +628,7 @@ public class PlayerProgressManager {
 
         String key = getPlayerKey(player);
         PlayerProgress progress = getOrLoad(player, key);
-        progress.coins = Math.max(0, amount);
+        PROGRESS_SERVICE.setCoins(progress, amount);
         markDirty(key);
     }
 
@@ -657,7 +646,7 @@ public class PlayerProgressManager {
         if (server == null || uuid == null) return false;
 
         PlayerProgress progress = getOrLoad(server, uuid, lastKnownName);
-        progress.coins = Math.max(0, amount);
+        PROGRESS_SERVICE.setCoins(progress, amount);
         return saveOffline(uuid, progress);
     }
 
@@ -759,7 +748,7 @@ public class PlayerProgressManager {
 
         String key = getPlayerKey(player);
         PlayerProgress progress = getOrLoad(player, key);
-        progress.matchesPlayed = safeAdd(progress.matchesPlayed, 1);
+        PROGRESS_SERVICE.incrementCounter(progress, MutableProgressState.Counter.MATCHES_PLAYED, 1);
         markDirty(key);
     }
 
@@ -775,7 +764,7 @@ public class PlayerProgressManager {
 
         String key = getPlayerKey(player);
         PlayerProgress progress = getOrLoad(player, key);
-        progress.wins = safeAdd(progress.wins, 1);
+        PROGRESS_SERVICE.incrementCounter(progress, MutableProgressState.Counter.WINS, 1);
         markDirty(key);
     }
 
@@ -791,7 +780,7 @@ public class PlayerProgressManager {
 
         String key = getPlayerKey(player);
         PlayerProgress progress = getOrLoad(player, key);
-        progress.kills = safeAdd(progress.kills, 1);
+        PROGRESS_SERVICE.incrementCounter(progress, MutableProgressState.Counter.KILLS, 1);
         markDirty(key);
     }
 
@@ -807,7 +796,7 @@ public class PlayerProgressManager {
 
         String key = getPlayerKey(player);
         PlayerProgress progress = getOrLoad(player, key);
-        progress.deaths = safeAdd(progress.deaths, 1);
+        PROGRESS_SERVICE.incrementCounter(progress, MutableProgressState.Counter.DEATHS, 1);
         markDirty(key);
     }
 
@@ -834,28 +823,47 @@ public class PlayerProgressManager {
         if (MapSetManager.isCompetitiveSet()) return PurchaseResult.NOT_PURCHASABLE;
 
         String normalizedClass = normalizeClass(clazz);
-        int price = getShopPrice(normalizedClass);
-
-        if (price <= 0) {
-            return PurchaseResult.NOT_PURCHASABLE;
-        }
+        if (getShopPrice(normalizedClass) <= 0) return PurchaseResult.NOT_PURCHASABLE;
 
         String key = getPlayerKey(player);
         PlayerProgress progress = getOrLoad(player, key);
+        ProgressPurchaseResult purchase = PROGRESS_SERVICE.purchaseClass(
+                progress,
+                normalizedClass,
+                progressContext()
+        );
+        PurchaseResult legacyResult = mapPurchaseResult(purchase);
+        if (!purchase.successful()) return legacyResult;
 
-        if (progress.purchasedClasses.getOrDefault(normalizedClass, 0) > 0) {
-            return PurchaseResult.ALREADY_OWNED;
-        }
-
-        if (progress.coins < price) {
-            return PurchaseResult.NOT_ENOUGH_COINS;
-        }
-
-        progress.coins -= price;
-        progress.purchasedClasses.put(normalizedClass, 1);
-        progress.classes.put(normalizedClass, 0);
         markDirty(key);
-        return PurchaseResult.PURCHASED;
+        return legacyResult;
+    }
+
+    static PurchaseResult mapPurchaseResult(ProgressPurchaseResult result) {
+        if (result.successful()) return PurchaseResult.PURCHASED;
+        return switch (result.failure()) {
+            case ALREADY_OWNED -> PurchaseResult.ALREADY_OWNED;
+            case INSUFFICIENT_FUNDS -> PurchaseResult.NOT_ENOUGH_COINS;
+            case INVALID_ITEM -> PurchaseResult.NOT_PURCHASABLE;
+            case NONE -> throw new IllegalArgumentException("Rejected purchase cannot have NONE failure");
+        };
+    }
+
+    static ProgressionResult mapProgressionStatus(ProgressionStatus status) {
+        return switch (status) {
+            case SUCCESS -> ProgressionResult.SUCCESS;
+            case ALREADY_UNLOCKED -> ProgressionResult.ALREADY_UNLOCKED;
+            case LOCKED -> ProgressionResult.LOCKED;
+            case NOT_ENOUGH_COINS -> ProgressionResult.NOT_ENOUGH_COINS;
+            case NOT_ENOUGH_XP -> ProgressionResult.NOT_ENOUGH_XP;
+            case INVALID_CLASS -> ProgressionResult.INVALID_CLASS;
+            case MAX_TIER -> ProgressionResult.MAX_TIER;
+            case WRONG_TIER -> ProgressionResult.WRONG_TIER;
+        };
+    }
+
+    private static ProgressContext progressContext() {
+        return new ProgressContext(MapSetManager.isCompetitiveSet());
     }
 
     public static synchronized boolean isExclusiveClassGranted(ServerPlayer player, String clazz) {
@@ -896,12 +904,12 @@ public class PlayerProgressManager {
         }
 
         PlayerProgress progress = getOrLoad(server, uuid, lastKnownName);
-        return grantExclusiveClassForPersistence(
-                progress.purchasedClasses,
-                progress.classes,
-                clazz,
-                () -> saveOffline(uuid, progress)
-        );
+        ExclusiveUnlockResult result = PROGRESS_SERVICE.grantExclusiveClass(progress, clazz);
+        if (!result.changed()) return mapExclusiveUnlockResult(result);
+        if (saveOffline(uuid, progress)) return mapExclusiveUnlockResult(result);
+
+        result.rollback().ifPresent(rollback -> PROGRESS_SERVICE.rollbackExclusiveClass(progress, rollback));
+        return ExclusiveClassGrantResult.SAVE_FAILED;
     }
 
     static ExclusiveClassGrantResult grantExclusiveClassForPersistence(
@@ -910,39 +918,38 @@ public class PlayerProgressManager {
             String clazz,
             BooleanSupplier save
     ) {
-        String normalizedClass = normalizeClass(clazz);
-        if (purchasedClasses == null || classes == null || save == null || !isExclusiveClass(normalizedClass)) {
+        if (purchasedClasses == null || classes == null || save == null) {
             return ExclusiveClassGrantResult.INVALID_CLASS;
         }
-        if (purchasedClasses.getOrDefault(normalizedClass, 0) > 0) {
-            return ExclusiveClassGrantResult.ALREADY_OWNED;
-        }
+        ExclusiveUnlockState state = exclusiveUnlockState(purchasedClasses, classes);
+        ExclusiveUnlockResult result = PROGRESS_SERVICE.grantExclusiveClass(state, clazz);
+        if (!result.changed()) return mapExclusiveUnlockResult(result);
+        if (save.getAsBoolean()) return mapExclusiveUnlockResult(result);
 
-        Integer previousPurchasedValue = purchasedClasses.get(normalizedClass);
-        boolean xpEntryExisted = classes.containsKey(normalizedClass);
-        Integer previousXpValue = classes.get(normalizedClass);
-
-        purchasedClasses.put(normalizedClass, 1);
-        classes.putIfAbsent(normalizedClass, 0);
-        if (save.getAsBoolean()) {
-            return ExclusiveClassGrantResult.GRANTED;
-        }
-
-        restoreMapValue(purchasedClasses, normalizedClass, previousPurchasedValue);
-        if (xpEntryExisted) {
-            classes.put(normalizedClass, previousXpValue);
-        } else {
-            classes.remove(normalizedClass);
-        }
+        result.rollback().ifPresent(rollback -> PROGRESS_SERVICE.rollbackExclusiveClass(state, rollback));
         return ExclusiveClassGrantResult.SAVE_FAILED;
     }
 
-    private static void restoreMapValue(Map<String, Integer> values, String key, Integer previousValue) {
-        if (previousValue == null) {
-            values.remove(key);
-        } else {
-            values.put(key, previousValue);
-        }
+    static ExclusiveClassGrantResult mapExclusiveUnlockResult(ExclusiveUnlockResult result) {
+        return switch (result.status()) {
+            case GRANTED -> ExclusiveClassGrantResult.GRANTED;
+            case ALREADY_OWNED -> ExclusiveClassGrantResult.ALREADY_OWNED;
+            case INVALID_CLASS -> ExclusiveClassGrantResult.INVALID_CLASS;
+        };
+    }
+
+    private static ExclusiveUnlockState exclusiveUnlockState(
+            Map<String, Integer> purchasedClasses,
+            Map<String, Integer> classes
+    ) {
+        return new ExclusiveUnlockState() {
+            public ProgressEntry experience(String classId) { return ProgressEntry.from(classes.get(classId)); }
+            public void experience(String classId, int value) { classes.put(classId, value); }
+            public void removeExperience(String classId) { classes.remove(classId); }
+            public ProgressEntry purchase(String classId) { return ProgressEntry.from(purchasedClasses.get(classId)); }
+            public void purchase(String classId, int value) { purchasedClasses.put(classId, value); }
+            public void removePurchase(String classId) { purchasedClasses.remove(classId); }
+        };
     }
     public static synchronized Map<String, Integer> getPurchasedClasses(ServerPlayer player) {
         Map<String, Integer> result = new HashMap<>();
@@ -1035,7 +1042,7 @@ public class PlayerProgressManager {
 
         String key = getPlayerKey(player);
         PlayerProgress progress = getOrLoad(player, key);
-        progress.battlePassXp = safeAdd(progress.battlePassXp, amount);
+        PROGRESS_SERVICE.incrementCounter(progress, MutableProgressState.Counter.BATTLE_PASS_XP, amount);
         markDirty(key);
     }
 
@@ -1104,7 +1111,7 @@ public class PlayerProgressManager {
         if (playersRoot == null || backupsRoot == null || persistenceExecutor == null) return;
         if (!backupCoordinator.tryStart()) return;
 
-        List<PlayerProgressSnapshot> snapshots = new ArrayList<>();
+        List<ProgressSnapshot> snapshots = new ArrayList<>();
         for (Map.Entry<String, PlayerProgress> entry : cache.entrySet()) {
             PlayerProgress progress = entry.getValue();
             progress.lastSeen = Instant.now().toEpochMilli();
@@ -1451,7 +1458,7 @@ public class PlayerProgressManager {
         return enqueueSnapshot(key, progress, snapshot(key, progress, ++nextSnapshotRevision), false);
     }
 
-    private static SaveTicket enqueueSnapshot(String key, PlayerProgress progress, PlayerProgressSnapshot snapshot) {
+    private static SaveTicket enqueueSnapshot(String key, PlayerProgress progress, ProgressSnapshot snapshot) {
         return enqueueSnapshot(key, progress, snapshot, false);
     }
 
@@ -1459,7 +1466,7 @@ public class PlayerProgressManager {
         return enqueueSnapshot(key, progress, snapshot(key, progress, ++nextSnapshotRevision), finalSnapshot);
     }
 
-    private static SaveTicket enqueueSnapshot(String key, PlayerProgress progress, PlayerProgressSnapshot snapshot, boolean finalSnapshot) {
+    private static SaveTicket enqueueSnapshot(String key, PlayerProgress progress, ProgressSnapshot snapshot, boolean finalSnapshot) {
         if (persistenceExecutor == null || playersRoot == null) {
             markDirty(key);
             return null;
@@ -1496,8 +1503,8 @@ public class PlayerProgressManager {
         }
     }
 
-    private static PlayerProgressSnapshot snapshot(String key, PlayerProgress progress, long revision) {
-        return new PlayerProgressSnapshot(key, revision, new PlayerProgressData(
+    private static ProgressSnapshot snapshot(String key, PlayerProgress progress, long revision) {
+        return new ProgressSnapshot(key, revision, new ProgressSnapshot.Data(
                 progress.dataVersion,
                 progress.name,
                 progress.uuid,
@@ -1555,7 +1562,7 @@ public class PlayerProgressManager {
         progress.kills = Math.max(0, progress.kills);
         progress.deaths = Math.max(0, progress.deaths);
         progress.matchesPlayed = Math.max(0, progress.matchesPlayed);
-        progress.coins = Math.max(0, progress.coins);
+        progress.coins = ProgressPolicy.normalizeCoins(progress.coins);
         progress.battlePassXp = Math.max(0, progress.battlePassXp);
 
         progress.classes = normalizeIntegerMap(progress.classes);
@@ -1662,20 +1669,7 @@ public class PlayerProgressManager {
     }
 
     private static Map<String, Integer> normalizeIntegerMap(Map<String, Integer> input) {
-        Map<String, Integer> result = new HashMap<>();
-
-        if (input == null) {
-            return result;
-        }
-
-        for (Map.Entry<String, Integer> entry : input.entrySet()) {
-            String key = normalizeClass(entry.getKey());
-            if (key.isBlank()) continue;
-
-            result.put(key, Math.max(0, entry.getValue() == null ? 0 : entry.getValue()));
-        }
-
-        return result;
+        return ProgressPolicy.normalizeNonNegativeValues(input);
     }
 
     private static String normalizeClass(String clazz) {
@@ -1736,7 +1730,7 @@ public class PlayerProgressManager {
             return false;
         }
 
-        PlayerProgressSnapshot snapshot = snapshot(key, progress, ++nextSnapshotRevision);
+        ProgressSnapshot snapshot = snapshot(key, progress, ++nextSnapshotRevision);
         SaveTicket ticket = enqueueSnapshot(key, progress, snapshot);
         boolean saved = awaitTicket(ticket, key);
         if (saved) {
@@ -1868,51 +1862,14 @@ public class PlayerProgressManager {
     }
 
     private static int safeAdd(int current, int amount) {
-        if (amount > 0 && current > Integer.MAX_VALUE - amount) {
-            return Integer.MAX_VALUE;
-        }
-
-        if (amount < 0 && current < Integer.MIN_VALUE - amount) {
-            return Integer.MIN_VALUE;
-        }
-
-        return current + amount;
-    }
-
-    /** Immutable, Minecraft-free payload handed to the persistence thread. */
-    static record PlayerProgressSnapshot(String key, long revision, PlayerProgressData data) {
-        PlayerProgressSnapshot {
-            Objects.requireNonNull(key, "key");
-            Objects.requireNonNull(data, "data");
-        }
-    }
-
-    /** JSON-compatible immutable copy of a player progress document. */
-    static record PlayerProgressData(
-            int dataVersion, String name, String uuid,
-            Map<String, Integer> classes, Map<String, Integer> classTiers, Map<String, Integer> unlockedBaseClasses,
-            int wins, int kills, int deaths, int matchesPlayed, int coins, int battlePassXp,
-            boolean xpBoost, boolean sadTromboneKills,
-            Map<String, Integer> purchasedClasses, Map<String, Integer> donations, Map<String, Integer> stats,
-            List<AppliedTransactionReceipt> appliedTransactionReceipts,
-            long firstSeen, long lastSeen
-    ) {
-        PlayerProgressData {
-            classes = Map.copyOf(classes);
-            classTiers = Map.copyOf(classTiers);
-            unlockedBaseClasses = Map.copyOf(unlockedBaseClasses);
-            purchasedClasses = Map.copyOf(purchasedClasses);
-            donations = Map.copyOf(donations);
-            stats = Map.copyOf(stats);
-            appliedTransactionReceipts = List.copyOf(appliedTransactionReceipts);
-        }
+        return ProgressPolicy.saturatingAdd(current, amount);
     }
 
     private static final class PlayerWriteTask implements ModPersistenceExecutor.WriteTask {
         private final Path target;
-        private final PlayerProgressSnapshot snapshot;
+        private final ProgressSnapshot snapshot;
 
-        private PlayerWriteTask(Path target, PlayerProgressSnapshot snapshot) {
+        private PlayerWriteTask(Path target, ProgressSnapshot snapshot) {
             this.target = target;
             this.snapshot = snapshot;
         }
@@ -1938,7 +1895,7 @@ public class PlayerProgressManager {
             Path playersRoot,
             Path backupsRoot,
             String timestamp,
-            List<PlayerProgressSnapshot> players,
+            List<ProgressSnapshot> players,
             long revision
     ) {
         BackupSnapshot {
@@ -1985,7 +1942,7 @@ public class PlayerProgressManager {
         // Existing offline players are copied first; active players are then replaced by the agreed snapshots.
         copyJsonFiles(snapshot.playersRoot(), temporaryPlayers);
         List<String> files = new ArrayList<>();
-        for (PlayerProgressSnapshot player : snapshot.players()) {
+        for (ProgressSnapshot player : snapshot.players()) {
             Path target = temporaryPlayers.resolve(player.key() + ".json");
             FileSaveResult result = FILE_STORE.write(target, writer -> GSON.toJson(player.data(), writer));
             if (result.status() != FileSaveResult.Status.SUCCESS) {
@@ -2057,7 +2014,7 @@ public class PlayerProgressManager {
         return name.endsWith(".tmp") || name.contains(".incomplete");
     }
 
-    private static final class PlayerProgress implements PlayerTransactionReceiptLedger.State {
+    private static final class PlayerProgress implements PlayerTransactionReceiptLedger.State, MutableProgressState {
         private int dataVersion = DATA_VERSION;
         private String name = "";
         private String uuid = "";
@@ -2097,6 +2054,143 @@ public class PlayerProgressManager {
         @Override
         public void receipts(List<AppliedTransactionReceipt> value) {
             appliedTransactionReceipts = value == null ? new ArrayList<>() : value;
+        }
+
+        @Override
+        public ProgressEntry experience(String classId) {
+            return ProgressEntry.from(classes.get(classId));
+        }
+
+        @Override
+        public void experience(String classId, int value) {
+            classes.put(classId, value);
+        }
+
+        @Override
+        public void removeExperience(String classId) {
+            classes.remove(classId);
+        }
+
+        @Override
+        public ProgressEntry tier(String classId) {
+            return ProgressEntry.from(classTiers.get(classId));
+        }
+
+        @Override
+        public void tier(String classId, int value) {
+            classTiers.put(classId, value);
+        }
+
+        @Override
+        public ProgressEntry baseUnlock(String classId) {
+            return ProgressEntry.from(unlockedBaseClasses.get(classId));
+        }
+
+        @Override
+        public void baseUnlock(String classId, int value) {
+            unlockedBaseClasses.put(classId, value);
+        }
+
+        @Override
+        public void removeBaseUnlock(String classId) {
+            unlockedBaseClasses.remove(classId);
+        }
+
+        @Override
+        public ProgressEntry purchase(String classId) {
+            return ProgressEntry.from(purchasedClasses.get(classId));
+        }
+
+        @Override
+        public void purchase(String classId, int value) {
+            purchasedClasses.put(classId, value);
+        }
+
+        @Override
+        public void removePurchase(String classId) {
+            purchasedClasses.remove(classId);
+        }
+
+        @Override
+        public int counter(MutableProgressState.Counter counter) {
+            return switch (counter) {
+                case WINS -> wins;
+                case KILLS -> kills;
+                case DEATHS -> deaths;
+                case MATCHES_PLAYED -> matchesPlayed;
+                case BATTLE_PASS_XP -> battlePassXp;
+            };
+        }
+
+        @Override
+        public void counter(MutableProgressState.Counter counter, int value) {
+            switch (counter) {
+                case WINS -> wins = value;
+                case KILLS -> kills = value;
+                case DEATHS -> deaths = value;
+                case MATCHES_PLAYED -> matchesPlayed = value;
+                case BATTLE_PASS_XP -> battlePassXp = value;
+            }
+        }
+
+        @Override
+        public boolean flag(MutableProgressState.Flag flag) {
+            return switch (flag) {
+                case XP_BOOST -> xpBoost;
+                case SAD_TROMBONE_KILLS -> sadTromboneKills;
+            };
+        }
+
+        @Override
+        public void flag(MutableProgressState.Flag flag, boolean value) {
+            switch (flag) {
+                case XP_BOOST -> xpBoost = value;
+                case SAD_TROMBONE_KILLS -> sadTromboneKills = value;
+            }
+        }
+
+        @Override
+        public Optional<ProgressReceipt> receipt(String receiptId) {
+            if (receiptId == null) return Optional.empty();
+            for (AppliedTransactionReceipt receipt : appliedTransactionReceipts) {
+                if (receipt != null && receiptId.equals(receipt.transactionId)) {
+                    return Optional.of(toProgressReceipt(receipt));
+                }
+            }
+            return Optional.empty();
+        }
+
+        @Override
+        public void addReceipt(ProgressReceipt receipt) {
+            appliedTransactionReceipts.add(toAppliedReceipt(receipt));
+        }
+
+        @Override
+        public boolean removeReceipt(ProgressReceipt receipt) {
+            return appliedTransactionReceipts.removeIf(candidate -> candidate != null
+                    && toProgressReceipt(candidate).equals(receipt));
+        }
+
+        private static ProgressReceipt toProgressReceipt(AppliedTransactionReceipt receipt) {
+            return new ProgressReceipt(
+                    receipt.transactionId,
+                    receipt.operationType,
+                    receipt.appliedAt,
+                    receipt.expectedOldBalance,
+                    receipt.newBalance,
+                    receipt.payloadHash
+            );
+        }
+
+        private static AppliedTransactionReceipt toAppliedReceipt(ProgressReceipt receipt) {
+            AppliedTransactionReceipt applied = new AppliedTransactionReceipt();
+            applied.transactionId = receipt.transactionId();
+            applied.operationType = receipt.operationType();
+            applied.appliedAt = receipt.appliedAt();
+            applied.expectedOldBalance = receipt.expectedOldBalance();
+            applied.newBalance = receipt.newBalance();
+            applied.payloadHash = receipt.payloadHash();
+            return applied;
         }
     }
 

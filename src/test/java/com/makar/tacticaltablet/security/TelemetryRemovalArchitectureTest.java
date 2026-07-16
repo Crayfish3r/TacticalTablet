@@ -40,12 +40,19 @@ class TelemetryRemovalArchitectureTest {
     @Test
     void tabletValidationAndRateLimitStillRejectBeforeAction() throws IOException {
         String source = Files.readString(MAIN_JAVA.resolve("com/makar/tacticaltablet/tablet/net/TabletPacket.java"));
+        String normalized = source.replace("\r\n", "\n");
 
-        assertTrue(source.contains("if (actionId < MIN_ACTION_ID || actionId > MAX_ACTION_ID)"));
-        assertTrue(source.contains("if (!PacketHandler.allowC2S(player, PacketHandler.C2SAction.TABLET))"));
-        assertTrue(source.contains("if (!InventoryManager.hasTablet(player))"));
-        assertTrue(source.contains("LobbyManager.sync(player);\n                return;"));
-        assertTrue(source.contains("RtpTimerManager.forceRtp(player)"));
+        int actionValidation = normalized.indexOf("if (actionId < MIN_ACTION_ID || actionId > MAX_ACTION_ID)");
+        int rateLimit = normalized.indexOf("if (!PacketHandler.allowC2S(player, PacketHandler.C2SAction.TABLET))");
+        int rateLimitRejection = normalized.indexOf("LobbyManager.sync(player);\n                return;", rateLimit);
+        int inventoryValidation = normalized.indexOf("if (!InventoryManager.hasTablet(player))");
+        int sensitiveAction = normalized.indexOf("RtpTimerManager.forceRtp(player)");
+
+        assertTrue(actionValidation >= 0);
+        assertTrue(rateLimit > actionValidation);
+        assertTrue(rateLimitRejection > rateLimit);
+        assertTrue(inventoryValidation > rateLimitRejection);
+        assertTrue(sensitiveAction > inventoryValidation);
     }
 
     @Test
