@@ -6,7 +6,11 @@ import com.makar.tacticaltablet.tablet.net.ContractTrackerStatePacket;
 import com.makar.tacticaltablet.tablet.net.PacketHandler;
 import com.makar.tacticaltablet.tablet.net.TrackerWatchPacket;
 import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.blaze3d.vertex.BufferBuilder;
+import com.mojang.blaze3d.vertex.DefaultVertexFormat;
+import com.mojang.blaze3d.vertex.Tesselator;
 import com.mojang.blaze3d.vertex.VertexConsumer;
+import com.mojang.blaze3d.vertex.VertexFormat;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
@@ -257,13 +261,12 @@ public class ContractTrackerScreen extends Screen {
     }
 
     private void renderDirectionRay(GuiGraphics g, float centerX, float centerY, double directionX, double directionY) {
-        float tipX = centerX + (float) directionX * 6.0F;
-        float tipY = centerY + (float) directionY * 6.0F;
-        float endX = tipX + (float) directionX * 14.0F;
-        float endY = tipY + (float) directionY * 14.0F;
+        float endX = centerX - (float) directionX * 5.0F;
+        float endY = centerY - (float) directionY * 5.0F;
+        float startX = endX - (float) directionX * 10.0F;
+        float startY = endY - (float) directionY * 10.0F;
 
-        drawLineQuad(g, tipX, tipY, endX, endY, 3.5F, 0xFF14200F);
-        drawLineQuad(g, tipX, tipY, endX, endY, 1.5F, 0xFFF0F5E8);
+        drawLineQuad(g, startX, startY, endX, endY, 1.5F, 0xFFF0F5E8);
     }
 
     private void renderPlayerTriangle(
@@ -273,8 +276,8 @@ public class ContractTrackerScreen extends Screen {
             double directionX,
             double directionY
     ) {
-        drawTriangle(g, centerX, centerY, directionX, directionY, 6.0F, 4.5F, 0xFF14200F);
-        drawTriangle(g, centerX, centerY, directionX, directionY, 4.5F, 2.75F, 0xFFF0F5E8);
+        drawTriangle(g, centerX, centerY, directionX, directionY, 6.0D, 5.0D, 0xFF14200F);
+        drawTriangle(g, centerX, centerY, directionX, directionY, 5.25D, 4.0D, 0xFFF0F5E8);
     }
 
     private void drawLineQuad(GuiGraphics g, float startX, float startY, float endX, float endY, float width, int color) {
@@ -299,23 +302,36 @@ public class ContractTrackerScreen extends Screen {
             float centerY,
             double directionX,
             double directionY,
-            float halfLength,
-            float halfBaseWidth,
+            double halfLength,
+            double halfBaseWidth,
             int color
     ) {
-        float tipX = centerX + (float) directionX * halfLength;
-        float tipY = centerY + (float) directionY * halfLength;
-        float baseX = centerX - (float) directionX * halfLength;
-        float baseY = centerY - (float) directionY * halfLength;
-        float perpendicularX = -(float) directionY * halfBaseWidth;
-        float perpendicularY = (float) directionX * halfBaseWidth;
+        double tipX = centerX + directionX * halfLength;
+        double tipY = centerY + directionY * halfLength;
+        double baseX = centerX - directionX * halfLength;
+        double baseY = centerY - directionY * halfLength;
+        double perpendicularX = -directionY;
+        double perpendicularY = directionX;
+        double leftX = baseX + perpendicularX * halfBaseWidth;
+        double leftY = baseY + perpendicularY * halfBaseWidth;
+        double rightX = baseX - perpendicularX * halfBaseWidth;
+        double rightY = baseY - perpendicularY * halfBaseWidth;
 
-        drawQuad(g,
-                tipX, tipY,
-                baseX + perpendicularX, baseY + perpendicularY,
-                baseX - perpendicularX, baseY - perpendicularY,
-                baseX - perpendicularX, baseY - perpendicularY,
-                color);
+        g.flush();
+        RenderSystem.setShader(GameRenderer::getPositionColorShader);
+        Matrix4f matrix = g.pose().last().pose();
+        Tesselator tesselator = Tesselator.getInstance();
+        BufferBuilder vertices = tesselator.getBuilder();
+        vertices.begin(VertexFormat.Mode.TRIANGLES, DefaultVertexFormat.POSITION_COLOR);
+
+        int alpha = color >>> 24;
+        int red = color >> 16 & 0xFF;
+        int green = color >> 8 & 0xFF;
+        int blue = color & 0xFF;
+        addVertex(vertices, matrix, (float) tipX, (float) tipY, red, green, blue, alpha);
+        addVertex(vertices, matrix, (float) rightX, (float) rightY, red, green, blue, alpha);
+        addVertex(vertices, matrix, (float) leftX, (float) leftY, red, green, blue, alpha);
+        tesselator.end();
     }
 
     private void drawQuad(
