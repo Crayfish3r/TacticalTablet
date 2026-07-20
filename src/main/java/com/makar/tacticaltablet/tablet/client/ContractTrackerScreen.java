@@ -6,13 +6,17 @@ import com.makar.tacticaltablet.tablet.net.ContractTrackerStatePacket;
 import com.makar.tacticaltablet.tablet.net.PacketHandler;
 import com.makar.tacticaltablet.tablet.net.TrackerWatchPacket;
 import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.renderer.GameRenderer;
+import net.minecraft.client.renderer.RenderType;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.util.Mth;
+import org.joml.Matrix4f;
 
 import java.util.List;
 
@@ -76,7 +80,7 @@ public class ContractTrackerScreen extends Screen {
         }
 
         drawInfo(g, x, y);
-        drawContractMap(g, x + 36, y + 110, MAP_SIZE);
+        drawContractMap(g, x + 36, y + 110, MAP_SIZE, partialTick);
 
         super.render(g, mouseX, mouseY, partialTick);
     }
@@ -187,7 +191,7 @@ public class ContractTrackerScreen extends Screen {
                 left, top + 60, 0xFF9FC36A, false);
     }
 
-    private void drawContractMap(GuiGraphics g, int mapX, int mapY, int size) {
+    private void drawContractMap(GuiGraphics g, int mapX, int mapY, int size, float partialTick) {
         g.fill(mapX, mapY, mapX + size, mapY + size, 0xAA050805);
 
         int gridColor = 0x6614260F;
@@ -222,7 +226,146 @@ public class ContractTrackerScreen extends Screen {
 
         int playerX = toMapX(mapX, size, ContractClientState.getPlayerX());
         int playerY = toMapY(mapY, size, ContractClientState.getPlayerZ());
-        drawDot(g, playerX, playerY, 3, 0xFFFFFFFF);
+        renderPlayerDirectionMarker(g, playerX, playerY, mapX, mapY, size, partialTick);
+    }
+
+    private void renderPlayerDirectionMarker(
+            GuiGraphics g,
+            int playerX,
+            int playerY,
+            int mapX,
+            int mapY,
+            int size,
+            float partialTick
+    ) {
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft.player == null) return;
+
+        float yaw = interpolateYaw(minecraft.player.yRotO, minecraft.player.getYRot(), partialTick);
+        double directionX = directionX(yaw);
+        double directionY = directionY(yaw);
+
+        g.flush();
+        g.enableScissor(mapX + 3, mapY + 3, mapX + size - 3, mapY + size - 3);
+        try {
+            renderDirectionRay(g, playerX, playerY, directionX, directionY);
+            renderPlayerTriangle(g, playerX, playerY, directionX, directionY);
+            g.flush();
+        } finally {
+            g.disableScissor();
+        }
+    }
+
+    private void renderDirectionRay(GuiGraphics g, float centerX, float centerY, double directionX, double directionY) {
+        float tipX = centerX + (float) directionX * 6.0F;
+        float tipY = centerY + (float) directionY * 6.0F;
+        float endX = tipX + (float) directionX * 14.0F;
+        float endY = tipY + (float) directionY * 14.0F;
+
+        drawLineQuad(g, tipX, tipY, endX, endY, 3.5F, 0xFF14200F);
+        drawLineQuad(g, tipX, tipY, endX, endY, 1.5F, 0xFFF0F5E8);
+    }
+
+    private void renderPlayerTriangle(
+            GuiGraphics g,
+            float centerX,
+            float centerY,
+            double directionX,
+            double directionY
+    ) {
+        drawTriangle(g, centerX, centerY, directionX, directionY, 6.0F, 4.5F, 0xFF14200F);
+        drawTriangle(g, centerX, centerY, directionX, directionY, 4.5F, 2.75F, 0xFFF0F5E8);
+    }
+
+    private void drawLineQuad(GuiGraphics g, float startX, float startY, float endX, float endY, float width, int color) {
+        float deltaX = endX - startX;
+        float deltaY = endY - startY;
+        float length = Mth.sqrt(deltaX * deltaX + deltaY * deltaY);
+        if (length <= Mth.EPSILON) return;
+
+        float offsetX = -deltaY / length * width / 2.0F;
+        float offsetY = deltaX / length * width / 2.0F;
+        drawQuad(g,
+                startX + offsetX, startY + offsetY,
+                endX + offsetX, endY + offsetY,
+                endX - offsetX, endY - offsetY,
+                startX - offsetX, startY - offsetY,
+                color);
+    }
+
+    private void drawTriangle(
+            GuiGraphics g,
+            float centerX,
+            float centerY,
+            double directionX,
+            double directionY,
+            float halfLength,
+            float halfBaseWidth,
+            int color
+    ) {
+        float tipX = centerX + (float) directionX * halfLength;
+        float tipY = centerY + (float) directionY * halfLength;
+        float baseX = centerX - (float) directionX * halfLength;
+        float baseY = centerY - (float) directionY * halfLength;
+        float perpendicularX = -(float) directionY * halfBaseWidth;
+        float perpendicularY = (float) directionX * halfBaseWidth;
+
+        drawQuad(g,
+                tipX, tipY,
+                baseX + perpendicularX, baseY + perpendicularY,
+                baseX - perpendicularX, baseY - perpendicularY,
+                baseX - perpendicularX, baseY - perpendicularY,
+                color);
+    }
+
+    private void drawQuad(
+            GuiGraphics g,
+            float x1,
+            float y1,
+            float x2,
+            float y2,
+            float x3,
+            float y3,
+            float x4,
+            float y4,
+            int color
+    ) {
+        Matrix4f matrix = g.pose().last().pose();
+        VertexConsumer vertices = g.bufferSource().getBuffer(RenderType.gui());
+        int alpha = color >>> 24;
+        int red = color >> 16 & 0xFF;
+        int green = color >> 8 & 0xFF;
+        int blue = color & 0xFF;
+
+        addVertex(vertices, matrix, x1, y1, red, green, blue, alpha);
+        addVertex(vertices, matrix, x2, y2, red, green, blue, alpha);
+        addVertex(vertices, matrix, x3, y3, red, green, blue, alpha);
+        addVertex(vertices, matrix, x4, y4, red, green, blue, alpha);
+    }
+
+    private void addVertex(
+            VertexConsumer vertices,
+            Matrix4f matrix,
+            float x,
+            float y,
+            int red,
+            int green,
+            int blue,
+            int alpha
+    ) {
+        vertices.vertex(matrix, x, y, 0.0F).color(red, green, blue, alpha).endVertex();
+    }
+
+    static float interpolateYaw(float previousYaw, float currentYaw, float partialTick) {
+        return Mth.rotLerp(partialTick, previousYaw, currentYaw);
+    }
+
+    static double directionX(float yaw) {
+        return -Math.sin(Math.toRadians(yaw));
+    }
+
+    static double directionY(float yaw) {
+        return Math.cos(Math.toRadians(yaw));
     }
 
     private int toMapX(int mapX, int size, int worldX) {
@@ -235,10 +378,6 @@ public class ContractTrackerScreen extends Screen {
         int minZ = ContractClientState.getZoneCenterZ() - ContractClientState.getZoneRadius();
         int maxZ = ContractClientState.getZoneCenterZ() + ContractClientState.getZoneRadius();
         return mapY + Math.round((worldZ - minZ) / (float) Math.max(1, maxZ - minZ) * size);
-    }
-
-    private void drawDot(GuiGraphics g, int cx, int cy, int r, int color) {
-        g.fill(cx - r, cy - r, cx + r + 1, cy + r + 1, color);
     }
 
     private void drawRectOutline(GuiGraphics g, int x, int y, int w, int h, int color) {
