@@ -13,6 +13,9 @@ import com.makar.tacticaltablet.clan.ClanManager;
 import com.makar.tacticaltablet.clan.ClanRejectJoinPacket;
 import com.makar.tacticaltablet.tablet.net.PacketHandler;
 import com.makar.tacticaltablet.tablet.net.TabletPacket;
+import com.makar.tacticaltablet.tablet.ClassCategory;
+import com.makar.tacticaltablet.tablet.ClassDefinition;
+import com.makar.tacticaltablet.tablet.ClassDefinitions;
 import com.makar.tacticaltablet.progression.ClassTier;
 import com.makar.tacticaltablet.progression.PlayerProgressManager;
 import com.mojang.blaze3d.systems.RenderSystem;
@@ -33,6 +36,8 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
 import java.util.function.IntSupplier;
@@ -52,48 +57,6 @@ public class TabletScreen extends Screen {
             new ResourceLocation("tacticaltablet", "textures/gui/button_hover.png");
     private static final ResourceLocation BTN_DISABLED =
             new ResourceLocation("tacticaltablet", "textures/gui/button_disabled.png");
-
-    private static final ResourceLocation BTN_EPIC =
-            new ResourceLocation("tacticaltablet", "textures/gui/button_epic.png");
-    private static final ResourceLocation BTN_EPIC_HOVER =
-            new ResourceLocation("tacticaltablet", "textures/gui/button_hover_epic.png");
-    private static final ResourceLocation BTN_EPIC_DISABLED =
-            new ResourceLocation("tacticaltablet", "textures/gui/button_disabled_epic.png");
-
-    private static final ResourceLocation BTN_RARE =
-            new ResourceLocation("tacticaltablet", "textures/gui/button_rare.png");
-    private static final ResourceLocation BTN_RARE_HOVER =
-            new ResourceLocation("tacticaltablet", "textures/gui/button_hover_rare.png");
-    private static final ResourceLocation BTN_RARE_DISABLED =
-            new ResourceLocation("tacticaltablet", "textures/gui/button_disabled_rare.png");
-
-    private static final ResourceLocation BTN_LEGEND =
-            new ResourceLocation("tacticaltablet", "textures/gui/button_legend.png");
-    private static final ResourceLocation BTN_LEGEND_HOVER =
-            new ResourceLocation("tacticaltablet", "textures/gui/button_hover_legend.png");
-    private static final ResourceLocation BTN_LEGEND_DISABLED =
-            new ResourceLocation("tacticaltablet", "textures/gui/button_disabled_legend.png");
-
-    private static final ResourceLocation BTN_MONSTER =
-            new ResourceLocation("tacticaltablet", "textures/gui/button_monster.png");
-    private static final ResourceLocation BTN_MONSTER_HOVER =
-            new ResourceLocation("tacticaltablet", "textures/gui/button_hover_monster.png");
-    private static final ResourceLocation BTN_MONSTER_DISABLED =
-            new ResourceLocation("tacticaltablet", "textures/gui/button_disabled_monster.png");
-
-    private static final ResourceLocation TP_BTN =
-            new ResourceLocation("tacticaltablet", "textures/gui/tp_button.png");
-    private static final ResourceLocation TP_BTN_HOVER =
-            new ResourceLocation("tacticaltablet", "textures/gui/tp_button_hover.png");
-    private static final ResourceLocation TP_BTN_DISABLED =
-            new ResourceLocation("tacticaltablet", "textures/gui/tp_button_disabled.png");
-
-    private static final ResourceLocation TAB_BTN =
-            new ResourceLocation("tacticaltablet", "textures/gui/tab_button.png");
-    private static final ResourceLocation TAB_BTN_HOVER =
-            new ResourceLocation("tacticaltablet", "textures/gui/tab_button_hover.png");
-    private static final ResourceLocation TAB_BTN_ACTIVE =
-            new ResourceLocation("tacticaltablet", "textures/gui/tab_button_active.png");
 
     private static final ResourceLocation CONFIRM_PANEL =
             new ResourceLocation("tacticaltablet", "textures/gui/confirm_panel.png");
@@ -144,148 +107,75 @@ public class TabletScreen extends Screen {
     private static final int UI_WIDTH = 380;
     private static final int UI_HEIGHT = 220;
 
-    private static final int BTN_W = 160;
-    private static final int BTN_H = 30;
-    private static final int TAB_W = 66;
-    private static final int TAB_H = 20;
+    private static final int NAV_X = 12;
+    private static final int NAV_Y = 14;
+    private static final int NAV_W = 72;
+    private static final int NAV_H = 192;
+    private static final int HEADER_X = 94;
+    private static final int HEADER_Y = 14;
+    private static final int HEADER_W = 184;
+    private static final int HEADER_H = 26;
+    private static final int RTP_X = 286;
+    private static final int RTP_Y = 16;
+    private static final int RTP_W = 78;
+    private static final int RTP_H = 20;
+    private static final int CONTENT_X = 94;
+    private static final int CONTENT_Y = 46;
+    private static final int CONTENT_W = 274;
+    private static final int CONTENT_H = 150;
 
     private static final int CONFIRM_W = 240;
     private static final int CONFIRM_H = 132;
     private static final int CONFIRM_BUTTON_W = 96;
     private static final int CONFIRM_BUTTON_H = 24;
 
-    private static final int OFFSET_X = 23;
-    private static final int OFFSET_Y = 46;
-    private static final int BUTTON_GAP_X = 174;
-    private static final int BUTTON_GAP_Y = 40;
-
-    private static final int INFO_LEFT = 38;
-    private static final int INFO_TOP = 72;
-    private static final int INFO_WIDTH = 292;
+    private static final int INFO_LEFT = CONTENT_X;
+    private static final int INFO_TOP = CONTENT_Y;
+    private static final int INFO_WIDTH = 264;
     private static final int INFO_HEIGHT = 118;
     private static final int INFO_LINE_HEIGHT = 10;
-    private static final int CLAN_LIST_LEFT = 48;
-    private static final int CLAN_LIST_TOP = 74;
-    private static final int CLAN_ROW_W = 284;
+    private static final int CLAN_LIST_LEFT = CONTENT_X;
+    private static final int CLAN_LIST_TOP = CONTENT_Y;
+    private static final int CLAN_ROW_W = 264;
     private static final int CLAN_ROW_H = 22;
     private static final int CLAN_ROW_GAP = 24;
-    private static final int CLAN_CREATE_W = 160;
-    private static final int CLAN_CREATE_H = 30;
+    private static final int CLAN_CREATE_W = 120;
+    private static final int CLAN_CREATE_H = 24;
     private static final int CLAN_BACK_W = 76;
     private static final int CLAN_BACK_H = 22;
     private static final int CLAN_ACTION_W = 120;
     private static final int CLAN_ACTION_H = 24;
     private static final int CLAN_SMALL_W = 58;
     private static final int CLAN_SMALL_H = 18;
-    private static final int CLAN_INFO_LEFT = 48;
-    private static final int CLAN_INFO_TOP = 74;
-    private static final int CLAN_MEMBERS_LEFT = 48;
-    private static final int CLAN_MEMBERS_TOP = 124;
-    private static final int CLAN_MEMBERS_WIDTH = 160;
-    private static final int CLAN_MEMBERS_HEIGHT = 52;
+    private static final int CLAN_INFO_LEFT = CONTENT_X;
+    private static final int CLAN_INFO_TOP = 70;
+    private static final int CLAN_MEMBERS_LEFT = CONTENT_X;
+    private static final int CLAN_MEMBERS_TOP = 120;
+    private static final int CLAN_MEMBERS_WIDTH = 126;
+    private static final int CLAN_MEMBERS_HEIGHT = 58;
     private static final int CLAN_MEMBER_ROW_H = 13;
     private static final int CLAN_VISIBLE_MEMBERS = 3;
-    private static final int CLAN_PENDING_LEFT = 218;
-    private static final int CLAN_PENDING_TOP = 76;
-    private static final int CLAN_PENDING_WIDTH = 148;
-    private static final int CLAN_PENDING_HEIGHT = 74;
+    private static final int CLAN_PENDING_LEFT = 232;
+    private static final int CLAN_PENDING_TOP = 120;
+    private static final int CLAN_PENDING_WIDTH = 132;
+    private static final int CLAN_PENDING_HEIGHT = 58;
     private static final int CLAN_PENDING_ROW_H = 18;
     private static final int CLAN_VISIBLE_PENDING = 3;
-    private static final int CLAN_BOTTOM_BUTTON_Y = 184;
+    private static final int CLAN_BOTTOM_BUTTON_Y = 178;
     private static final String MARINE_CLASS = "marine";
     private static final float GUI_SOUND_VOLUME = 0.0625F;
 
     private static final String SERVER_INFO_TEXT = "";
 
-    private static final TabletAction STORMTROOPER =
-            TabletAction.classKit("\u0428\u0422\u0423\u0420\u041c\u041e\u0412\u0418\u041a", "stormtrooper", 0);
-    private static final TabletAction SNIPER =
-            TabletAction.classKit("\u0421\u041d\u0410\u0419\u041f\u0415\u0420", "sniper", 1);
-    private static final TabletAction SCOUT =
-            TabletAction.classKit("\u0420\u0410\u0417\u0412\u0415\u0414\u0427\u0418\u041a", "scout", 2);
-    private static final TabletAction DRONE_OPERATOR =
-            TabletAction.classKit("\u0414\u0420\u041e\u041d \u041e\u041f.", "droneoperator", 3);
-    private static final TabletAction MORTARMAN =
-            TabletAction.classKit("\u041c\u0418\u041d\u041e\u041c\u0401\u0422\u0427\u0418\u041a", "mortarman", 5);
     private static final TabletAction TELEPORT_RTP =
-            TabletAction.rtp("\u0422\u0415\u041b\u0415\u041f\u041e\u0420\u0422 (RTP)", 7);
-    private static final TabletAction MACHINE_GUNNER =
-            TabletAction.classKit("\u041f\u0423\u041b\u0415\u041c\u0401\u0422\u0427\u0418\u041a", "machinegunner", 8);
-    private static final TabletAction RPG_TROOPER =
-            TabletAction.classKit("\u0420\u041f\u0413-\u0411\u041e\u0415\u0426", "rpgtrooper", 9);
-
-    private static final TabletAction BOOMGUY_SHOP =
-            TabletAction.shopClass("\u041f\u041e\u0414\u0420\u042b\u0412\u041d\u0418\u041a", "boomguy", 4, 500, 2);
-    private static final TabletAction DREAM_SHOP =
-            TabletAction.shopClass("\u0414\u0420\u0418\u041c", "dream", 6, 500, 2);
-    private static final TabletAction TAGILLA_SHOP =
-            TabletAction.shopClass("\u0422\u0410\u0413\u0418\u041b\u041b\u0410", "tagilla", 10, 750, 2);
-    private static final TabletAction BLACK_OPS_SHOP =
-            TabletAction.shopClass("\u0421\u041f\u0415\u0426\u041d\u0410\u0417", "blackops", 11, 1000, 2);
-    private static final TabletAction COWBOY_SHOP =
-            TabletAction.shopClass("\u041a\u041e\u0412\u0411\u041e\u0419", "cowboy", 12, 100, 1);
-    private static final TabletAction SOLIDER_SHOP =
-            TabletAction.shopClass("\u0421\u041e\u041b\u0414\u0410\u0422", "solider", 13, 50, 0);
-    private static final TabletAction REBEL_SHOP =
-            TabletAction.shopClass("\u041f\u041e\u0412\u0421\u0422\u0410\u041d\u0415\u0426", "rebel", 14, 1000, 2);
-    private static final TabletAction SABOTEUR_SHOP =
-            TabletAction.shopClass("\u0414\u0418\u0412\u0415\u0420\u0421\u0410\u041d\u0422", "saboteur", 15, 1000, 2);
-
-    private static final TabletAction KILLER_EXCLUSIVE =
-            TabletAction.exclusiveClass("\u041a\u0418\u041b\u041b\u0415\u0420", "killer", 16);
-    private static final TabletAction MINIBOSS_EXCLUSIVE =
-            TabletAction.exclusiveClass("\u041c\u0418\u041d\u0418-\u0411\u041e\u0421\u0421", "miniboss", 17);
-    private static final TabletAction SHAHED_EXCLUSIVE =
-            TabletAction.exclusiveClass("\u0428\u0410\u0425\u0415\u0414 \u041e\u041f.", "shahed", 18, 2);
-    private static final TabletAction KROT_EXCLUSIVE =
-            TabletAction.exclusiveClass("\u041a\u0420\u041e\u0422", "krot", 19, 1);
-    private static final TabletAction MARINE_EXCLUSIVE =
-            TabletAction.exclusiveClass("\u041c\u041e\u0420\u041f\u0415\u0425", MARINE_CLASS, 20, 2);
-    private static final TabletAction MEDIC_EXCLUSIVE =
-            TabletAction.exclusiveClass("\u041c\u0415\u0414\u0418\u041a", "medic", 21, 2);
-    private static final TabletAction MICROWAVE_EXCLUSIVE =
-            TabletAction.exclusiveClass("\u041c\u0418\u041a\u0420\u041e\u0412\u042d\u0419\u0412", "microwave", 22, 2);
-    private static final TabletAction RAILGUNNER_EXCLUSIVE =
-            TabletAction.exclusiveClass("\u0420\u042d\u0419\u041b-\u0413\u0410\u041d\u041d\u0415\u0420", "railgunner", 23, 2);
-    private static final TabletAction SOON =
-            TabletAction.locked("\u0421\u041a\u041e\u0420\u041e...");
-
-    private static final TabletAction LOCKED =
-            TabletAction.locked("???");
+            TabletAction.rtp("RTP", 7);
 
     private static final TabletPage[] PAGES = new TabletPage[]{
-            new TabletPage("\u041a\u041b\u0410\u0421\u0421\u042b", PageType.ACTIONS, new TabletAction[]{
-                    STORMTROOPER,
-                    SNIPER,
-                    SCOUT,
-                    DRONE_OPERATOR,
-                    MACHINE_GUNNER,
-                    MORTARMAN,
-                    RPG_TROOPER,
-                    TELEPORT_RTP
-            }),
-            new TabletPage("\u041a\u041b\u0410\u041d\u042b", PageType.CLAN, new TabletAction[0]),
-            new TabletPage("\u041f\u0420\u041e\u0424\u0418\u041b\u042c", PageType.PROFILE, new TabletAction[0]),
-            new TabletPage("\u041c\u0410\u0413\u0410\u0417\u0418\u041d", PageType.ACTIONS, new TabletAction[]{
-                    BOOMGUY_SHOP,
-                    DREAM_SHOP,
-                    TAGILLA_SHOP,
-                    BLACK_OPS_SHOP,
-                    COWBOY_SHOP,
-                    SOLIDER_SHOP,
-                    REBEL_SHOP,
-                    SABOTEUR_SHOP
-            }),
-            new TabletPage("\u042d\u041a\u0421\u041a\u041b\u042e\u0417\u0418\u0412", PageType.ACTIONS, new TabletAction[]{
-                    KILLER_EXCLUSIVE,
-                    MINIBOSS_EXCLUSIVE,
-                    SHAHED_EXCLUSIVE,
-                    KROT_EXCLUSIVE,
-                    MARINE_EXCLUSIVE,
-                    MEDIC_EXCLUSIVE,
-                    MICROWAVE_EXCLUSIVE,
-                    RAILGUNNER_EXCLUSIVE
-            })
+            new TabletPage("КЛАССЫ", "classes", PageType.ACTIONS, actionsFor(ClassCategory.BASE)),
+            new TabletPage("МАГАЗИН", "shop", PageType.ACTIONS, actionsFor(ClassCategory.SHOP)),
+            new TabletPage("VIP", "vip", PageType.ACTIONS, actionsFor(ClassCategory.EXCLUSIVE)),
+            new TabletPage("КЛАНЫ", "clans", PageType.CLAN, List.of()),
+            new TabletPage("ПРОФИЛЬ", "profile", PageType.PROFILE, List.of())
     };
 
     private final Set<String> dismissedUpgradePrompts = new HashSet<>();
@@ -295,6 +185,11 @@ public class TabletScreen extends Screen {
     private int pendingScrollOffset;
     private int memberScrollOffset;
     private int selectedClanIndex = -1;
+    private int lastHoveredActionId = -1;
+    private final ScrollableActionGrid<TabletAction> actionGrid =
+            new ScrollableActionGrid<>(this::renderActionCard, this::pressAction);
+    private final TabletNavigationRail navigationRail = new TabletNavigationRail(
+            Arrays.stream(PAGES).map(TabletPage::title).toList(), this::selectPage, () -> playSound(HOVER));
 
 
     public TabletScreen() {
@@ -305,49 +200,19 @@ public class TabletScreen extends Screen {
     protected void init() {
         this.clearWidgets();
 
-        int x0 = (this.width - UI_WIDTH) / 2;
-        int y0 = (this.height - UI_HEIGHT) / 2;
+        int x0 = panelX();
+        int y0 = panelY();
 
-        addPageTabs(x0, y0);
+        navigationRail.setBounds(x0 + NAV_X, y0 + NAV_Y);
+        navigationRail.setSelectedIndex(currentPage);
+        this.addRenderableWidget(new TabletRtpButton(x0 + RTP_X, y0 + RTP_Y));
 
         TabletPage page = PAGES[currentPage];
         if (page.type() == PageType.ACTIONS) {
-            addActionButtons(x0, y0, page);
+            actionGrid.setBounds(x0 + CONTENT_X, y0 + CONTENT_Y);
+            actionGrid.setSection(page.key(), page.actions());
         } else if (page.type() == PageType.CLAN) {
             addClanButtons(x0, y0);
-        }
-    }
-
-    private void addPageTabs(int x0, int y0) {
-        int totalWidth = PAGES.length * TAB_W + (PAGES.length - 1) * 6;
-        int startX = x0 + (UI_WIDTH - totalWidth) / 2;
-        int y = y0 + 17;
-
-        for (int i = 0; i < PAGES.length; i++) {
-            this.addRenderableWidget(new PageTabButton(
-                    startX + i * (TAB_W + 6),
-                    y,
-                    i
-            ));
-        }
-    }
-
-    private void addActionButtons(int x0, int y0, TabletPage page) {
-        TabletAction[] actions = Arrays.copyOf(page.actions(), 8);
-
-        for (int i = 0; i < actions.length; i++) {
-            TabletAction action = actions[i] == null ? LOCKED : actions[i];
-
-            int x = x0 + OFFSET_X + (i % 2 * BUTTON_GAP_X);
-            int y = y0 + OFFSET_Y + (i / 2 * BUTTON_GAP_Y);
-
-            this.addRenderableWidget(new TabletActionButton(
-                    x,
-                    y,
-                    BTN_W,
-                    BTN_H,
-                    action
-            ));
         }
     }
 
@@ -389,8 +254,8 @@ public class TabletScreen extends Screen {
             }
 
             ClanTextureButton createClanButton = new ClanTextureButton(
-                    x0 + 110,
-                    y0 + 184,
+                    x0 + CONTENT_X + (CONTENT_W - CLAN_CREATE_W) / 2,
+                    y0 + 172,
                     CLAN_CREATE_W,
                     CLAN_CREATE_H,
                     CLAN_CREATE_BUTTON,
@@ -406,8 +271,8 @@ public class TabletScreen extends Screen {
 
         ClanListPacket.ClanEntry clan = clans.get(selectedClanIndex);
         this.addRenderableWidget(new ClanTextureButton(
-                x0 + 38,
-                y0 + 50,
+                x0 + CONTENT_X,
+                y0 + 46,
                 CLAN_BACK_W,
                 CLAN_BACK_H,
                 CLAN_BACK_BUTTON,
@@ -518,12 +383,6 @@ public class TabletScreen extends Screen {
     public void tick() {
         super.tick();
 
-        for (var widget : this.renderables) {
-            if (widget instanceof TabletActionButton button) {
-                button.updateState();
-            }
-        }
-
         if (TabletClientState.shouldClose()) {
             Minecraft.getInstance().setScreen(null);
             TabletClientState.resetCloseFlag();
@@ -534,17 +393,27 @@ public class TabletScreen extends Screen {
     public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
         this.renderBackground(g);
 
-        int x = (this.width - UI_WIDTH) / 2;
-        int y = (this.height - UI_HEIGHT) / 2;
+        int x = panelX();
+        int y = panelY();
 
         RenderSystem.setShader(GameRenderer::getPositionTexShader);
         ResourceLocation panel = getPanelTexture();
         RenderSystem.setShaderTexture(0, panel);
         g.blit(panel, x, y, 0, 0, UI_WIDTH, UI_HEIGHT, UI_WIDTH, UI_HEIGHT);
 
+        renderShell(g, x, y);
+
         renderPageContent(g, x, y);
 
+        if (PAGES[currentPage].type() == PageType.ACTIONS) {
+            actionGrid.render(g, mouseX, mouseY, partialTick);
+        }
+        navigationRail.render(g, mouseX, mouseY);
+        renderFooter(g, x, y);
+
         super.render(g, mouseX, mouseY, partialTick);
+
+        renderHoverFeedback(g, mouseX, mouseY);
     }
 
     private void renderPageContent(GuiGraphics g, int x, int y) {
@@ -561,8 +430,7 @@ public class TabletScreen extends Screen {
         }
 
         if (page.type() == PageType.PROFILE) {
-            drawHeader(g, x, y, "\u041f\u0440\u043e\u0444\u0438\u043b\u044c");
-            drawInfoLine(g, x, y, 0, "\u041c\u043e\u043d\u0435\u0442\u044b", TabletClientState.getCoins() + " \u043c", 0xFFFFD966);
+            drawInfoLine(g, x, y, 0, "\u041c\u043e\u043d\u0435\u0442\u044b", TabletClientState.getCoins() + " \u043c", 0xFFE7C76A);
             drawInfoLine(g, x, y, 1, "\u041f\u043e\u0431\u0435\u0434\u044b", String.valueOf(TabletClientState.getWins()));
             drawInfoLine(g, x, y, 2, "\u041c\u0430\u0442\u0447\u0438", String.valueOf(TabletClientState.getMatchesPlayed()));
             drawInfoLine(g, x, y, 3, "\u0423\u0431\u0438\u0439\u0441\u0442\u0432\u0430", String.valueOf(TabletClientState.getKills()));
@@ -570,6 +438,39 @@ public class TabletScreen extends Screen {
             drawInfoLine(g, x, y, 5, "KDA", TabletClientState.getKdaText());
             drawInfoLine(g, x, y, 6, "\u041f\u0440\u043e\u0433\u0440\u0435\u0441\u0441", TabletClientState.getCareerProgressPercent() + "%");
         }
+    }
+
+    @Override
+    public void removed() {
+        RenderSystem.disableScissor();
+        super.removed();
+    }
+
+    private void renderShell(GuiGraphics g, int x, int y) {
+        g.fill(x + NAV_X, y + NAV_Y, x + NAV_X + NAV_W, y + NAV_Y + NAV_H, 0xE6101713);
+        g.fill(x + HEADER_X, y + HEADER_Y, x + HEADER_X + HEADER_W, y + HEADER_Y + HEADER_H, 0xE618231C);
+        g.fill(x + CONTENT_X, y + CONTENT_Y, x + CONTENT_X + CONTENT_W, y + CONTENT_Y + CONTENT_H, 0xE6101713);
+        g.fill(x + 94, y + 200, x + 364, y + 210, 0xCC18231C);
+        g.fill(x + NAV_X + NAV_W - 1, y + NAV_Y, x + NAV_X + NAV_W, y + NAV_Y + NAV_H, 0xFF496454);
+        drawHeader(g, x, y, PAGES[currentPage].title());
+    }
+
+    private void renderFooter(GuiGraphics g, int x, int y) {
+        TabletPage page = PAGES[currentPage];
+        String footer;
+        if (page.type() == PageType.ACTIONS) {
+            int rows = ScrollableGridLayout.rowCount(page.actions().size());
+            footer = page.actions().size() + " классов";
+            if (rows > ScrollableGridLayout.VISIBLE_ROWS) {
+                footer += " • колесо: ряд " + (actionGrid.scrollRows() + 1) + "/"
+                        + (ScrollableGridLayout.maxScrollRows(page.actions().size()) + 1);
+            }
+        } else if (page.type() == PageType.CLAN) {
+            footer = "Список, участники и заявки прокручиваются отдельно";
+        } else {
+            footer = "Данные обновляются с сервера";
+        }
+        g.drawString(Minecraft.getInstance().font, fitText(footer, 266), x + 96, y + 201, 0xFF9FB2A4, false);
     }
 
     private ResourceLocation getPanelTexture() {
@@ -586,14 +487,12 @@ public class TabletScreen extends Screen {
             return;
         }
 
-        drawHeader(g, x, y, "\u041a\u043b\u0430\u043d\u044b");
-
         int listLeft = x + CLAN_LIST_LEFT;
         int listTop = y + CLAN_LIST_TOP;
 
         if (clans.isEmpty()) {
-            drawWrappedText(g, "\u041a\u043b\u0430\u043d\u043e\u0432 \u043f\u043e\u043a\u0430 \u043d\u0435\u0442.", listLeft, listTop + 12, CLAN_ROW_W, 0xFFE6E6E6);
-            drawWrappedText(g, "\u0421\u043e\u0437\u0434\u0430\u0439 \u043f\u0435\u0440\u0432\u044b\u0439 \u043a\u043b\u0430\u043d \u0437\u0430 " + ClanConstants.CREATE_COST + " \u043c\u043e\u043d\u0435\u0442.", listLeft, listTop + 38, CLAN_ROW_W, 0xFFAAAAAA);
+            drawWrappedText(g, "\u041a\u043b\u0430\u043d\u043e\u0432 \u043f\u043e\u043a\u0430 \u043d\u0435\u0442.", listLeft, listTop + 12, CLAN_ROW_W, 0xFFE6F0E8);
+            drawWrappedText(g, "\u0421\u043e\u0437\u0434\u0430\u0439 \u043f\u0435\u0440\u0432\u044b\u0439 \u043a\u043b\u0430\u043d \u0437\u0430 " + ClanConstants.CREATE_COST + " \u043c\u043e\u043d\u0435\u0442.", listLeft, listTop + 38, CLAN_ROW_W, 0xFF9FB2A4);
             return;
         }
 
@@ -620,22 +519,23 @@ public class TabletScreen extends Screen {
     }
 
     private void drawClanDetailsSimple(GuiGraphics g, int x, int y, ClanListPacket.ClanEntry clan) {
-        drawCenteredClanText(g, "[" + clan.tag() + "] " + clan.name(), x + UI_WIDTH / 2, y + 56, clan.color());
+        drawCenteredClanText(g, "[" + clan.tag() + "] " + clan.name(),
+                x + CONTENT_X + CONTENT_W / 2, y + 56, clan.color());
 
         String status = clan.owner()
                 ? "\u0421\u0442\u0430\u0442\u0443\u0441: \u0433\u043b\u0430\u0432\u0430"
                 : clan.member() ? "\u0421\u0442\u0430\u0442\u0443\u0441: \u0443\u0447\u0430\u0441\u0442\u043d\u0438\u043a"
                 : clan.pending() ? "\u0421\u0442\u0430\u0442\u0443\u0441: \u0437\u0430\u044f\u0432\u043a\u0430"
                 : "\u0421\u0442\u0430\u0442\u0443\u0441: \u043d\u0435 \u0432 \u043a\u043b\u0430\u043d\u0435";
-        int statusColor = clan.owner() || clan.pending() ? 0xFFFFD966 : clan.member() ? 0xFF66FF66 : 0xFFAAAAAA;
+        int statusColor = clan.owner() || clan.pending() ? 0xFFE7C76A : clan.member() ? 0xFF72D68A : 0xFF9FB2A4;
 
         int left = x + CLAN_INFO_LEFT;
         int top = y + CLAN_INFO_TOP;
 
         g.drawString(Minecraft.getInstance().font, status, left, top, statusColor, false);
-        g.drawString(Minecraft.getInstance().font, "\u0413\u043b\u0430\u0432\u0430: " + fitText(clan.ownerName(), 112), left, top + 14, 0xFFE6E6E6, false);
-        g.drawString(Minecraft.getInstance().font, "\u0423\u0447\u0430\u0441\u0442\u043d\u0438\u043a\u043e\u0432: " + clan.memberCount() + "/" + ClanConstants.MAX_MEMBERS, left, top + 28, 0xFFE6E6E6, false);
-        g.drawString(Minecraft.getInstance().font, "\u041a\u041a: " + clan.clanCoins(), left, top + 42, 0xFF66FF66, false);
+        g.drawString(Minecraft.getInstance().font, "\u0413\u043b\u0430\u0432\u0430: " + fitText(clan.ownerName(), 112), left, top + 14, 0xFFE6F0E8, false);
+        g.drawString(Minecraft.getInstance().font, "\u0423\u0447\u0430\u0441\u0442\u043d\u0438\u043a\u043e\u0432: " + clan.memberCount() + "/" + ClanConstants.MAX_MEMBERS, left, top + 28, 0xFFE6F0E8, false);
+        g.drawString(Minecraft.getInstance().font, "\u041a\u041a: " + clan.clanCoins(), left, top + 42, 0xFF72D68A, false);
 
         drawClanMembers(g, clan, x + CLAN_MEMBERS_LEFT, y + CLAN_MEMBERS_TOP);
         drawClanPending(g, clan, x + CLAN_PENDING_LEFT, y + CLAN_PENDING_TOP);
@@ -643,7 +543,7 @@ public class TabletScreen extends Screen {
 
     private void drawClanMembers(GuiGraphics g, ClanListPacket.ClanEntry clan, int x, int y) {
         List<ClanListPacket.MemberEntry> members = clan.memberEntries() == null ? List.of() : clan.memberEntries();
-        g.drawString(Minecraft.getInstance().font, "\u0423\u0447\u0430\u0441\u0442\u043d\u0438\u043a\u0438", x, y, 0xFFE6E6E6, false);
+        g.drawString(Minecraft.getInstance().font, "\u0423\u0447\u0430\u0441\u0442\u043d\u0438\u043a\u0438", x, y, 0xFFE6F0E8, false);
 
         if (members.isEmpty()) {
             g.drawString(Minecraft.getInstance().font, "\u041d\u0435\u0442 \u0443\u0447\u0430\u0441\u0442\u043d\u0438\u043a\u043e\u0432", x, y + 14, 0xFF777777, false);
@@ -655,16 +555,19 @@ public class TabletScreen extends Screen {
         int count = Math.min(CLAN_VISIBLE_MEMBERS, members.size() - memberScrollOffset);
 
         g.enableScissor(x, listTop, x + CLAN_MEMBERS_WIDTH, y + CLAN_MEMBERS_HEIGHT);
-        for (int i = 0; i < count; i++) {
-            ClanListPacket.MemberEntry member = members.get(memberScrollOffset + i);
-            boolean owner = member.uuid().equals(clan.ownerUuid());
-            String suffix = owner ? " *" : "";
-            int rowY = listTop + i * CLAN_MEMBER_ROW_H;
-            int nameWidth = clan.owner() && !owner ? 104 : 148;
-            int color = owner ? 0xFFFFD966 : 0xFFE6E6E6;
-            g.drawString(Minecraft.getInstance().font, fitText(member.name() + suffix, nameWidth), x, rowY, color, false);
+        try {
+            for (int i = 0; i < count; i++) {
+                ClanListPacket.MemberEntry member = members.get(memberScrollOffset + i);
+                boolean owner = member.uuid().equals(clan.ownerUuid());
+                String suffix = owner ? " *" : "";
+                int rowY = listTop + i * CLAN_MEMBER_ROW_H;
+                int nameWidth = clan.owner() && !owner ? 70 : 114;
+                int color = owner ? 0xFFE7C76A : 0xFFE6F0E8;
+                g.drawString(Minecraft.getInstance().font, fitText(member.name() + suffix, nameWidth), x, rowY, color, false);
+            }
+        } finally {
+            g.disableScissor();
         }
-        g.disableScissor();
 
         if (members.size() > CLAN_VISIBLE_MEMBERS) {
             drawInfoScrollbar(
@@ -680,7 +583,7 @@ public class TabletScreen extends Screen {
 
     private void drawClanPending(GuiGraphics g, ClanListPacket.ClanEntry clan, int x, int y) {
         int pending = clan.pendingEntries() == null ? 0 : clan.pendingEntries().size();
-        g.drawString(Minecraft.getInstance().font, "\u0417\u0430\u044f\u0432\u043a\u0438: " + pending, x, y, clan.owner() ? 0xFFFFD966 : 0xFFAAAAAA, false);
+        g.drawString(Minecraft.getInstance().font, "\u0417\u0430\u044f\u0432\u043a\u0438: " + pending, x, y, clan.owner() ? 0xFFE7C76A : 0xFF9FB2A4, false);
         if (!clan.owner()) return;
 
         if (pending <= 0) {
@@ -693,11 +596,15 @@ public class TabletScreen extends Screen {
         int listTop = y + 18;
 
         g.enableScissor(x, listTop, x + CLAN_PENDING_WIDTH, y + CLAN_PENDING_HEIGHT);
-        for (int i = 0; i < count; i++) {
-            ClanListPacket.PendingEntry entry = clan.pendingEntries().get(pendingScrollOffset + i);
-            g.drawString(Minecraft.getInstance().font, fitText(entry.name(), 54), x, listTop + i * CLAN_PENDING_ROW_H, 0xFFE6E6E6, false);
+        try {
+            for (int i = 0; i < count; i++) {
+                ClanListPacket.PendingEntry entry = clan.pendingEntries().get(pendingScrollOffset + i);
+                g.drawString(Minecraft.getInstance().font, fitText(entry.name(), 48), x,
+                        listTop + i * CLAN_PENDING_ROW_H, 0xFFE6F0E8, false);
+            }
+        } finally {
+            g.disableScissor();
         }
-        g.disableScissor();
 
         if (pending > CLAN_VISIBLE_PENDING) {
             drawInfoScrollbar(g, x + CLAN_PENDING_WIDTH - 4, listTop, CLAN_PENDING_HEIGHT - 18, pendingScrollOffset, Math.max(1, pending - CLAN_VISIBLE_PENDING));
@@ -759,8 +666,6 @@ public class TabletScreen extends Screen {
     }
 
     private void drawServerInfo(GuiGraphics g, int x, int y) {
-        drawHeader(g, x, y, "\u0418\u043d\u0444\u043e\u0440\u043c\u0430\u0446\u0438\u044f");
-
         List<FormattedCharSequence> lines = getServerInfoLines(INFO_WIDTH);
         int maxScroll = getMaxInfoScroll(lines);
         infoScroll = clamp(infoScroll, 0, maxScroll);
@@ -771,23 +676,24 @@ public class TabletScreen extends Screen {
         int bottom = top + INFO_HEIGHT;
 
         g.enableScissor(left, top, right, bottom);
-
-        int lineY = top - infoScroll;
-        for (FormattedCharSequence line : lines) {
-            if (lineY > top - INFO_LINE_HEIGHT && lineY < bottom) {
-                g.drawString(
-                        Minecraft.getInstance().font,
-                        line,
-                        left,
-                        lineY,
-                        0xFFE6E6E6,
-                        false
-                );
+        try {
+            int lineY = top - infoScroll;
+            for (FormattedCharSequence line : lines) {
+                if (lineY > top - INFO_LINE_HEIGHT && lineY < bottom) {
+                    g.drawString(
+                            Minecraft.getInstance().font,
+                            line,
+                            left,
+                            lineY,
+                            0xFFE6F0E8,
+                            false
+                    );
+                }
+                lineY += INFO_LINE_HEIGHT;
             }
-            lineY += INFO_LINE_HEIGHT;
+        } finally {
+            g.disableScissor();
         }
-
-        g.disableScissor();
         drawInfoScrollbar(g, right + 5, top, INFO_HEIGHT, infoScroll, maxScroll);
     }
 
@@ -814,13 +720,13 @@ public class TabletScreen extends Screen {
         g.fill(x, y, x + 3, y + height, 0x66000000);
 
         if (maxScroll <= 0) {
-            g.fill(x, y, x + 3, y + height, 0xFF66FF66);
+            g.fill(x, y, x + 3, y + height, 0xFF72D68A);
             return;
         }
 
         int thumbHeight = Math.max(16, height * height / (height + maxScroll));
         int thumbY = y + (height - thumbHeight) * scroll / maxScroll;
-        g.fill(x, thumbY, x + 3, thumbY + thumbHeight, 0xFF66FF66);
+        g.fill(x, thumbY, x + 3, thumbY + thumbHeight, 0xFF72D68A);
     }
 
     private boolean isMouseOverInfoArea(double mouseX, double mouseY) {
@@ -892,6 +798,12 @@ public class TabletScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
+        if (navigationRail.mouseScrolled(mouseX, mouseY, delta)) return true;
+
+        if (PAGES[currentPage].type() == PageType.ACTIONS && actionGrid.mouseScrolled(mouseX, mouseY, delta)) {
+            return true;
+        }
+
         if (PAGES[currentPage].type() == PageType.CLAN) {
             List<ClanListPacket.ClanEntry> clans = TabletClientState.getClans();
             if (selectedClanIndex < 0 && isMouseOverClanList(mouseX, mouseY)) {
@@ -934,17 +846,42 @@ public class TabletScreen extends Screen {
         return super.mouseScrolled(mouseX, mouseY, delta);
     }
 
+    @Override
+    public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        if (navigationRail.mouseClicked(mouseX, mouseY, button)) return true;
+        if (PAGES[currentPage].type() == PageType.ACTIONS && actionGrid.mouseClicked(mouseX, mouseY, button)) {
+            return true;
+        }
+        return super.mouseClicked(mouseX, mouseY, button);
+    }
+
+    private int panelX() {
+        return Math.max(0, (this.width - UI_WIDTH) / 2);
+    }
+
+    private int panelY() {
+        return Math.max(0, (this.height - UI_HEIGHT) / 2);
+    }
+
+    private void selectPage(int pageIndex) {
+        if (pageIndex == currentPage || pageIndex < 0 || pageIndex >= PAGES.length) return;
+        playSound(CLICK);
+        currentPage = pageIndex;
+        init();
+    }
+
     private static int clamp(int value, int min, int max) {
         return Math.max(min, Math.min(max, value));
     }
 
     private void drawHeader(GuiGraphics g, int x, int y, String text) {
-        g.drawCenteredString(
+        g.drawString(
                 Minecraft.getInstance().font,
                 text,
-                x + UI_WIDTH / 2,
-                y + 52,
-                0xFF66FF66
+                x + HEADER_X + 8,
+                y + HEADER_Y + 9,
+                0xFFE6F0E8,
+                false
         );
     }
 
@@ -953,22 +890,22 @@ public class TabletScreen extends Screen {
     }
 
     private void drawInfoLine(GuiGraphics g, int x, int y, int row, String label, String value, int valueColor) {
-        int left = x + 52;
-        int top = y + 72 + row * 17;
+        int left = x + CONTENT_X + 10;
+        int top = y + CONTENT_Y + 10 + row * 18;
 
         g.drawString(
                 Minecraft.getInstance().font,
                 label + ":",
                 left,
                 top,
-                0xFFAAAAAA,
+                0xFF9FB2A4,
                 false
         );
 
         g.drawString(
                 Minecraft.getInstance().font,
                 value,
-                left + 112,
+                left + 126,
                 top,
                 valueColor,
                 false
@@ -999,7 +936,7 @@ public class TabletScreen extends Screen {
         CLAN
     }
 
-    private record TabletPage(String title, PageType type, TabletAction[] actions) {
+    private record TabletPage(String title, String key, PageType type, List<TabletAction> actions) {
     }
 
     private record TabletAction(
@@ -1011,50 +948,271 @@ public class TabletScreen extends Screen {
             boolean shop,
             boolean exclusive,
             int price,
-            int fixedLevel
+            int fixedLevel,
+            ResourceLocation icon
     ) {
-        private static TabletAction classKit(String label, String classKey, int actionId) {
-            return new TabletAction(label, classKey, actionId, false, false, false, false, 0, -1);
-        }
-
-        private static TabletAction shopClass(String label, String classKey, int actionId, int price, int fixedLevel) {
-            return new TabletAction(label, classKey, actionId, false, false, true, false, price, fixedLevel);
-        }
-
-        private static TabletAction exclusiveClass(String label, String classKey, int actionId) {
-            return exclusiveClass(label, classKey, actionId, 2);
-        }
-
-        private static TabletAction exclusiveClass(String label, String classKey, int actionId, int fixedLevel) {
-            return new TabletAction(label, classKey, actionId, false, false, false, true, 0, fixedLevel);
+        private static TabletAction fromDefinition(ClassDefinition definition) {
+            return new TabletAction(
+                    definition.name().getString().toUpperCase(Locale.ROOT),
+                    definition.classKey(),
+                    definition.actionId(),
+                    false,
+                    false,
+                    definition.category() == ClassCategory.SHOP,
+                    definition.category() == ClassCategory.EXCLUSIVE,
+                    definition.price(),
+                    definition.fixedTier(),
+                    definition.icon()
+            );
         }
 
         private static TabletAction rtp(String label, int actionId) {
-            return new TabletAction(label, "", actionId, true, false, false, false, 0, -1);
-        }
-
-        private static TabletAction locked(String label) {
-            return new TabletAction(label, "", -1, false, true, false, false, 0, -1);
+            return new TabletAction(label, "", actionId, true, false, false, false, 0, -1,
+                    ClassDefinitions.FALLBACK_ICON);
         }
     }
 
-    private class PageTabButton extends Button {
+    private static List<TabletAction> actionsFor(ClassCategory category) {
+        return ClassDefinitions.byCategory(category).stream().map(TabletAction::fromDefinition).toList();
+    }
 
-        private final int pageIndex;
+    private void renderActionCard(GuiGraphics g, TabletAction action, int x, int y, int width, int height,
+                                  int mouseX, int mouseY, float partialTick) {
+        boolean hover = mouseX >= x && mouseX < x + width && mouseY >= y && mouseY < y + height;
+        ActionPresentation presentation = describeAction(action);
+        int border = rarityColor(action);
+        ResourceLocation resolvedIcon = ClassDefinitions.byClassKey(action.classKey())
+                .map(definition -> ClassIconResolver.resolve(definition,
+                        icon -> Minecraft.getInstance().getResourceManager().getResource(icon).isPresent()))
+                .orElse(ClassDefinitions.FALLBACK_ICON);
+        String title = fitText(action.label(), 88);
+        String status = fitText(presentation.status(), 92);
+        TabletActionCard.render(g, x, y, width, height, hover, resolvedIcon,
+                Minecraft.getInstance().getResourceManager().getResource(resolvedIcon).isPresent(), title,
+                new TabletActionCard.Presentation(presentation.active(), border, status,
+                        presentation.statusColor(), presentation.marker()));
+    }
+
+    private void pressAction(TabletAction action) {
+        if (!isActionActive(action) || action.locked()) return;
+        if (isClanWarSetupOnly()) return;
+        if (TabletClientState.isCompetitiveSet() && action.shop()) return;
+        if (isClanWarSoloShopRestricted(action)) return;
+
+        if (isMarineAction(action) && !isMarineUnlockedForCurrentClan()) {
+            PacketHandler.sendToServer(new TabletPacket(action.actionId()));
+            return;
+        }
+
+        if (action.shop() && !TabletClientState.isClassPurchased(action.classKey())) {
+            showPurchaseConfirmation(action);
+            return;
+        }
+
+        if (isBaseClassAction(action) && !TabletClientState.isBaseClassUnlocked(action.classKey())) {
+            showBaseUnlockConfirmation(action);
+            return;
+        }
+
+        if (isBaseClassAction(action) && !dismissedUpgradePrompts.contains(action.classKey())) {
+            int targetTier = getAvailableUpgradeTier(action);
+            if (targetTier > PlayerProgressManager.BASIC_TIER
+                    && TabletClientState.getCoins() >= PlayerProgressManager.getUpgradeCost(targetTier)) {
+                showTierUpgradeConfirmation(action, targetTier);
+                return;
+            }
+        }
+
+        playSound(CLICK);
+        PacketHandler.sendToServer(new TabletPacket(action.actionId()));
+    }
+
+    private boolean isActionActive(TabletAction action) {
+        if (action.locked() || isClanWarSetupOnly()) return false;
+        if (isMarineAction(action) && !isMarineUnlockedForCurrentClan()) return canBuyMarineForCurrentClan();
+        if (action.exclusive() && !isMarineAction(action)
+                && !TabletClientState.isClassPurchased(action.classKey())) return false;
+        if (TabletClientState.isCompetitiveSet() && action.shop()) return false;
+        if (isClanWarSoloShopRestricted(action)) return false;
+
+        if (action.shop() && !TabletClientState.isClassPurchased(action.classKey())) {
+            return TabletClientState.getCoins() >= action.price();
+        }
+        if (isBaseClassAction(action) && !TabletClientState.isBaseClassUnlocked(action.classKey())) {
+            return TabletClientState.getCoins() >= PlayerProgressManager.BASE_UNLOCK_COST;
+        }
+        if (isBaseClassAction(action) && !dismissedUpgradePrompts.contains(action.classKey())) {
+            int targetTier = getAvailableUpgradeTier(action);
+            if (targetTier > PlayerProgressManager.BASIC_TIER
+                    && TabletClientState.getCoins() >= PlayerProgressManager.getUpgradeCost(targetTier)) return true;
+        }
+        if (!TabletClientState.isGameRunning()) return false;
+        return !TabletClientState.isKitUsed() && TabletClientState.getCooldown(action.actionId()) <= 0L;
+    }
+
+    private ActionPresentation describeAction(TabletAction action) {
+        boolean active = isActionActive(action);
+        if (isClanWarSetupOnly()) return unavailable("Матч ещё не начался");
+        if (isMarineAction(action) && !isCurrentPlayerInClan()) return unavailable("Требуется клан", "C");
+        if (isMarineAction(action) && !isMarineUnlockedForCurrentClan()) {
+            if (canBuyMarineForCurrentClan()) {
+                return new ActionPresentation("Покупка • " + ClanManager.MARINE_CLASS_COST + " КК",
+                        "Глава клана может купить Морпеха", true, 0xFFE7C76A, "¤");
+            }
+            return unavailable("Требуется разблокировка клана", "C");
+        }
+        if (action.exclusive() && !TabletClientState.isClassPurchased(action.classKey())) {
+            return unavailable("Эксклюзивный класс не выдан");
+        }
+        if (TabletClientState.isCompetitiveSet() && action.shop()) {
+            return unavailable("Недоступен в соревновательном режиме");
+        }
+        if (isClanWarSoloShopRestricted(action)) return unavailable("Требуется клан", "C");
+
+        if (action.shop() && !TabletClientState.isClassPurchased(action.classKey())) {
+            int color = TabletClientState.getCoins() >= action.price() ? 0xFFE7C76A : 0xFFD87575;
+            return new ActionPresentation(TabletStatusFormatter.purchase(action.price()),
+                    TabletClientState.getCoins() >= action.price() ? "Нажмите для покупки" : "Недостаточно монет",
+                    active, color, "¤");
+        }
+        if (isBaseClassAction(action) && !TabletClientState.isBaseClassUnlocked(action.classKey())) {
+            boolean enough = TabletClientState.getCoins() >= PlayerProgressManager.BASE_UNLOCK_COST;
+            return new ActionPresentation("Открытие • " + PlayerProgressManager.BASE_UNLOCK_COST + " монет",
+                    enough ? "Нажмите для разблокировки" : "Недостаточно монет", active,
+                    enough ? 0xFFE7C76A : 0xFFD87575, "▣");
+        }
+
+        if (isBaseClassAction(action) && !dismissedUpgradePrompts.contains(action.classKey())) {
+            int targetTier = getAvailableUpgradeTier(action);
+            if (targetTier > PlayerProgressManager.BASIC_TIER
+                    && TabletClientState.getCoins() >= PlayerProgressManager.getUpgradeCost(targetTier)) {
+                return new ActionPresentation(TabletStatusFormatter.upgrade(PlayerProgressManager.getUpgradeCost(targetTier)),
+                        "Доступно повышение тира", true, 0xFF72D68A, "↑");
+            }
+        }
+
+        long cooldown = TabletClientState.getCooldown(action.actionId());
+        if (cooldown > 0L) {
+            return new ActionPresentation(TabletStatusFormatter.cooldown(formatTime(cooldown)),
+                    "Класс на перезарядке", false, 0xFFE7C76A, "◷");
+        }
+        if (TabletClientState.isKitUsed()) return unavailable("Уже использован", "✓");
+        if (!TabletClientState.isGameRunning()) return unavailable("Нет активной игры");
+
+        if (isBaseClassAction(action)) {
+            int tier = TabletClientState.getClassTier(action.classKey());
+            int xp = TabletClientState.getXP(action.classKey());
+            ClassTier current = ClassTier.clamp(tier);
+            Optional<ClassTier> next = current.next();
+            if (next.isPresent() && xp >= next.get().requiredXp()
+                    && !dismissedUpgradePrompts.contains(action.classKey())) {
+                return new ActionPresentation(TabletStatusFormatter.upgrade(next.get().upgradeCost()),
+                        "Доступно повышение тира", active, 0xFF72D68A, "↑");
+            }
+            int cap = next.map(ClassTier::requiredXp).orElse(current.xpCap());
+            return new ActionPresentation(TabletStatusFormatter.progress(tierName(current), xp, cap),
+                    "Класс доступен", active, 0xFF9FB2A4, "✓");
+        }
+        if (action.shop()) return new ActionPresentation("Куплено", "Класс доступен", active, 0xFF72D68A, "✓");
+        return new ActionPresentation("Доступен", "Класс доступен", active, 0xFF72D68A, "✓");
+    }
+
+    private ActionPresentation unavailable(String detail) {
+        return unavailable(detail, "▣");
+    }
+
+    private ActionPresentation unavailable(String detail, String marker) {
+        return new ActionPresentation(detail, detail, false, 0xFFD87575, marker);
+    }
+
+    private String tierName(ClassTier tier) {
+        return switch (tier) {
+            case BASIC -> "Базовый";
+            case RARE -> "Редкий";
+            case EPIC -> "Эпический";
+            case LEGEND -> "Легендарный";
+            case MONSTER -> "Монстр";
+        };
+    }
+
+    private int rarityColor(TabletAction action) {
+        int level = action.fixedLevel() >= 0 ? action.fixedLevel() : TabletClientState.getClassTier(action.classKey());
+        return switch (ClassTier.clamp(level)) {
+            case BASIC -> 0xFF71877A;
+            case RARE -> 0xFF5B8DEF;
+            case EPIC -> 0xFFA56BE8;
+            case LEGEND -> 0xFFE7C76A;
+            case MONSTER -> 0xFFD87575;
+        };
+    }
+
+    private boolean isBaseClassAction(TabletAction action) {
+        return !action.shop() && !action.exclusive() && !action.rtp() && !action.locked();
+    }
+
+    private int getAvailableUpgradeTier(TabletAction action) {
+        int tier = TabletClientState.getClassTier(action.classKey());
+        int xp = TabletClientState.getXP(action.classKey());
+        ClassTier current = ClassTier.clamp(tier);
+        return current.next().filter(next -> xp >= next.requiredXp()).map(ClassTier::id)
+                .orElse(PlayerProgressManager.BASIC_TIER);
+    }
+
+    private void renderHoverFeedback(GuiGraphics g, int mouseX, int mouseY) {
+        if (PAGES[currentPage].type() == PageType.ACTIONS) {
+            Optional<TabletAction> hovered = actionGrid.itemAt(mouseX, mouseY);
+            int hoveredId = hovered.map(TabletAction::actionId).orElse(-1);
+            if (hoveredId >= 0 && hoveredId != lastHoveredActionId) playSound(HOVER);
+            lastHoveredActionId = hoveredId;
+            if (hovered.isPresent()) {
+                TabletAction action = hovered.get();
+                ActionPresentation presentation = describeAction(action);
+                g.renderComponentTooltip(Minecraft.getInstance().font,
+                        List.of(Component.literal(action.label()), Component.literal(presentation.detail())),
+                        mouseX, mouseY);
+                return;
+            }
+        } else {
+            lastHoveredActionId = -1;
+        }
+
+        if (isMouseOverRtp(mouseX, mouseY)) {
+            g.renderComponentTooltip(Minecraft.getInstance().font,
+                    List.of(Component.literal("RTP"), Component.literal(rtpUnavailableReason())), mouseX, mouseY);
+        }
+    }
+
+    private boolean isMouseOverRtp(double mouseX, double mouseY) {
+        int x = panelX() + RTP_X;
+        int y = panelY() + RTP_Y;
+        return mouseX >= x && mouseX < x + RTP_W && mouseY >= y && mouseY < y + RTP_H;
+    }
+
+    private boolean isRtpActive() {
+        return TabletClientState.isGameRunning() && !TabletClientState.isRtpUsed();
+    }
+
+    private String rtpUnavailableReason() {
+        if (TabletClientState.isRtpUsed()) return "RTP уже использован";
+        if (!TabletClientState.isGameRunning()) return "Недоступно: нет активной игры";
+        return "Случайная телепортация";
+    }
+
+    private record ActionPresentation(String status, String detail, boolean active, int statusColor, String marker) {
+    }
+
+    private class TabletRtpButton extends Button {
         private boolean wasHovered;
 
-        private PageTabButton(int x, int y, int pageIndex) {
-            super(Button.builder(Component.literal(PAGES[pageIndex].title()), button -> {}).bounds(x, y, TAB_W, TAB_H));
-            this.pageIndex = pageIndex;
+        private TabletRtpButton(int x, int y) {
+            super(Button.builder(Component.literal("RTP"), button -> {}).bounds(x, y, RTP_W, RTP_H));
         }
 
         @Override
         public void onPress() {
-            if (currentPage == pageIndex) return;
-
-            playSound(CLICK);
-            currentPage = pageIndex;
-            TabletScreen.this.init();
+            if (!isRtpActive()) return;
+            playSound(TELEPORT);
+            PacketHandler.sendToServer(new TabletPacket(TELEPORT_RTP.actionId()));
         }
 
         @Override
@@ -1063,32 +1221,16 @@ public class TabletScreen extends Screen {
 
         @Override
         public void renderWidget(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
-            boolean hover = this.isMouseOver(mouseX, mouseY);
-
-            if (hover && !wasHovered && currentPage != pageIndex) {
-                playSound(HOVER);
-            }
+            this.active = isRtpActive();
+            boolean hover = isMouseOver(mouseX, mouseY);
+            if (hover && !wasHovered) playSound(HOVER);
             wasHovered = hover;
-
-            ResourceLocation tex = currentPage == pageIndex
-                    ? TAB_BTN_ACTIVE
-                    : hover ? TAB_BTN_HOVER : TAB_BTN;
-
-            RenderSystem.setShader(GameRenderer::getPositionTexShader);
-            RenderSystem.setShaderTexture(0, tex);
-            g.blit(tex, getX(), getY(), 0, 0, width, height, width, height);
-
-            int color = currentPage == pageIndex
-                    ? 0xFFFFFFFF
-                    : hover ? 0xFFE6FFE6 : 0xFF66FF66;
-
-            g.drawCenteredString(
-                    Minecraft.getInstance().font,
-                    PAGES[pageIndex].title(),
-                    getX() + width / 2,
-                    getY() + (height - 8) / 2,
-                    color
-            );
+            int background = !active ? 0xFF18231C : hover ? 0xFF294032 : 0xFF1D2B22;
+            int color = active ? 0xFF72D68A : 0xFF77867B;
+            g.fill(getX(), getY(), getX() + width, getY() + height, background);
+            g.fill(getX(), getY() + height - 1, getX() + width, getY() + height, color);
+            g.drawCenteredString(Minecraft.getInstance().font,
+                    TabletClientState.isRtpUsed() ? "RTP ✓" : "RTP", getX() + width / 2, getY() + 6, color);
         }
     }
 
@@ -1115,6 +1257,7 @@ public class TabletScreen extends Screen {
         private final TabletAction action;
         private final ConfirmAction confirmAction;
         private final int targetTier;
+        private boolean submitting;
 
         private TabletConfirmScreen(TabletAction action, ConfirmAction confirmAction, int targetTier) {
             super(Component.literal("\u041f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u0438\u0435"));
@@ -1137,12 +1280,14 @@ public class TabletScreen extends Screen {
                     Component.literal("\u041e\u0422\u041c\u0415\u041d\u0410"),
                     this::cancel
             ));
-            this.addRenderableWidget(new ConfirmTextureButton(
+            ConfirmTextureButton confirmButton = new ConfirmTextureButton(
                     x + CONFIRM_W - CONFIRM_BUTTON_W - 18,
                     buttonY,
                     Component.literal(confirmAction == ConfirmAction.SHOP_PURCHASE ? "\u041a\u0423\u041f\u0418\u0422\u042c" : "\u041e\u041a"),
                     this::confirm
-            ));
+            );
+            confirmButton.active = TabletClientState.getCoins() >= getPrice();
+            this.addRenderableWidget(confirmButton);
         }
 
         @Override
@@ -1157,10 +1302,15 @@ public class TabletScreen extends Screen {
             RenderSystem.setShaderTexture(0, CONFIRM_PANEL);
             g.blit(CONFIRM_PANEL, x, y, 0, 0, CONFIRM_W, CONFIRM_H, CONFIRM_W, CONFIRM_H);
 
-            g.drawCenteredString(Minecraft.getInstance().font, getConfirmTitle(), x + CONFIRM_W / 2, y + 17, 0xFF66FF66);
-            g.drawCenteredString(Minecraft.getInstance().font, action.label(), x + CONFIRM_W / 2, y + 44, getShopTitleColor(action));
+            g.drawCenteredString(Minecraft.getInstance().font, getConfirmTitle(), x + CONFIRM_W / 2, y + 17, 0xFF72D68A);
+            g.drawCenteredString(Minecraft.getInstance().font, fitText(action.label(), CONFIRM_W - 30), x + CONFIRM_W / 2, y + 44, getShopTitleColor(action));
             g.drawCenteredString(Minecraft.getInstance().font, getPrice() + " \u043c\u043e\u043d\u0435\u0442", x + CONFIRM_W / 2, y + 58, 0xFFFFFFFF);
-            g.drawCenteredString(Minecraft.getInstance().font, "\u0423 \u0442\u0435\u0431\u044f: " + TabletClientState.getCoins() + " \u043c\u043e\u043d\u0435\u0442", x + CONFIRM_W / 2, y + 72, 0xFFAAAAAA);
+            boolean enoughCoins = TabletClientState.getCoins() >= getPrice();
+            String balance = enoughCoins
+                    ? "У тебя: " + TabletClientState.getCoins() + " монет"
+                    : "Недостаточно монет: " + TabletClientState.getCoins() + "/" + getPrice();
+            g.drawCenteredString(Minecraft.getInstance().font, balance, x + CONFIRM_W / 2, y + 72,
+                    enoughCoins ? 0xFF9FB2A4 : 0xFFD87575);
 
             super.render(g, mouseX, mouseY, partialTick);
         }
@@ -1171,6 +1321,8 @@ public class TabletScreen extends Screen {
         }
 
         private void confirm() {
+            if (submitting || TabletClientState.getCoins() < getPrice()) return;
+            submitting = true;
             if (confirmAction == ConfirmAction.SHOP_PURCHASE) {
                 PacketHandler.sendToServer(new TabletPacket(action.actionId()));
             } else if (confirmAction == ConfirmAction.BASE_UNLOCK) {
@@ -1223,14 +1375,14 @@ public class TabletScreen extends Screen {
 
         private int getShopTitleColor(TabletAction action) {
             if (action.fixedLevel() >= 2) {
-                return 0xFFFFD966;
+                return 0xFFE7C76A;
             }
 
             if (action.fixedLevel() == 1) {
                 return 0xFFB266FF;
             }
 
-            return 0xFF66FF66;
+            return 0xFF72D68A;
         }
     }
 
@@ -1270,9 +1422,9 @@ public class TabletScreen extends Screen {
             RenderSystem.setShader(GameRenderer::getPositionTexShader);
             RenderSystem.setShaderTexture(0, CONFIRM_PANEL);
             g.blit(CONFIRM_PANEL, x, y, 0, 0, CONFIRM_W, CONFIRM_H, CONFIRM_W, CONFIRM_H);
-            g.drawCenteredString(Minecraft.getInstance().font, "\u0421\u043e\u0437\u0434\u0430\u0442\u044c \u043a\u043b\u0430\u043d?", x + CONFIRM_W / 2, y + 18, 0xFF66FF66);
+            g.drawCenteredString(Minecraft.getInstance().font, "\u0421\u043e\u0437\u0434\u0430\u0442\u044c \u043a\u043b\u0430\u043d?", x + CONFIRM_W / 2, y + 18, 0xFF72D68A);
             g.drawCenteredString(Minecraft.getInstance().font, "\u0421\u0442\u043e\u0438\u043c\u043e\u0441\u0442\u044c: " + ClanConstants.CREATE_COST + " \u043c\u043e\u043d\u0435\u0442", x + CONFIRM_W / 2, y + 48, 0xFFFFFFFF);
-            g.drawCenteredString(Minecraft.getInstance().font, "\u041c\u043e\u043d\u0435\u0442\u044b: " + TabletClientState.getCoins(), x + CONFIRM_W / 2, y + 66, 0xFFAAAAAA);
+            g.drawCenteredString(Minecraft.getInstance().font, "\u041c\u043e\u043d\u0435\u0442\u044b: " + TabletClientState.getCoins(), x + CONFIRM_W / 2, y + 66, 0xFF9FB2A4);
             super.render(g, mouseX, mouseY, partialTick);
         }
 
@@ -1289,6 +1441,7 @@ public class TabletScreen extends Screen {
     private class ClanJoinConfirmScreen extends Screen {
 
         private final ClanListPacket.ClanEntry clan;
+        private boolean submitting;
 
         private ClanJoinConfirmScreen(ClanListPacket.ClanEntry clan) {
             super(Component.literal("\u0412\u0441\u0442\u0443\u043f\u043b\u0435\u043d\u0438\u0435 \u0432 \u043a\u043b\u0430\u043d"));
@@ -1306,10 +1459,7 @@ public class TabletScreen extends Screen {
                     x + CONFIRM_W - CONFIRM_BUTTON_W - 18,
                     buttonY,
                     Component.literal("\u0417\u0410\u042f\u0412\u041a\u0410"),
-                    () -> {
-                        PacketHandler.sendToServer(new ClanJoinRequestPacket(clan.id()));
-                        returnToTablet();
-                    }
+                    this::confirm
             ));
         }
 
@@ -1322,9 +1472,10 @@ public class TabletScreen extends Screen {
             RenderSystem.setShader(GameRenderer::getPositionTexShader);
             RenderSystem.setShaderTexture(0, CONFIRM_PANEL);
             g.blit(CONFIRM_PANEL, x, y, 0, 0, CONFIRM_W, CONFIRM_H, CONFIRM_W, CONFIRM_H);
-            g.drawCenteredString(Minecraft.getInstance().font, "\u0412\u0441\u0442\u0443\u043f\u0438\u0442\u044c \u0432 \u043a\u043b\u0430\u043d?", x + CONFIRM_W / 2, y + 18, 0xFF66FF66);
-            drawCenteredClanText(g, "[" + clan.tag() + "] " + clan.name(), x + CONFIRM_W / 2, y + 48, clan.color());
-            g.drawCenteredString(Minecraft.getInstance().font, "\u0413\u043b\u0430\u0432\u0430 \u0440\u0430\u0441\u0441\u043c\u043e\u0442\u0440\u0438\u0442 \u0437\u0430\u044f\u0432\u043a\u0443", x + CONFIRM_W / 2, y + 66, 0xFFAAAAAA);
+            g.drawCenteredString(Minecraft.getInstance().font, "\u0412\u0441\u0442\u0443\u043f\u0438\u0442\u044c \u0432 \u043a\u043b\u0430\u043d?", x + CONFIRM_W / 2, y + 18, 0xFF72D68A);
+            drawCenteredClanText(g, fitText("[" + clan.tag() + "] " + clan.name(), CONFIRM_W - 24),
+                    x + CONFIRM_W / 2, y + 48, clan.color());
+            g.drawCenteredString(Minecraft.getInstance().font, "\u0413\u043b\u0430\u0432\u0430 \u0440\u0430\u0441\u0441\u043c\u043e\u0442\u0440\u0438\u0442 \u0437\u0430\u044f\u0432\u043a\u0443", x + CONFIRM_W / 2, y + 66, 0xFF9FB2A4);
             super.render(g, mouseX, mouseY, partialTick);
         }
 
@@ -1336,6 +1487,13 @@ public class TabletScreen extends Screen {
         private void returnToTablet() {
             Minecraft.getInstance().setScreen(TabletScreen.this);
         }
+
+        private void confirm() {
+            if (submitting) return;
+            submitting = true;
+            PacketHandler.sendToServer(new ClanJoinRequestPacket(clan.id()));
+            returnToTablet();
+        }
     }
 
     private class ClanSimpleConfirmScreen extends Screen {
@@ -1343,6 +1501,7 @@ public class TabletScreen extends Screen {
         private final String title;
         private final String detail;
         private final Runnable confirmAction;
+        private boolean submitting;
 
         private ClanSimpleConfirmScreen(String title, String detail, Runnable confirmAction) {
             super(Component.literal(title));
@@ -1362,10 +1521,7 @@ public class TabletScreen extends Screen {
                     x + CONFIRM_W - CONFIRM_BUTTON_W - 18,
                     buttonY,
                     Component.literal("\u041e\u041a"),
-                    () -> {
-                        confirmAction.run();
-                        returnToTablet();
-                    }
+                    this::confirm
             ));
         }
 
@@ -1378,8 +1534,10 @@ public class TabletScreen extends Screen {
             RenderSystem.setShader(GameRenderer::getPositionTexShader);
             RenderSystem.setShaderTexture(0, CONFIRM_PANEL);
             g.blit(CONFIRM_PANEL, x, y, 0, 0, CONFIRM_W, CONFIRM_H, CONFIRM_W, CONFIRM_H);
-            g.drawCenteredString(Minecraft.getInstance().font, title, x + CONFIRM_W / 2, y + 18, 0xFF66FF66);
-            g.drawCenteredString(Minecraft.getInstance().font, detail, x + CONFIRM_W / 2, y + 52, 0xFFFFFFFF);
+            g.drawCenteredString(Minecraft.getInstance().font, fitText(title, CONFIRM_W - 24),
+                    x + CONFIRM_W / 2, y + 18, 0xFF72D68A);
+            g.drawCenteredString(Minecraft.getInstance().font, fitText(detail, CONFIRM_W - 24),
+                    x + CONFIRM_W / 2, y + 52, 0xFFE6F0E8);
             super.render(g, mouseX, mouseY, partialTick);
         }
 
@@ -1390,6 +1548,13 @@ public class TabletScreen extends Screen {
 
         private void returnToTablet() {
             Minecraft.getInstance().setScreen(TabletScreen.this);
+        }
+
+        private void confirm() {
+            if (submitting) return;
+            submitting = true;
+            confirmAction.run();
+            returnToTablet();
         }
     }
 
@@ -1459,9 +1624,9 @@ public class TabletScreen extends Screen {
 
             drawHeader(g, x, y, "\u0426\u0432\u0435\u0442 \u043a\u043b\u0430\u043d\u0430");
             drawCenteredClanText(g, "[" + clan.tag() + "] " + clan.name(), x + UI_WIDTH / 2, y + 74, selectedColor);
-            g.drawString(Minecraft.getInstance().font, "\u0421\u0432\u043e\u0431\u043e\u0434\u043d\u044b\u0435 \u0446\u0432\u0435\u0442\u0430", x + 106, y + 94, 0xFFAAAAAA, false);
-            g.drawString(Minecraft.getInstance().font, "\u0421\u0442\u043e\u0438\u043c\u043e\u0441\u0442\u044c: " + ClanManager.CHANGE_COLOR_COST + " \u041a\u041a", x + 106, y + 136, 0xFFFFD966, false);
-            g.drawString(Minecraft.getInstance().font, "\u041a\u041a \u043a\u043b\u0430\u043d\u0430: " + clan.clanCoins(), x + 106, y + 150, clan.clanCoins() >= ClanManager.CHANGE_COLOR_COST ? 0xFF66FF66 : 0xFFFF6666, false);
+            g.drawString(Minecraft.getInstance().font, "\u0421\u0432\u043e\u0431\u043e\u0434\u043d\u044b\u0435 \u0446\u0432\u0435\u0442\u0430", x + 106, y + 94, 0xFF9FB2A4, false);
+            g.drawString(Minecraft.getInstance().font, "\u0421\u0442\u043e\u0438\u043c\u043e\u0441\u0442\u044c: " + ClanManager.CHANGE_COLOR_COST + " \u041a\u041a", x + 106, y + 136, 0xFFE7C76A, false);
+            g.drawString(Minecraft.getInstance().font, "\u041a\u041a \u043a\u043b\u0430\u043d\u0430: " + clan.clanCoins(), x + 106, y + 150, clan.clanCoins() >= ClanManager.CHANGE_COLOR_COST ? 0xFF72D68A : 0xFFD87575, false);
             super.render(g, mouseX, mouseY, partialTick);
         }
 
@@ -1544,14 +1709,14 @@ public class TabletScreen extends Screen {
             RenderSystem.setShaderTexture(0, panel);
             g.blit(panel, x, y, 0, 0, UI_WIDTH, UI_HEIGHT, UI_WIDTH, UI_HEIGHT);
             drawHeader(g, x, y, "\u041d\u043e\u0432\u044b\u0439 \u043a\u043b\u0430\u043d");
-            g.drawString(Minecraft.getInstance().font, "\u041d\u0430\u0437\u0432\u0430\u043d\u0438\u0435", x + 82, y + 66, 0xFFAAAAAA, false);
-            g.drawString(Minecraft.getInstance().font, "\u0422\u0435\u0433", x + 82, y + 100, 0xFFAAAAAA, false);
-            g.drawString(Minecraft.getInstance().font, "\u0426\u0432\u0435\u0442", x + 170, y + 100, 0xFFAAAAAA, false);
+            g.drawString(Minecraft.getInstance().font, "\u041d\u0430\u0437\u0432\u0430\u043d\u0438\u0435", x + 82, y + 66, 0xFF9FB2A4, false);
+            g.drawString(Minecraft.getInstance().font, "\u0422\u0435\u0433", x + 82, y + 100, 0xFF9FB2A4, false);
+            g.drawString(Minecraft.getInstance().font, "\u0426\u0432\u0435\u0442", x + 170, y + 100, 0xFF9FB2A4, false);
             g.drawString(Minecraft.getInstance().font, "\u041d\u0430\u0437\u0432\u0430\u043d\u0438\u0435: 3-" + ClanConstants.MAX_NAME_LENGTH + " \u0441\u0438\u043c\u0432.", x + 82, y + 134, 0xFF777777, false);
             g.drawString(Minecraft.getInstance().font, "\u0422\u0435\u0433: 1-" + ClanConstants.MAX_TAG_LENGTH + " \u0441\u0438\u043c\u0432.", x + 82, y + 146, 0xFF777777, false);
-            g.drawString(Minecraft.getInstance().font, "\u0421\u0442\u043e\u0438\u043c\u043e\u0441\u0442\u044c: " + ClanConstants.CREATE_COST + " \u043c\u043e\u043d\u0435\u0442", x + 82, y + 158, 0xFFFFD966, false);
+            g.drawString(Minecraft.getInstance().font, "\u0421\u0442\u043e\u0438\u043c\u043e\u0441\u0442\u044c: " + ClanConstants.CREATE_COST + " \u043c\u043e\u043d\u0435\u0442", x + 82, y + 158, 0xFFE7C76A, false);
             if (!errorMessage.isBlank()) {
-                g.drawString(Minecraft.getInstance().font, errorMessage, x + 82, y + 184, 0xFFFF6666, false);
+                g.drawString(Minecraft.getInstance().font, errorMessage, x + 82, y + 184, 0xFFD87575, false);
             }
             super.render(g, mouseX, mouseY, partialTick);
         }
@@ -1659,8 +1824,8 @@ public class TabletScreen extends Screen {
             int fill = !this.active ? 0xAA111111 : hover ? 0xCC174617 : 0xAA082808;
             g.fill(getX(), getY(), getX() + width, getY() + height, border);
             g.fill(getX() + 1, getY() + 1, getX() + width - 1, getY() + height - 1, fill);
-            int labelColor = !this.active ? 0xFF555555 : textColorSupplier == null
-                    ? (hover ? 0xFFFFFFFF : 0xFF66FF66)
+            int labelColor = !this.active ? 0xFF77867B : textColorSupplier == null
+                    ? (hover ? 0xFFFFFFFF : 0xFF72D68A)
                     : textColorSupplier.getAsInt();
             int textX = getX() + width / 2;
             int textY = getY() + (height - 8) / 2;
@@ -1696,7 +1861,7 @@ public class TabletScreen extends Screen {
         @Override
         public void renderWidget(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
             boolean hover = this.isMouseOver(mouseX, mouseY);
-            int border = selected.getAsBoolean() ? 0xFFFFFFFF : hover ? 0xFFAAAAAA : 0xFF444444;
+            int border = selected.getAsBoolean() ? 0xFFFFFFFF : hover ? 0xFF9FB2A4 : 0xFF496454;
             g.fill(getX() - 1, getY() - 1, getX() + width + 1, getY() + height + 1, border);
             if (isBlackClanColor(color)) {
                 g.fill(getX(), getY(), getX() + width, getY() + height, 0xFFFFFFFF);
@@ -1706,7 +1871,7 @@ public class TabletScreen extends Screen {
             }
             if (!this.active) {
                 g.fill(getX(), getY(), getX() + width, getY() + height, 0xAA000000);
-                g.drawString(Minecraft.getInstance().font, "x", getX() + 5, getY() + 4, 0xFFFF6666, false);
+                g.drawString(Minecraft.getInstance().font, "x", getX() + 5, getY() + 4, 0xFFD87575, false);
             }
         }
     }
@@ -1753,266 +1918,8 @@ public class TabletScreen extends Screen {
                     getMessage(),
                     getX() + width / 2,
                     getY() + (height - 8) / 2,
-                    this.active ? hover ? 0xFFFFFFFF : 0xFF66FF66 : 0xFF555555
+                    this.active ? hover ? 0xFFFFFFFF : 0xFF72D68A : 0xFF77867B
             );
-        }
-    }
-
-    private class TabletActionButton extends Button {
-
-        private final TabletAction action;
-        private boolean wasHovered;
-
-        private TabletActionButton(int x, int y, int w, int h, TabletAction action) {
-            super(Button.builder(Component.literal(action.label()), button -> {}).bounds(x, y, w, h));
-            this.action = action;
-            this.active = !action.locked()
-                    && (!action.exclusive() || isMarineAction(action) || TabletClientState.isClassPurchased(action.classKey()));
-        }
-
-        public void updateState() {
-            if (action.locked()) {
-                this.active = false;
-                return;
-            }
-
-            if (isClanWarSetupOnly()) {
-                this.active = false;
-                return;
-            }
-
-            if (isMarineAction(action) && !isMarineUnlockedForCurrentClan()) {
-                this.active = canBuyMarineForCurrentClan();
-                return;
-            }
-
-            if (action.exclusive() && !isMarineAction(action) && !TabletClientState.isClassPurchased(action.classKey())) {
-                this.active = false;
-                return;
-            }
-
-            if (TabletClientState.isCompetitiveSet() && action.shop()) {
-                this.active = false;
-                return;
-            }
-
-            if (isClanWarSoloShopRestricted(action)) {
-                this.active = false;
-                return;
-            }
-
-            boolean purchased = action.shop() && TabletClientState.isClassPurchased(action.classKey());
-            if (action.shop() && !purchased) {
-                this.active = TabletClientState.getCoins() >= action.price();
-                return;
-            }
-
-            boolean running = TabletClientState.isGameRunning();
-            if (isBaseClassAction() && !TabletClientState.isBaseClassUnlocked(action.classKey())) {
-                this.active = TabletClientState.getCoins() >= PlayerProgressManager.BASE_UNLOCK_COST;
-                return;
-            }
-
-            if (isBaseClassAction()
-                    && TabletClientState.isBaseClassUnlocked(action.classKey())
-                    && !dismissedUpgradePrompts.contains(action.classKey())) {
-                int targetTier = getAvailableUpgradeTier();
-                if (targetTier > PlayerProgressManager.BASIC_TIER
-                        && TabletClientState.getCoins() >= PlayerProgressManager.getUpgradeCost(targetTier)) {
-                    this.active = true;
-                    return;
-                }
-            }
-
-            boolean kitUsed = TabletClientState.isKitUsed();
-            boolean rtpUsed = TabletClientState.isRtpUsed();
-            long cooldown = action.rtp() ? 0L : TabletClientState.getCooldown(action.actionId());
-
-            if (!running) {
-                this.active = false;
-                return;
-            }
-
-            if (isClanWarSoloShopRestricted(action)) {
-                this.active = false;
-                return;
-            }
-
-
-            if (action.rtp()) {
-                this.active = !rtpUsed;
-            } else {
-                this.active = !(kitUsed || cooldown > 0L);
-            }
-        }
-
-        @Override
-        public void onPress() {
-            if (!this.active || action.locked()) return;
-            if (isClanWarSetupOnly()) return;
-            if (TabletClientState.isCompetitiveSet() && action.shop()) return;
-            if (isClanWarSoloShopRestricted(action)) return;
-
-            if (isMarineAction(action) && !isMarineUnlockedForCurrentClan()) {
-                PacketHandler.sendToServer(new TabletPacket(action.actionId()));
-                return;
-            }
-
-            if (action.shop() && !TabletClientState.isClassPurchased(action.classKey())) {
-                showPurchaseConfirmation(action);
-                return;
-            }
-
-            boolean running = TabletClientState.isGameRunning();
-            if (isBaseClassAction() && !TabletClientState.isBaseClassUnlocked(action.classKey())) {
-                showBaseUnlockConfirmation(action);
-                return;
-            }
-
-            if (isBaseClassAction() && !dismissedUpgradePrompts.contains(action.classKey())) {
-                int targetTier = getAvailableUpgradeTier();
-                if (targetTier > PlayerProgressManager.BASIC_TIER
-                        && TabletClientState.getCoins() >= PlayerProgressManager.getUpgradeCost(targetTier)) {
-                    showTierUpgradeConfirmation(action, targetTier);
-                    return;
-                }
-            }
-
-            playSound(action.rtp() ? TELEPORT : CLICK);
-            PacketHandler.sendToServer(new TabletPacket(action.actionId()));
-        }
-
-        @Override
-        public void playDownSound(SoundManager soundManager) {
-        }
-
-        @Override
-        public void renderWidget(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
-            boolean hover = this.isMouseOver(mouseX, mouseY);
-
-            if (hover && !wasHovered && !action.locked()) {
-                playSound(HOVER);
-            }
-            wasHovered = hover;
-
-            String label = fitLabel(getRenderedLabel());
-            ResourceLocation texture = getTexture(hover);
-
-            RenderSystem.setShader(GameRenderer::getPositionTexShader);
-            RenderSystem.setShaderTexture(0, texture);
-            g.blit(texture, getX(), getY(), 0, 0, width, height, width, height);
-
-            int color = this.active
-                    ? (hover ? 0xFFFFFFFF : 0xFF66FF66)
-                    : 0xFF555555;
-
-            g.drawCenteredString(
-                    Minecraft.getInstance().font,
-                    label,
-                    getX() + width / 2,
-                    getY() + (height - 8) / 2 - 1,
-                    color
-            );
-        }
-
-        private String getRenderedLabel() {
-            String prefix = getProgressPrefix();
-            if (action.locked()) return "[???] " + action.label();
-
-            if (isMarineAction(action)) {
-                if (!isCurrentPlayerInClan()) return "[\u041a\u041b\u0410\u041d\u042b] " + action.label();
-                if (isMarineUnlockedForCurrentClan()) return action.label();
-                if (canBuyMarineForCurrentClan()) return "[" + ClanManager.MARINE_CLASS_COST + " \u041a\u041a] " + action.label();
-                return "[\u041a\u041b\u0410\u041d] " + action.label();
-            }
-
-            if (action.exclusive() && !TabletClientState.isClassPurchased(action.classKey())) {
-                return "[\u041d\u0415\u0414\u041e\u0421\u0422\u0423\u041f\u041d\u041e] " + action.label();
-            }
-
-            long cooldown = action.rtp() ? 0L : TabletClientState.getCooldown(action.actionId());
-            if (cooldown > 0L) {
-                return "[\u041a\u0414 " + formatTime(cooldown) + "] " + action.label();
-            }
-
-            if (!action.shop() || TabletClientState.isClassPurchased(action.classKey())) return prefix + action.label();
-            return "[" + action.price() + " \u041c\u041e\u041d\u0415\u0422] " + action.label();
-        }
-
-        private String fitLabel(String label) {
-            int availableWidth = width - 12;
-            var font = Minecraft.getInstance().font;
-            if (font.width(label) <= availableWidth) return label;
-
-            String suffix = "...";
-            return font.plainSubstrByWidth(label, Math.max(0, availableWidth - font.width(suffix))) + suffix;
-        }
-
-        private String getProgressPrefix() {
-            if (action.exclusive() || action.rtp() || action.locked()) return "";
-            if (action.shop()) return TabletClientState.isClassPurchased(action.classKey()) ? "\u041a\u0423\u041f\u041b\u0415\u041d\u041e " : "";
-
-            int tier = TabletClientState.getClassTier(action.classKey());
-            int xp = TabletClientState.getXP(action.classKey());
-            if (!TabletClientState.isBaseClassUnlocked(action.classKey())) {
-                return "[\u041e\u0422\u041a\u0420. " + PlayerProgressManager.BASE_UNLOCK_COST + "] ";
-            }
-            ClassTier current = ClassTier.clamp(tier);
-            if (current.isMaximum()) return "[MAX " + xp + "/" + current.xpCap() + "] ";
-            ClassTier next = current.next().orElseThrow();
-            int coins = TabletClientState.getCoins();
-            if (xp < next.requiredXp()) {
-                return "[" + xp + "/" + next.requiredXp() + " XP] ";
-            }
-            if (coins < next.upgradeCost()) {
-                return "[" + coins + "/" + next.upgradeCost() + " COINS] ";
-            }
-            return "[UPGRADE " + next.upgradeCost() + " COINS] ";
-        }
-
-        private ResourceLocation getTexture(boolean hover) {
-            if (action.locked()) {
-                return BTN_DISABLED;
-            }
-
-            if (action.rtp()) {
-                return !this.active ? TP_BTN_DISABLED : hover ? TP_BTN_HOVER : TP_BTN;
-            }
-
-            int level = action.fixedLevel() >= 0
-                    ? action.fixedLevel()
-                    : TabletClientState.getClassTier(action.classKey());
-
-            ClassTier tier = ClassTier.clamp(level);
-            if (!this.active) return switch (tier) {
-                case MONSTER -> BTN_MONSTER_DISABLED;
-                case LEGEND -> BTN_LEGEND_DISABLED;
-                case EPIC -> BTN_EPIC_DISABLED;
-                case RARE -> BTN_RARE_DISABLED;
-                case BASIC -> BTN_DISABLED;
-            };
-            return switch (tier) {
-                case MONSTER -> hover ? BTN_MONSTER_HOVER : BTN_MONSTER;
-                case LEGEND -> hover ? BTN_LEGEND_HOVER : BTN_LEGEND;
-                case EPIC -> hover ? BTN_EPIC_HOVER : BTN_EPIC;
-                case RARE -> hover ? BTN_RARE_HOVER : BTN_RARE;
-                case BASIC -> hover ? BTN_HOVER : BTN;
-            };
-        }
-
-        private boolean isBaseClassAction() {
-            return !action.shop() && !action.exclusive() && !action.rtp() && !action.locked();
-        }
-
-        private int getAvailableUpgradeTier() {
-            int tier = TabletClientState.getClassTier(action.classKey());
-            int xp = TabletClientState.getXP(action.classKey());
-
-            ClassTier current = ClassTier.clamp(tier);
-            return current.next()
-                    .filter(next -> xp >= next.requiredXp())
-                    .map(ClassTier::id)
-                    .orElse(PlayerProgressManager.BASIC_TIER);
         }
     }
 

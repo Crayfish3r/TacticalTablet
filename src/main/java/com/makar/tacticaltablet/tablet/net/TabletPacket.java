@@ -12,6 +12,7 @@ import com.makar.tacticaltablet.progression.ClassCooldownManager;
 import com.makar.tacticaltablet.progression.ClassTier;
 import com.makar.tacticaltablet.progression.kit.KitManager;
 import com.makar.tacticaltablet.progression.PlayerProgressManager;
+import com.makar.tacticaltablet.tablet.ClassDefinitions;
 import com.makar.tacticaltablet.tablet.PlayerTabletState;
 
 import net.minecraft.network.FriendlyByteBuf;
@@ -19,7 +20,6 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.network.NetworkEvent;
 
-import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Supplier;
@@ -32,31 +32,7 @@ public class TabletPacket {
     private static final int UNLOCK_BASE_ACTION_OFFSET = 100;
     private static final int UPGRADE_ACTION_OFFSET_STEP = 100;
 
-    private static final Map<Integer, String> KITS = Map.ofEntries(
-            Map.entry(0, "stormtrooper"),
-            Map.entry(1, "sniper"),
-            Map.entry(2, "scout"),
-            Map.entry(3, "droneoperator"),
-            Map.entry(4, "boomguy"),
-            Map.entry(5, "mortarman"),
-            Map.entry(6, "dream"),
-            Map.entry(8, "machinegunner"),
-            Map.entry(9, "rpgtrooper"),
-            Map.entry(10, "tagilla"),
-            Map.entry(11, "blackops"),
-            Map.entry(12, "cowboy"),
-            Map.entry(13, "solider"),
-            Map.entry(14, "rebel"),
-            Map.entry(15, "saboteur"),
-            Map.entry(16, "killer"),
-            Map.entry(17, "miniboss"),
-            Map.entry(18, "shahed"),
-            Map.entry(19, "krot"),
-            Map.entry(20, "marine"),
-            Map.entry(21, "medic"),
-            Map.entry(22, "microwave"),
-            Map.entry(23, "railgunner")
-    );
+    private static final Map<Integer, String> KITS = ClassDefinitions.actionIdToClassKey();
 
     private final int actionId;
 
@@ -338,29 +314,8 @@ public class TabletPacket {
     }
 
     private String getDisplayName(String kit) {
-        if ("boomguy".equals(kit)) return "Подрывник";
-        if ("dream".equals(kit)) return "Дрим";
-        if ("rpgtrooper".equals(kit)) return "РПГ-боец";
-        if ("droneoperator".equals(kit)) return "Оператор дрона";
-        if ("machinegunner".equals(kit)) return "Пулемётчик";
-        if ("mortarman".equals(kit)) return "Миномётчик";
-        if ("stormtrooper".equals(kit)) return "Штурмовик";
-        if ("sniper".equals(kit)) return "Снайпер";
-        if ("scout".equals(kit)) return "Разведчик";
-        if ("tagilla".equals(kit)) return "Тагилла";
-        if ("blackops".equals(kit)) return "Спецназ";
-        if ("cowboy".equals(kit)) return "Ковбой";
-        if ("solider".equals(kit)) return "Солдат";
-        if ("rebel".equals(kit)) return "Повстанец";
-        if ("saboteur".equals(kit)) return "Диверсант";
-        if ("killer".equals(kit)) return "Киллер";
-        if ("miniboss".equals(kit)) return "Мини-Босс";
-        if ("shahed".equals(kit)) return "Шахед оп.";
-        if ("krot".equals(kit)) return "Крот";
-        if ("marine".equals(kit)) return "Морпех";
-        if ("medic".equals(kit)) return "Медик";
-        if ("microwave".equals(kit)) return "Микровэйв";
-        if ("railgunner".equals(kit)) return "Рэйл-ганнер";
-        return kit;
+        return ClassDefinitions.byClassKey(kit)
+                .map(definition -> definition.name().getString())
+                .orElse(kit);
     }
 }
