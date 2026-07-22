@@ -3,6 +3,7 @@ package com.makar.tacticaltablet.game.respawn;
 import com.makar.tacticaltablet.airdrop.AirdropManager;
 import com.makar.tacticaltablet.clan.ClanManager;
 import com.makar.tacticaltablet.game.GameStateManager;
+import com.makar.tacticaltablet.game.MatchAdmissionManager;
 import com.makar.tacticaltablet.game.MapSetManager;
 import com.makar.tacticaltablet.game.set.SetMatchRuntime;
 import com.makar.tacticaltablet.game.clanwar.ClanWarManager;
@@ -73,6 +74,7 @@ public class RtpTimerManager {
     public static void start(ServerPlayer player) {
         if (player == null) return;
         if (!GameStateManager.isRunning(player.server)) return;
+        if (MatchAdmissionManager.isLateSpectator(player)) return;
         if (PlayerTabletState.isRtpUsed(player)) return;
         if (!LivesManager.canContinueMatch(player)) return;
         UUID uuid = player.getUUID();
@@ -258,6 +260,11 @@ public class RtpTimerManager {
     }
 
     private static void finishRtp(ServerPlayer player) {
+        if (MatchAdmissionManager.isLateSpectator(player)) {
+            cancel(player);
+            MatchAdmissionManager.enforceLateSpectator(player, false);
+            return;
+        }
         UUID uuid = player.getUUID();
         timers.remove(uuid);
         dequeue(uuid);

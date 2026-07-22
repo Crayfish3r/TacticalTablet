@@ -2,6 +2,7 @@ package com.makar.tacticaltablet.game.team;
 
 import com.makar.tacticaltablet.clan.ClanManager;
 import com.makar.tacticaltablet.game.MatchMode;
+import com.makar.tacticaltablet.game.MatchAdmissionManager;
 import com.makar.tacticaltablet.game.SpectatorCameraManager;
 import com.makar.tacticaltablet.game.lives.LivesManager;
 import com.makar.tacticaltablet.voice.VoiceChatTeamManager;
@@ -190,6 +191,7 @@ public final class TeamMatchManager {
 
     public static TeamId assignClanWarPlayer(MinecraftServer server, ServerPlayer player) {
         if (server == null || player == null) return null;
+        if (MatchAdmissionManager.isLateSpectator(player)) return null;
 
         rememberName(player);
         String clanId = ClanManager.getClanIdForPlayer(player);
@@ -221,6 +223,7 @@ public final class TeamMatchManager {
 
     public static TeamId assignLateJoiner(MinecraftServer server, ServerPlayer player, MatchMode mode) {
         if (server == null || player == null || mode == null || !mode.isTeamMode()) return null;
+        if (MatchAdmissionManager.isLateSpectator(player)) return null;
 
         rememberName(player);
         TeamId currentTeam = playerTeams.get(player.getUUID());
@@ -335,6 +338,20 @@ public final class TeamMatchManager {
             scoreboard.removePlayerTeam(team);
         }
         originalScoreboardTeams.clear();
+    }
+
+    public static void removePlayerFromMatch(ServerPlayer player) {
+        if (player == null) return;
+        removeAssignment(player.getUUID());
+
+        Scoreboard scoreboard = player.getScoreboard();
+        PlayerTeam current = scoreboard.getPlayersTeam(player.getScoreboardName());
+        if (isManagedTeam(current)) {
+            scoreboard.removePlayerFromTeam(player.getScoreboardName(), current);
+            player.refreshTabListName();
+        }
+        originalScoreboardTeams.remove(player.getUUID());
+        SpectatorCameraManager.onPlayerTeamChanged(player);
     }
 
     public static int getAliveTeamCount(MinecraftServer server) {

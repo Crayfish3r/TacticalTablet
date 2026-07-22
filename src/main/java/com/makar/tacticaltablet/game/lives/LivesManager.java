@@ -3,6 +3,7 @@ package com.makar.tacticaltablet.game.lives;
 import com.makar.tacticaltablet.clan.ClanManager;
 import com.makar.tacticaltablet.game.GameStateManager;
 import com.makar.tacticaltablet.game.MapSetManager;
+import com.makar.tacticaltablet.game.MatchAdmissionManager;
 import com.makar.tacticaltablet.game.SpectatorCameraManager;
 import com.makar.tacticaltablet.game.clanwar.ClanWarManager;
 import com.makar.tacticaltablet.game.lobby.LobbyManager;
@@ -39,6 +40,7 @@ public class LivesManager {
 
     public static void ensureStarted(ServerPlayer player) {
         if (player == null) return;
+        if (MatchAdmissionManager.isLateSpectator(player)) return;
         bindToCurrentMatch(player);
         if (player.getTags().contains(TAG_LIVES_INIT)) return;
         if (player.getTags().contains(TAG_ELIMINATED)) return;
@@ -135,6 +137,7 @@ public class LivesManager {
 
     public static boolean canContinueMatch(ServerPlayer player) {
         if (player == null) return false;
+        if (MatchAdmissionManager.isLateSpectator(player)) return false;
         if (ModerModeManager.isInModerMode(player)) return false;
         if (isEliminated(player)) return false;
 
@@ -163,6 +166,7 @@ public class LivesManager {
 
     public static boolean isAliveParticipant(ServerPlayer player) {
         if (player == null) return false;
+        if (!MatchAdmissionManager.isCurrentMatchParticipant(player.getUUID())) return false;
         if (ModerModeManager.isInModerMode(player)) return false;
         if (!player.getTags().contains(TAG_LIVES_INIT)) return false;
         if (isEliminated(player)) return false;
@@ -347,6 +351,14 @@ public class LivesManager {
         player.setGameMode(GameType.SPECTATOR);
         SpectatorCameraManager.onPlayerEliminated(player);
         ClassXPManager.sync(player);
+    }
+
+    public static void clearForLateSpectator(ServerPlayer player) {
+        if (player == null) return;
+        player.removeTag(TAG_LIVES_INIT);
+        player.removeTag(TAG_ELIMINATED);
+        setLives(player, 0);
+        bindToCurrentMatch(player);
     }
 
     public static void resetPlayer(ServerPlayer player) {

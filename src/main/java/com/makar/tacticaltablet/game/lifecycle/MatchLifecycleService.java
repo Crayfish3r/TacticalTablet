@@ -126,6 +126,27 @@ public final class MatchLifecycleService {
         return MatchTransitionResult.applied(previous, currentContext, "recorded step " + step.trim());
     }
 
+    public MatchTransitionResult registerParticipant(UUID expectedMatchId, UUID playerId) {
+        MatchTransitionResult stale = rejectIfStale(expectedMatchId);
+        if (stale != null) return stale;
+        if (currentContext == null) {
+            return MatchTransitionResult.rejected(snapshot(), "no active match context");
+        }
+        if (playerId == null || currentContext.participantIds().contains(playerId)) {
+            return MatchTransitionResult.noOp(snapshot(), "participant already registered or missing");
+        }
+        if (currentContext.state() != MatchState.STARTING && currentContext.state() != MatchState.RUNNING) {
+            return MatchTransitionResult.rejected(snapshot(),
+                    "participants can only be registered while STARTING or RUNNING");
+        }
+
+        MatchState previous = currentContext.state();
+        long nextRevision = revision + 1L;
+        currentContext = currentContext.withParticipant(playerId, nextRevision);
+        revision = currentContext.revision();
+        return MatchTransitionResult.applied(previous, currentContext, "registered match participant " + playerId);
+    }
+
     private MatchTransitionResult transition(UUID expectedMatchId, MatchState nextState, String diagnostic) {
         MatchTransitionResult stale = rejectIfStale(expectedMatchId);
         if (stale != null) return stale;

@@ -115,6 +115,28 @@ public record MatchContext(
         );
     }
 
+    public MatchContext withParticipant(UUID playerId, long nextRevision) {
+        if (playerId == null || participantIds.contains(playerId)) {
+            return this;
+        }
+        LinkedHashSet<UUID> nextParticipants = new LinkedHashSet<>(participantIds);
+        nextParticipants.add(playerId);
+        return new MatchContext(
+                matchId,
+                state,
+                mapId,
+                modeId,
+                startReason,
+                initiatingAdministratorUuid,
+                nextParticipants,
+                completedLifecycleSteps,
+                createdAt,
+                stateEnteredAt,
+                failure,
+                nextRevision
+        );
+    }
+
     private static String normalize(String value, String fallback) {
         if (value == null) return fallback;
         String trimmed = value.trim();

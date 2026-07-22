@@ -176,6 +176,10 @@ public final class MatchStartCoordinator {
         return lifecycleService.snapshot();
     }
 
+    public MatchTransitionResult registerParticipant(UUID matchId, UUID playerId) {
+        return lifecycleService.registerParticipant(matchId, playerId);
+    }
+
     public void clearAfterLegacyCleanup() {
         MatchLifecycleSnapshot snapshot = lifecycleService.snapshot();
         if (snapshot.matchId().isEmpty()) {

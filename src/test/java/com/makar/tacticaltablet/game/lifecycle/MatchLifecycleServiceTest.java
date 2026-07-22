@@ -158,6 +158,42 @@ class MatchLifecycleServiceTest {
     }
 
     @Test
+    void earlyJoinCanBeRegisteredIdempotentlyInTheCurrentMatch() {
+        MatchLifecycleService service = service(FIRST_MATCH_ID);
+        service.beginPreparation(request());
+        service.markStarting(FIRST_MATCH_ID);
+        service.markRunning(FIRST_MATCH_ID);
+
+        MatchTransitionResult added = service.registerParticipant(FIRST_MATCH_ID, SECOND_MATCH_ID);
+        MatchTransitionResult duplicate = service.registerParticipant(FIRST_MATCH_ID, SECOND_MATCH_ID);
+
+        assertEquals(MatchTransitionStatus.APPLIED, added.status());
+        assertEquals(MatchTransitionStatus.NO_OP, duplicate.status());
+        assertEquals(Set.of(PLAYER_ID, SECOND_MATCH_ID), service.snapshot().participantIds());
+    }
+
+    @Test
+    void participantRegistrationIsScopedToMatchIdAndDoesNotLeakToNextMatch() {
+        AtomicInteger ids = new AtomicInteger();
+        MatchLifecycleService service = new MatchLifecycleService(
+                fixedClock(),
+                () -> ids.incrementAndGet() == 1 ? FIRST_MATCH_ID : SECOND_MATCH_ID
+        );
+        service.beginPreparation(request());
+        service.markStarting(FIRST_MATCH_ID);
+        service.registerParticipant(FIRST_MATCH_ID, SECOND_MATCH_ID);
+        service.markRunning(FIRST_MATCH_ID);
+        service.beginEnding(FIRST_MATCH_ID, MatchEndReason.NATURAL);
+        service.beginCleanup(FIRST_MATCH_ID);
+        service.markIdle(FIRST_MATCH_ID);
+
+        service.beginPreparation(request());
+
+        assertEquals(SECOND_MATCH_ID, service.snapshot().matchId().orElseThrow());
+        assertEquals(Set.of(PLAYER_ID), service.snapshot().participantIds());
+    }
+
+    @Test
     void policyDocumentsAllowedTransitions() {
         assertTrue(MatchTransitionPolicy.canTransition(MatchState.IDLE, MatchState.PREPARING));
         assertTrue(MatchTransitionPolicy.canTransition(MatchState.PREPARING, MatchState.STARTING));

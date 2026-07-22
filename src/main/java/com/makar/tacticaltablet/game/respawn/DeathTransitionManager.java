@@ -1,6 +1,7 @@
 package com.makar.tacticaltablet.game.respawn;
 
 import com.makar.tacticaltablet.game.MapSetManager;
+import com.makar.tacticaltablet.game.MatchAdmissionManager;
 import com.makar.tacticaltablet.game.clanwar.ClanWarManager;
 import com.makar.tacticaltablet.game.extraction.ExtractionPointManager;
 import com.makar.tacticaltablet.game.lives.LivesManager;
@@ -68,6 +69,7 @@ public final class DeathTransitionManager {
 
     public static boolean begin(ServerPlayer player) {
         if (player == null) return false;
+        if (MatchAdmissionManager.enforceLateSpectator(player, false)) return true;
 
         DeathMessage message = pendingMessages.remove(player.getUUID());
         if (message == null) return false;
@@ -115,6 +117,10 @@ public final class DeathTransitionManager {
     }
 
     private static void finishRespawn(ServerPlayer player) {
+        if (MatchAdmissionManager.enforceLateSpectator(player, false)) {
+            ClassXPManager.sync(player);
+            return;
+        }
         if (LivesManager.ensureEliminatedIfOutOfLives(player)) {
             ClassXPManager.sync(player);
             return;

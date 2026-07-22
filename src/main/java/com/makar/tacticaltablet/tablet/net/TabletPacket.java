@@ -2,6 +2,7 @@ package com.makar.tacticaltablet.tablet.net;
 
 import com.makar.tacticaltablet.clan.ClanManager;
 import com.makar.tacticaltablet.game.GameStateManager;
+import com.makar.tacticaltablet.game.MatchAdmissionManager;
 import com.makar.tacticaltablet.game.MapSetManager;
 import com.makar.tacticaltablet.game.clanwar.ClanWarManager;
 import com.makar.tacticaltablet.game.lives.LivesManager;
@@ -202,6 +203,10 @@ public class TabletPacket {
     }
 
     private void handleRtp(ServerPlayer player) {
+        if (MatchAdmissionManager.enforceLateSpectator(player, false)) {
+            LobbyManager.sync(player);
+            return;
+        }
         if (!GameStateManager.isRunning(player.server)) {
             player.sendSystemMessage(Component.literal("[WAR] Планшет недоступен до начала матча."));
             LobbyManager.sync(player);
@@ -220,6 +225,10 @@ public class TabletPacket {
     }
 
     private void handleKit(ServerPlayer player, String kit) {
+        if (MatchAdmissionManager.enforceLateSpectator(player, false)) {
+            LobbyManager.sync(player);
+            return;
+        }
         if (MapSetManager.isCompetitiveSet() && PlayerProgressManager.isShopClass(kit)) {
             player.sendSystemMessage(Component.literal("[WAR] Магазинные классы недоступны в соревновательном режиме."));
             LobbyManager.sync(player);

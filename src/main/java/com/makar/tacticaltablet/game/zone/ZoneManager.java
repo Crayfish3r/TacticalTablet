@@ -27,6 +27,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Random;
+import java.util.OptionalInt;
 
 public final class ZoneManager {
 
@@ -65,6 +66,14 @@ public final class ZoneManager {
     private static volatile RtpSettings activeRtpSettings = RtpSettings.surfaceDefaults();
 
     private ZoneManager() {
+    }
+
+    /** Returns the externally visible, one-based zone phase number. */
+    public static OptionalInt getCurrentPhaseNumber() {
+        if (currentPhaseIndex < 0 || currentPhaseIndex >= PHASES.length) {
+            return OptionalInt.empty();
+        }
+        return OptionalInt.of(PHASES[currentPhaseIndex].number);
     }
 
     public static void start(MinecraftServer server) {

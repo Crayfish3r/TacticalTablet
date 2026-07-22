@@ -6,6 +6,7 @@ import com.makar.tacticaltablet.clan.ClanManager;
 import com.makar.tacticaltablet.core.TacticalTabletMod;
 import com.makar.tacticaltablet.game.GameStateManager;
 import com.makar.tacticaltablet.game.MapSetManager;
+import com.makar.tacticaltablet.game.MatchAdmissionManager;
 import com.makar.tacticaltablet.game.MatchMode;
 import com.makar.tacticaltablet.game.team.TeamId;
 import com.makar.tacticaltablet.game.team.TeamMatchManager;
@@ -134,7 +135,9 @@ public final class DiscordLeaderboardService {
         }
 
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-            currentMatchStats.put(key(player), MatchStats.fromPlayer(player));
+            if (MatchAdmissionManager.isCurrentMatchParticipant(player.getUUID())) {
+                currentMatchStats.put(key(player), MatchStats.fromPlayer(player));
+            }
         }
     }
 
@@ -145,7 +148,7 @@ public final class DiscordLeaderboardService {
     }
 
     public static synchronized void recordMatchKill(ServerPlayer player) {
-        if (player == null) {
+        if (player == null || !MatchAdmissionManager.isCurrentMatchParticipant(player.getUUID())) {
             return;
         }
 
@@ -153,7 +156,7 @@ public final class DiscordLeaderboardService {
     }
 
     public static synchronized void recordMatchDeath(ServerPlayer player) {
-        if (player == null) {
+        if (player == null || !MatchAdmissionManager.isCurrentMatchParticipant(player.getUUID())) {
             return;
         }
 
@@ -161,13 +164,14 @@ public final class DiscordLeaderboardService {
     }
 
     public static synchronized void recordMatchAssist(UUID playerId, String playerName) {
-        if (playerId == null) return;
+        if (playerId == null || !MatchAdmissionManager.isCurrentMatchParticipant(playerId)) return;
         currentMatchStats.computeIfAbsent(playerId.toString(),
                 ignored -> new MatchStats(playerId.toString(), playerName)).addAssist();
     }
 
     public static void recordMatchDamage(ServerPlayer attacker, double amount) {
-        if (attacker == null || amount <= 0.0D) {
+        if (attacker == null || amount <= 0.0D
+                || !MatchAdmissionManager.isCurrentMatchParticipant(attacker.getUUID())) {
             return;
         }
 
@@ -177,7 +181,8 @@ public final class DiscordLeaderboardService {
     }
 
     public static synchronized int recordTeamKill(MinecraftServer server, ServerPlayer player) {
-        if (server == null || player == null) {
+        if (server == null || player == null
+                || !MatchAdmissionManager.isCurrentMatchParticipant(player.getUUID())) {
             return 0;
         }
 
@@ -217,6 +222,11 @@ public final class DiscordLeaderboardService {
             boolean setComplete,
             boolean clanWarSet
     ) {
+        winners = winners == null ? List.of() : winners.stream()
+                .filter(java.util.Objects::nonNull)
+                .filter(player -> MatchAdmissionManager.isCurrentMatchParticipant(player.getUUID()))
+                .distinct()
+                .toList();
         boolean effectiveClanWarSet = clanWarSet || currentSetClanWar;
 
         if (currentMatchStats.isEmpty() && !setComplete) {
@@ -243,10 +253,10 @@ public final class DiscordLeaderboardService {
                         stats.kills(), stats.assists(), stats.actualHealthDamage()));
             }
         }
-        List<UUID> winnerIds = winners == null ? List.of() : winners.stream()
-                .filter(java.util.Objects::nonNull).map(ServerPlayer::getUUID).distinct().toList();
-        TeamId winningTeam = winners == null ? null : winners.stream()
-                .filter(java.util.Objects::nonNull).map(TeamMatchManager::getTeam)
+        List<UUID> winnerIds = winners.stream()
+                .map(ServerPlayer::getUUID).distinct().toList();
+        TeamId winningTeam = winners.stream()
+                .map(TeamMatchManager::getTeam)
                 .filter(java.util.Objects::nonNull).findFirst().orElse(null);
         MatchPlacementTracker.PlacementSnapshot placementSnapshot = SetMatchRuntime.finishMatch(
                 winnerIds, winningTeam, combatTotals);

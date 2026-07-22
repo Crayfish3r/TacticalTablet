@@ -12,6 +12,8 @@ import com.makar.tacticaltablet.game.extraction.ExtractionPointManager;
 import com.makar.tacticaltablet.game.lifecycle.LegacyMatchStateMapper;
 import com.makar.tacticaltablet.game.lifecycle.MatchLifecycleService;
 import com.makar.tacticaltablet.game.lifecycle.MatchLifecycleSnapshot;
+import com.makar.tacticaltablet.game.lifecycle.MatchTransitionResult;
+import com.makar.tacticaltablet.game.lifecycle.MatchTransitionStatus;
 import com.makar.tacticaltablet.game.lifecycle.MatchStartRequest;
 import com.makar.tacticaltablet.game.lifecycle.MatchStartStep;
 import com.makar.tacticaltablet.game.lifecycle.MatchState;
@@ -140,6 +142,14 @@ public class GameStateManager {
 
     public static MatchLifecycleSnapshot getLifecycleSnapshot() {
         return MATCH_START_COORDINATOR.snapshot();
+    }
+
+    static boolean registerCurrentMatchParticipant(UUID matchId, UUID playerId) {
+        if (matchId == null || playerId == null) return false;
+        MatchTransitionResult result = MATCH_START_COORDINATOR.registerParticipant(matchId, playerId);
+        return (result.status() == MatchTransitionStatus.APPLIED
+                || result.status() == MatchTransitionStatus.NO_OP)
+                && MATCH_START_COORDINATOR.snapshot().participantIds().contains(playerId);
     }
 
     public static boolean isStartTransitionPlayerSetup() {
@@ -363,6 +373,18 @@ public class GameStateManager {
         boolean clanWarSet = MapSetManager.isClanWarSet();
         boolean completingSet = MapSetManager.getCompletedGames() + 1 >= MapSetManager.GAMES_PER_MAP;
         List<ServerPlayer> normalizedWinners = normalizedWinners(winners, displayWinner);
+        boolean hasEligibleWinner = !normalizedWinners.isEmpty();
+        if (!hasEligibleWinner) {
+            displayWinner = null;
+            winnerName = "Нет победителя";
+            winnerTeam = null;
+        } else if (displayWinner == null
+                || !MatchAdmissionManager.isCurrentMatchParticipant(displayWinner.getUUID())) {
+            displayWinner = normalizedWinners.get(0);
+            if (winnerTeam == null) {
+                winnerName = displayWinner.getName().getString();
+            }
+        }
 
         for (ServerPlayer winner : normalizedWinners) {
             PlayerProgressManager.addWin(winner);
@@ -399,12 +421,15 @@ public class GameStateManager {
         List<ServerPlayer> result = new ArrayList<>();
         if (winners != null) {
             for (ServerPlayer winner : winners) {
-                if (winner != null && !result.contains(winner)) {
+                if (winner != null
+                        && MatchAdmissionManager.isCurrentMatchParticipant(winner.getUUID())
+                        && !result.contains(winner)) {
                     result.add(winner);
                 }
             }
         }
-        if (result.isEmpty() && fallbackWinner != null) {
+        if (result.isEmpty() && fallbackWinner != null
+                && MatchAdmissionManager.isCurrentMatchParticipant(fallbackWinner.getUUID())) {
             result.add(fallbackWinner);
         }
         return result;
@@ -1145,6 +1170,7 @@ public class GameStateManager {
         private List<String> recordMatchesPlayedAfterCommit(MinecraftServer server) {
             List<String> failures = new ArrayList<>();
             for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+                if (!MatchAdmissionManager.isCurrentMatchParticipant(player.getUUID())) continue;
                 try {
                     PlayerProgressManager.addMatchPlayed(player);
                 } catch (Exception exception) {

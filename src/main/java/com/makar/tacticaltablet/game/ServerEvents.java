@@ -92,6 +92,14 @@ public class ServerEvents {
             PrefixManager.updateLastKnownName(player.getUUID(), player.getGameProfile().getName());
             TeamMatchManager.rememberPlayer(player);
             NameTagManager.applyToAll(player.server);
+            if (MatchAdmissionManager.enforceLateSpectator(player, true)) {
+                MapSetManager.sync(player, MapSetManager.isVoting());
+                GameStateManager.showCurrentSetRewardOnJoin(player);
+                TeamMatchManager.applyScoreboardTeams(player.server);
+                ClassXPManager.sync(player);
+                syncPrefixes(player.server);
+                return;
+            }
             LivesManager.reconcileMatchStateOnJoin(player);
             if (LivesManager.ensureEliminatedIfOutOfLives(player)) {
                 TeamMatchManager.applyScoreboardTeams(player.server);
@@ -134,6 +142,11 @@ public class ServerEvents {
         if (event.getEntity() instanceof ServerPlayer player) {
             PlayerProgressManager.loadPlayer(player);
 
+            if (MatchAdmissionManager.enforceLateSpectator(player, false)) {
+                ClassXPManager.sync(player);
+                return;
+            }
+
             if (DeathTransitionManager.begin(player)) {
                 return;
             }
@@ -166,6 +179,15 @@ public class ServerEvents {
         if (!(event.getOriginal() instanceof ServerPlayer oldPlayer)) return;
 
         PlayerProgressManager.loadPlayer(newPlayer);
+
+        if (MatchAdmissionManager.isLateSpectator(newPlayer)) {
+            DeathTransitionManager.clear(newPlayer);
+            PlayerTabletState.reset(newPlayer);
+            LivesManager.clearForLateSpectator(newPlayer);
+            newPlayer.removeTag("war.playing");
+            newPlayer.removeTag("in_lobby");
+            return;
+        }
 
         for (String tag : oldPlayer.getTags()) {
             if (tag.equals("war.lives_init")
@@ -373,7 +395,9 @@ public class ServerEvents {
     }
 
     private static boolean isActiveMatchParticipant(ServerPlayer player) {
-        return player != null && player.getTags().contains("war.playing");
+        return player != null
+                && MatchAdmissionManager.isCurrentMatchParticipant(player.getUUID())
+                && player.getTags().contains("war.playing");
     }
 
     private static void processPlayerDeath(ServerPlayer victim, DamageSource source) {
@@ -434,7 +458,7 @@ public class ServerEvents {
                 && TeamMatchManager.areTeammates(killer, victim);
         KillCreditPolicy.Outcome outcome = KillCreditPolicy.classify(
                 killer != null,
-                killer != null && killer.getTags().contains("war.playing"),
+                killer != null && isActiveMatchParticipant(killer),
                 killer != null && killer.getUUID().equals(victim.getUUID()),
                 victimOwnedProjectile,
                 teammates

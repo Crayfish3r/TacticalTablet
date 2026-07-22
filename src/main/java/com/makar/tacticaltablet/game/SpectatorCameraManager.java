@@ -74,6 +74,9 @@ public final class SpectatorCameraManager {
         }
 
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            if (MatchAdmissionManager.isLateSpectator(player) && !player.isSpectator()) {
+                MatchAdmissionManager.enforceLateSpectator(player, false);
+            }
             if (!shouldLockSpectator(player)) {
                 clearSpectatorCameraState(player);
                 continue;
@@ -359,7 +362,9 @@ public final class SpectatorCameraManager {
         return player != null
                 && isActiveMatch(player.server)
                 && isStrictSpectatorCameraMatch()
-                && (LivesManager.isEliminated(player) || player.getTags().contains(ClanWarManager.TAG_SPECTATING))
+                && (LivesManager.isEliminated(player)
+                    || player.getTags().contains(ClanWarManager.TAG_SPECTATING)
+                    || MatchAdmissionManager.isLateSpectator(player))
                 && player.isSpectator();
     }
 

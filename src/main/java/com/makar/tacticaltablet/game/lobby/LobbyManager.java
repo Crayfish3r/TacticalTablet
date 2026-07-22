@@ -1,6 +1,7 @@
 package com.makar.tacticaltablet.game.lobby;
 
 import com.makar.tacticaltablet.game.GameStateManager;
+import com.makar.tacticaltablet.game.MatchAdmissionManager;
 import com.makar.tacticaltablet.airdrop.AirdropManager;
 import com.makar.tacticaltablet.game.contract.ContractManager;
 import com.makar.tacticaltablet.game.lives.LivesManager;
@@ -39,6 +40,7 @@ public class LobbyManager {
 
     public static void moveToLobby(ServerPlayer player) {
         if (player == null) return;
+        if (MatchAdmissionManager.enforceLateSpectator(player, false)) return;
 
         ServerLevel lobby = GameStateManager.getLobbyLevel(player.server);
         if (lobby == null) {
