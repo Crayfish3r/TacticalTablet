@@ -250,6 +250,60 @@ public final class ProgressService {
         return true;
     }
 
+    IdempotentCounterResult incrementCounterIdempotently(
+            MutableProgressState progress,
+            MutableProgressState.Counter counter,
+            String receiptId,
+            String operationType,
+            Clock clock
+    ) {
+        Objects.requireNonNull(progress, "progress");
+        Objects.requireNonNull(counter, "counter");
+        Objects.requireNonNull(clock, "clock");
+        int previous = progress.counter(counter);
+        if (receiptId == null || receiptId.isBlank() || operationType == null
+                || operationType.isBlank() || operationType.length() > 64) {
+            return counterResult(IdempotentCreditStatus.FAILED, previous, "Invalid counter receipt");
+        }
+
+        Optional<ProgressReceipt> existing = progress.receipt(receiptId);
+        if (existing.isPresent()) {
+            ProgressReceipt receipt = existing.get();
+            if (operationType.equals(receipt.operationType()) && "1".equals(receipt.payloadHash())) {
+                return counterResult(IdempotentCreditStatus.ALREADY_APPLIED, previous, "");
+            }
+            return counterResult(IdempotentCreditStatus.CONFLICT, previous, "Counter receipt mismatch");
+        }
+        if (previous == Integer.MAX_VALUE) {
+            return counterResult(IdempotentCreditStatus.FAILED, previous, "Counter would overflow");
+        }
+
+        int current = previous + 1;
+        ProgressReceipt receipt = new ProgressReceipt(
+                receiptId, operationType, clock.millis(), previous, current, "1");
+        progress.counter(counter, current);
+        progress.addReceipt(receipt);
+        return new IdempotentCounterResult(
+                IdempotentCreditStatus.APPLIED,
+                previous,
+                current,
+                "",
+                Optional.of(new IdempotentCounterRollback(counter, previous, current, receipt))
+        );
+    }
+
+    boolean rollbackIdempotentCounter(
+            MutableProgressState progress,
+            IdempotentCounterRollback rollback
+    ) {
+        Objects.requireNonNull(progress, "progress");
+        Objects.requireNonNull(rollback, "rollback");
+        if (progress.counter(rollback.counter()) != rollback.appliedValue()) return false;
+        if (!progress.removeReceipt(rollback.receipt())) return false;
+        progress.counter(rollback.counter(), rollback.previousValue());
+        return true;
+    }
+
     ExclusiveUnlockResult grantExclusiveClass(ExclusiveUnlockState progress, String classId) {
         Objects.requireNonNull(progress, "progress");
         String normalizedClass = catalog.normalizeClassId(classId);
@@ -326,6 +380,14 @@ public final class ProgressService {
             String diagnostic
     ) {
         return new IdempotentCreditResult(status, balance, balance, diagnostic, Optional.empty());
+    }
+
+    private IdempotentCounterResult counterResult(
+            IdempotentCreditStatus status,
+            int value,
+            String diagnostic
+    ) {
+        return new IdempotentCounterResult(status, value, value, diagnostic, Optional.empty());
     }
 
     private void restorePurchase(ExclusiveUnlockState progress, String classId, ProgressEntry previous) {

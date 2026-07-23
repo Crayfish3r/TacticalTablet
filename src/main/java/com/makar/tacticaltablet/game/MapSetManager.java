@@ -287,10 +287,18 @@ public final class MapSetManager {
         return state.setReportDispatched;
     }
 
-    public static synchronized void markSetReportDispatched(MinecraftServer server) {
+    public static synchronized boolean markSetReportDispatched(
+            MinecraftServer server,
+            UUID expectedSetId
+    ) {
         initStorage(server);
-        state.setReportDispatched = true;
-        saveState();
+        if (expectedSetId == null || !expectedSetId.toString().equals(state.setId)) return false;
+        boolean previous = state.setReportDispatched;
+        return SetReportDispatchFlag.persistTrue(
+                previous,
+                value -> state.setReportDispatched = value,
+                MapSetManager::saveState
+        );
     }
 
     public static synchronized boolean isCompetitiveSet() {
@@ -337,50 +345,67 @@ public final class MapSetManager {
             broadcast(server, "[WAR] Map voting cannot start because the map rotation pool is empty.");
             return;
         }
-        if (debug) {
-            skipRewardingForDebug(server);
-        }
-
+        int previousCompletedGames = state.completedGames;
+        SetRewardSummary previousRewardSummary = state.rewardSummary;
+        SetLeaderboardSnapshot previousLeaderboardSnapshot = state.leaderboardSnapshot;
+        long previousRewardEndsAtMillis = state.rewardEndsAtMillis;
+        RewardPhaseStatus previousRewardPhaseStatus = state.rewardPhaseStatus;
+        boolean previousNextSetCompetitive = state.nextSetCompetitive;
+        boolean previousNextSetClanWar = state.nextSetClanWar;
         List<String> previousHistory = List.copyOf(state.recentPlayedMaps);
-        List<String> updatedHistory = MapVoteCandidatePolicy.normalizeRecentPlayedMaps(
+        List<String> updatedHistory = MapVoteCandidatePolicy.reconcileRecentPlayedMaps(
                 fullPool, previousHistory, RECENT_MAP_COOLDOWN);
         if (!debug && isSetComplete()) {
             updatedHistory = MapVoteCandidatePolicy.recordPlayedMap(
                     fullPool, updatedHistory, currentMapName(server), RECENT_MAP_COOLDOWN);
         }
-        if (!updatedHistory.equals(previousHistory)) {
-            state.recentPlayedMaps = new ArrayList<>(updatedHistory);
-            if (!saveState()) {
-                state.recentPlayedMaps = new ArrayList<>(previousHistory);
-                TacticalTabletMod.LOGGER.error(
-                        "Cannot start map voting because played map history could not be persisted.");
-                broadcast(server, "[WAR] Map voting could not save its played-map history. Please retry.");
-                return;
-            }
+        if (debug) {
+            state.completedGames = GAMES_PER_MAP;
+            state.rewardSummary = null;
+            state.leaderboardSnapshot = null;
+            state.rewardEndsAtMillis = -1L;
+            state.rewardPhaseStatus = RewardPhaseStatus.SKIPPED;
         }
+        state.recentPlayedMaps = new ArrayList<>(updatedHistory);
 
-        votingMaps = MapVoteCandidatePolicy.selectCandidates(
+        List<String> selectedCandidates = MapVoteCandidatePolicy.selectCandidates(
                 fullPool,
                 state.recentPlayedMaps,
                 CANDIDATE_COUNT,
                 RECENT_MAP_COOLDOWN,
                 RANDOM
         );
-        if (votingMaps.size() < CANDIDATE_COUNT) {
+        if (selectedCandidates.size() < CANDIDATE_COUNT) {
             TacticalTabletMod.LOGGER.warn(
                     "Map voting pool contains only {} unique map(s); showing every available map.",
-                    votingMaps.size()
+                    selectedCandidates.size()
             );
         }
 
+        state.nextSetCompetitive = false;
+        state.nextSetClanWar = false;
+        if (!MapVoteOpeningTransaction.commit(MapSetManager::saveState, () -> {
+            state.completedGames = previousCompletedGames;
+            state.rewardSummary = previousRewardSummary;
+            state.leaderboardSnapshot = previousLeaderboardSnapshot;
+            state.rewardEndsAtMillis = previousRewardEndsAtMillis;
+            state.rewardPhaseStatus = previousRewardPhaseStatus;
+            state.nextSetCompetitive = previousNextSetCompetitive;
+            state.nextSetClanWar = previousNextSetClanWar;
+            state.recentPlayedMaps = new ArrayList<>(previousHistory);
+        })) {
+            TacticalTabletMod.LOGGER.error(
+                    "Cannot start map voting because its required state could not be persisted.");
+            broadcast(server, "[WAR] Map voting state could not be saved. Please retry.");
+            return;
+        }
+
+        votingMaps = selectedCandidates;
         votes.clear();
         selectedMap = "";
         voteSecondsLeft = MAP_VOTE_SECONDS;
         voting = true;
         stopIssued = false;
-        state.nextSetCompetitive = false;
-        state.nextSetClanWar = false;
-        saveState();
 
         broadcast(server, debug
                 ? "[WAR] Отладочное голосование за следующую карту началось. После выбора сервер будет перезапущен."
@@ -658,8 +683,16 @@ public final class MapSetManager {
 
     private static void reconcileRecentPlayedMaps(MinecraftServer server) {
         List<String> previousHistory = List.copyOf(state.recentPlayedMaps);
-        List<String> normalizedHistory = MapVoteCandidatePolicy.normalizeRecentPlayedMaps(
-                MapRotationManager.listMapNames(server),
+        List<String> fullPool = MapVoteCandidatePolicy.normalizePool(
+                MapRotationManager.listMapNames(server));
+        if (fullPool.isEmpty()) {
+            TacticalTabletMod.LOGGER.warn(
+                    "Skipping played map history reconciliation because the map rotation pool is empty; "
+                            + "the saved cooldown history is preserved.");
+            return;
+        }
+        List<String> normalizedHistory = MapVoteCandidatePolicy.reconcileRecentPlayedMaps(
+                fullPool,
                 previousHistory,
                 RECENT_MAP_COOLDOWN
         );

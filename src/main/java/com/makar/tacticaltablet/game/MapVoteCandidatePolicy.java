@@ -82,6 +82,17 @@ public final class MapVoteCandidatePolicy {
         return List.copyOf(result);
     }
 
+    public static List<String> reconcileRecentPlayedMaps(
+            List<String> fullPool,
+            List<String> recentPlayedMaps,
+            int cooldownSize
+    ) {
+        if (normalizePool(fullPool).isEmpty()) {
+            return normalizeStoredHistory(recentPlayedMaps, cooldownSize);
+        }
+        return normalizeRecentPlayedMaps(fullPool, recentPlayedMaps, cooldownSize);
+    }
+
     public static List<String> normalizeStoredHistory(List<String> recentPlayedMaps, int cooldownSize) {
         if (recentPlayedMaps == null || recentPlayedMaps.isEmpty() || cooldownSize <= 0) {
             return List.of();

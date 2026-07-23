@@ -100,6 +100,19 @@ class MapVoteCandidatePolicyTest {
     }
 
     @Test
+    void emptyPoolPreservesStoredCooldownAndRestoredPoolReconcilesIt() {
+        List<String> history = List.of("Alpha", "Removed", "Bravo");
+
+        List<String> unavailable = MapVoteCandidatePolicy.reconcileRecentPlayedMaps(
+                List.of(), history, 3);
+        List<String> restored = MapVoteCandidatePolicy.reconcileRecentPlayedMaps(
+                List.of("Alpha", "Bravo", "Charlie"), unavailable, 3);
+
+        assertEquals(history, unavailable);
+        assertEquals(List.of("Alpha", "Bravo"), restored);
+    }
+
+    @Test
     void recordingPlayedMapIsCanonicalBoundedAndIdempotent() {
         List<String> pool = List.of("Alpha", "Bravo", "Charlie", "Delta");
 

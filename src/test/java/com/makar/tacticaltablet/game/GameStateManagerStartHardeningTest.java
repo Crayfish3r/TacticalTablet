@@ -30,13 +30,13 @@ class GameStateManagerStartHardeningTest {
         int postCommit = source.indexOf("public void postCommit(MinecraftServer server) throws Exception");
         int initializePlayers = source.indexOf("private void initializePlayers(MinecraftServer server)");
         int rollbackPlayers = source.indexOf("private void rollbackPlayers(MinecraftServer server)");
-        int addMatchPlayed = source.indexOf("PlayerProgressManager.addMatchPlayed(player)");
+        int addMatchPlayed = source.indexOf("PlayerProgressManager.ensureMatchPlayed(player, matchId, null)");
 
         assertTrue(postCommit >= 0);
         assertTrue(initializePlayers >= 0);
         assertTrue(rollbackPlayers > initializePlayers);
         assertTrue(addMatchPlayed > postCommit);
-        assertFalse(source.substring(initializePlayers, rollbackPlayers).contains("addMatchPlayed"));
+        assertFalse(source.substring(initializePlayers, rollbackPlayers).contains("ensureMatchPlayed"));
         assertFalse(postCommitBlock(source).contains("Р"));
     }
 

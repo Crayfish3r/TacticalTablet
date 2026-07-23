@@ -28,43 +28,49 @@ public final class MatchAdmissionManager {
     private static final Component LATE_JOIN_SUBTITLE =
             Component.literal("Возрождение — только в следующей игре!");
 
+    private static final MatchAdmissionService ADMISSION_SERVICE = new MatchAdmissionService(
+            GameStateManager::getLifecycleSnapshot,
+            () -> ZoneManager.getCurrentPhaseNumber().orElse(0),
+            GameStateManager::registerCurrentMatchParticipant
+    );
+
     private MatchAdmissionManager() {
     }
 
     public static MatchAdmissionStatus resolve(ServerPlayer player) {
-        return player == null ? MatchAdmissionStatus.NO_ACTIVE_MATCH : resolve(player.getUUID());
+        return inspectStatus(player);
     }
 
     public static MatchAdmissionStatus resolve(UUID playerId) {
-        if (playerId == null) return MatchAdmissionStatus.NO_ACTIVE_MATCH;
+        return inspectStatus(playerId);
+    }
 
-        MatchLifecycleSnapshot snapshot = GameStateManager.getLifecycleSnapshot();
-        UUID matchId = snapshot.matchId().orElse(null);
-        int phase = ZoneManager.getCurrentPhaseNumber().orElse(0);
-        boolean active = matchId != null
-                && (snapshot.state() == MatchState.STARTING || snapshot.state() == MatchState.RUNNING);
-        boolean admitted = snapshot.participantIds().contains(playerId);
-        MatchAdmissionStatus status = MatchAdmissionPolicy.classify(active, admitted, phase);
+    public static MatchAdmissionStatus inspectStatus(ServerPlayer player) {
+        return player == null ? MatchAdmissionStatus.NO_ACTIVE_MATCH : inspectStatus(player.getUUID());
+    }
 
-        if (status == MatchAdmissionStatus.ADMITTED && !admitted) {
-            if (GameStateManager.registerCurrentMatchParticipant(matchId, playerId)) {
-                return MatchAdmissionStatus.ADMITTED;
-            }
+    public static MatchAdmissionStatus inspectStatus(UUID playerId) {
+        return ADMISSION_SERVICE.inspect(playerId).status();
+    }
+
+    public static MatchAdmissionStatus admitEligiblePlayer(ServerPlayer player) {
+        if (player == null) return MatchAdmissionStatus.NO_ACTIVE_MATCH;
+        MatchAdmissionService.Inspection result = ADMISSION_SERVICE.admit(player.getUUID());
+        if (result.status() == MatchAdmissionStatus.LATE_SPECTATOR && result.phase() < 3) {
             TacticalTabletMod.LOGGER.error(
                     "Failed to register early match participant matchId={} playerId={} zonePhase={}",
-                    matchId, playerId, phase
+                    result.matchId(), player.getUUID(), result.phase()
             );
-            return MatchAdmissionStatus.LATE_SPECTATOR;
         }
-        return status;
+        return result.status();
     }
 
     public static boolean isLateSpectator(ServerPlayer player) {
-        return resolve(player) == MatchAdmissionStatus.LATE_SPECTATOR;
+        return inspectStatus(player) == MatchAdmissionStatus.LATE_SPECTATOR;
     }
 
     public static boolean isLateSpectator(UUID playerId) {
-        return resolve(playerId) == MatchAdmissionStatus.LATE_SPECTATOR;
+        return inspectStatus(playerId) == MatchAdmissionStatus.LATE_SPECTATOR;
     }
 
     public static boolean isCurrentMatchParticipant(UUID playerId) {

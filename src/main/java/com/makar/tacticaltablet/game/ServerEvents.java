@@ -92,13 +92,34 @@ public class ServerEvents {
             PrefixManager.updateLastKnownName(player.getUUID(), player.getGameProfile().getName());
             TeamMatchManager.rememberPlayer(player);
             NameTagManager.applyToAll(player.server);
-            if (MatchAdmissionManager.enforceLateSpectator(player, true)) {
+            MatchAdmissionStatus admission = MatchAdmissionManager.inspectStatus(player);
+            if (admission == MatchAdmissionStatus.LATE_SPECTATOR) {
+                MatchAdmissionManager.enforceLateSpectator(player, true);
                 MapSetManager.sync(player, MapSetManager.isVoting());
                 GameStateManager.showCurrentSetRewardOnJoin(player);
                 TeamMatchManager.applyScoreboardTeams(player.server);
                 ClassXPManager.sync(player);
                 syncPrefixes(player.server);
                 return;
+            }
+            if (admission == MatchAdmissionStatus.ADMITTED) {
+                if (MatchAdmissionManager.admitEligiblePlayer(player) != MatchAdmissionStatus.ADMITTED) {
+                    TacticalTabletMod.LOGGER.error(
+                            "Could not admit player {} to the active early-phase match",
+                            player.getUUID());
+                    return;
+                }
+                var lifecycle = GameStateManager.getLifecycleSnapshot();
+                var matchId = lifecycle.matchId().orElse(null);
+                if (matchId != null && lifecycle.participantIds().contains(player.getUUID())) {
+                    var server = player.server;
+                    var playerId = player.getUUID();
+                    PlayerProgressManager.ensureMatchPlayed(player, matchId, () -> {
+                        ServerPlayer online = server.getPlayerList().getPlayer(playerId);
+                        if (online != null) finishPlayerJoin(online);
+                    });
+                    return;
+                }
             }
             LivesManager.reconcileMatchStateOnJoin(player);
             if (LivesManager.ensureEliminatedIfOutOfLives(player)) {
@@ -135,6 +156,43 @@ public class ServerEvents {
             ClassXPManager.sync(player);
             syncPrefixes(player.server);
         }
+    }
+
+    private static void finishPlayerJoin(ServerPlayer player) {
+        LivesManager.reconcileMatchStateOnJoin(player);
+        if (LivesManager.ensureEliminatedIfOutOfLives(player)) {
+            TeamMatchManager.applyScoreboardTeams(player.server);
+            ClassXPManager.sync(player);
+            syncPrefixes(player.server);
+            player.server.execute(() -> GameStateManager.checkForMatchEnd(player.server));
+            return;
+        }
+        if (GameStateManager.isRunning(player.server)
+                && GameStateManager.getMatchPhase() == MatchPhase.RUNNING
+                && GameStateManager.getCurrentMode().isTeamMode()) {
+            TeamId team = MapSetManager.isClanWarSet()
+                    ? TeamMatchManager.assignClanWarPlayer(player.server, player)
+                    : TeamMatchManager.assignLateJoiner(
+                    player.server,
+                    player,
+                    GameStateManager.getCurrentMode()
+            );
+            if (team != null) {
+                LivesManager.ensureStarted(player);
+                VoiceChatTeamManager.assignPlayerToVoiceGroup(player);
+                player.sendSystemMessage(Component.literal(
+                        "[WAR] Р’С‹ РїСЂРёСЃРѕРµРґРёРЅРµРЅС‹ Рє РєРѕРјР°РЅРґРµ " + team.displayName() + "."
+                ).withStyle(team.chatColor()));
+            }
+        }
+        LobbyManager.moveToLobby(player);
+        MapSetManager.sync(player, MapSetManager.isVoting());
+        GameStateManager.showCurrentSetRewardOnJoin(player);
+        ContractManager.ensureTracker(player);
+        ContractManager.giveSelectionTrackerIfAvailable(player);
+        TeamMatchManager.applyScoreboardTeams(player.server);
+        ClassXPManager.sync(player);
+        syncPrefixes(player.server);
     }
 
     @SubscribeEvent

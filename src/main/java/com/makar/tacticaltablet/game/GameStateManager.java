@@ -2,7 +2,6 @@ package com.makar.tacticaltablet.game;
 
 import com.makar.tacticaltablet.admin.TestModeManager;
 import com.makar.tacticaltablet.airdrop.AirdropManager;
-import com.makar.tacticaltablet.clan.ClanManager;
 import com.makar.tacticaltablet.core.TacticalTabletMod;
 import com.makar.tacticaltablet.game.clanwar.ClanWarManager;
 import com.makar.tacticaltablet.game.lives.LivesManager;
@@ -36,6 +35,7 @@ import com.makar.tacticaltablet.game.set.SetRewardService;
 import com.makar.tacticaltablet.game.set.SetRewardSummary;
 import com.makar.tacticaltablet.game.set.SetMatchRuntime;
 import com.makar.tacticaltablet.integration.discord.DiscordLeaderboardService;
+import com.makar.tacticaltablet.integration.discord.SetReportDispatchCoordinator;
 import com.makar.tacticaltablet.inventory.InventoryManager;
 import com.makar.tacticaltablet.map.WorldCleanupManager;
 import com.makar.tacticaltablet.progression.ClassCooldownManager;
@@ -84,6 +84,8 @@ public class GameStateManager {
     private static final String GAME_STATE_OBJECTIVE = "gameState";
     private static final ResourceLocation START_GAME_FUNCTION = new ResourceLocation("war", "start_game");
     private static final ResourceLocation RESET_GAME_FUNCTION = new ResourceLocation("war", "reset");
+    private static final SetReportDispatchCoordinator SET_REPORT_DISPATCH =
+            new SetReportDispatchCoordinator();
 
     private static boolean matchHadEnoughPlayers = false;
     private static int matchStartingParticipants = 0;
@@ -219,6 +221,12 @@ public class GameStateManager {
         if (server == null) return;
         if (++tickCounter < 20) return;
         tickCounter = 0;
+        SetRewardSummary pendingSetReport = MapSetManager.getRewardSummary();
+        if (pendingSetReport != null
+                && !MapSetManager.isClanWarSet()
+                && !MapSetManager.isSetReportDispatched()) {
+            dispatchSetReportOnce(server, pendingSetReport);
+        }
 
         if (postGameDelay > 0) {
             postGameDelay--;
@@ -329,9 +337,7 @@ public class GameStateManager {
     }
 
     private static String clanWarWinnerLabel(ServerPlayer winner) {
-        if (winner == null) return "РќРµС‚ РїРѕР±РµРґРёС‚РµР»СЏ";
-        String clanName = ClanManager.getClanNameForPlayer(winner);
-        return clanName.isBlank() ? winner.getName().getString() : clanName;
+        return ClanWarWinnerLabel.resolve(winner);
     }
 
     public static void endGame(MinecraftServer server) {
@@ -450,6 +456,7 @@ public class GameStateManager {
         startCountdown = -1;
         postGameDelay = 0;
         SET_REWARD_COUNTDOWN.reset();
+        SET_REPORT_DISPATCH.reset();
         matchPhase = MatchPhase.WAITING;
         currentMode = MatchMode.SOLO;
         SetMatchRuntime.reset();
@@ -917,9 +924,14 @@ public class GameStateManager {
     }
 
     private static void dispatchSetReportOnce(MinecraftServer server, SetRewardSummary summary) {
-        if (MapSetManager.isSetReportDispatched()) return;
-        DiscordLeaderboardService.sendCompletedSetReport(server, summary);
-        MapSetManager.markSetReportDispatched(server);
+        if (server == null || summary == null || MapSetManager.isSetReportDispatched()) return;
+        SET_REPORT_DISPATCH.request(
+                summary.setId(),
+                server::getTickCount,
+                () -> DiscordLeaderboardService.sendCompletedSetReport(server, summary),
+                expectedSetId -> MapSetManager.markSetReportDispatched(server, expectedSetId),
+                server::execute
+        );
     }
 
     public static void showCurrentSetRewardOnJoin(ServerPlayer player) {
@@ -1125,12 +1137,8 @@ public class GameStateManager {
 
         @Override
         public void postCommit(MinecraftServer server) throws Exception {
-            List<String> matchProgressFailures = recordMatchesPlayedAfterCommit(server);
+            recordMatchesPlayedAfterCommit(server);
             broadcast(server, "[WAR] Match started. Choose a class and use RTP.");
-            if (!matchProgressFailures.isEmpty()) {
-                throw new IllegalStateException("matchesPlayed post-commit update failed for "
-                        + matchProgressFailures.size() + " player(s)");
-            }
         }
 
         private void initializePlayers(MinecraftServer server) {
@@ -1170,20 +1178,16 @@ public class GameStateManager {
             }
         }
 
-        private List<String> recordMatchesPlayedAfterCommit(MinecraftServer server) {
-            List<String> failures = new ArrayList<>();
+        private void recordMatchesPlayedAfterCommit(MinecraftServer server) {
+            UUID matchId = getLifecycleSnapshot().matchId().orElse(null);
+            if (matchId == null) {
+                TacticalTabletMod.LOGGER.error("Cannot record matchesPlayed without an active matchId");
+                return;
+            }
             for (ServerPlayer player : server.getPlayerList().getPlayers()) {
                 if (!MatchAdmissionManager.isCurrentMatchParticipant(player.getUUID())) continue;
-                try {
-                    PlayerProgressManager.addMatchPlayed(player);
-                } catch (Exception exception) {
-                    String playerLabel = player.getGameProfile().getName() + " (" + player.getUUID() + ")";
-                    failures.add(playerLabel + ": " + exception.getClass().getSimpleName());
-                    TacticalTabletMod.LOGGER.warn("Failed to record post-commit matchesPlayed for {}",
-                            playerLabel, exception);
-                }
+                PlayerProgressManager.ensureMatchPlayed(player, matchId, null);
             }
-            return failures;
         }
 
         private void requireDatapackCommandSuccess(ResourceLocation functionId, int result) {

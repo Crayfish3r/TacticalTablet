@@ -11,7 +11,6 @@ import com.makar.tacticaltablet.game.lives.LivesManager;
 import com.makar.tacticaltablet.game.lobby.LobbyManager;
 import com.makar.tacticaltablet.game.extraction.ExtractionPointManager;
 import com.makar.tacticaltablet.game.teleport.SafeTeleport;
-import com.makar.tacticaltablet.game.MapSetManager;
 import com.makar.tacticaltablet.game.team.TeamId;
 import com.makar.tacticaltablet.game.team.TeamMatchManager;
 import com.makar.tacticaltablet.game.zone.ZoneManager;

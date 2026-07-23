@@ -155,6 +155,7 @@ public class PlayerProgressManager {
     private static final Map<String, PlayerProgress> cache = new HashMap<>();
     private static final Map<String, Boolean> dirty = new HashMap<>();
     private static final Map<String, Long> snapshotRevisions = new HashMap<>();
+    private static final Map<MatchPlayedKey, PendingMatchPlayed> pendingMatchesPlayed = new HashMap<>();
     private static int autosaveTicks;
     private static int backupTicks;
     private static long nextSnapshotRevision;
@@ -177,6 +178,12 @@ public class PlayerProgressManager {
         INVALID_CLASS,
         MAX_TIER,
         WRONG_TIER
+    }
+
+    public enum MatchPlayedSaveResult {
+        SAVED,
+        ALREADY_SAVED,
+        FAILED
     }
 
     public enum ExclusiveClassGrantResult {
@@ -361,6 +368,7 @@ public class PlayerProgressManager {
         cache.clear();
         dirty.clear();
         snapshotRevisions.clear();
+        pendingMatchesPlayed.clear();
         autosaveTicks = 0;
         backupTicks = 0;
         nextSnapshotRevision = 0L;
@@ -782,6 +790,170 @@ public class PlayerProgressManager {
         markDirty(key);
     }
 
+    public static void recordMatchPlayed(
+            ServerPlayer player,
+            UUID matchId,
+            Consumer<MatchPlayedSaveResult> completion
+    ) {
+        if (player == null || matchId == null || completion == null) return;
+
+        String key;
+        PlayerProgress progress;
+        IdempotentCounterResult mutation;
+        SaveTicket ticket;
+        synchronized (PlayerProgressManager.class) {
+            key = getPlayerKey(player);
+            progress = getOrLoad(player, key);
+            mutation = PROGRESS_SERVICE.incrementCounterIdempotently(
+                    progress,
+                    MutableProgressState.Counter.MATCHES_PLAYED,
+                    "matches_played:" + matchId,
+                    "matches_played",
+                    Clock.systemUTC()
+            );
+            if (mutation.status() == IdempotentCreditStatus.ALREADY_APPLIED) {
+                player.server.execute(() -> completion.accept(MatchPlayedSaveResult.ALREADY_SAVED));
+                return;
+            }
+            if (mutation.status() != IdempotentCreditStatus.APPLIED) {
+                TacticalTabletMod.LOGGER.error(
+                        "Could not prepare matchesPlayed receipt playerId={} matchId={}: {}",
+                        player.getUUID(), matchId, mutation.diagnostic());
+                player.server.execute(() -> completion.accept(MatchPlayedSaveResult.FAILED));
+                return;
+            }
+            progress.lastSeen = Instant.now().toEpochMilli();
+            normalize(progress);
+            markDirty(key);
+            ticket = enqueueSnapshot(key, progress);
+        }
+
+        awaitMatchPlayedSave(
+                player.server,
+                key,
+                progress,
+                mutation.rollback().orElseThrow(),
+                ticket,
+                completion
+        );
+    }
+
+    public static void ensureMatchPlayed(ServerPlayer player, UUID matchId, Runnable onSaved) {
+        if (player == null || matchId == null) return;
+        MatchPlayedKey operationKey = new MatchPlayedKey(player.getUUID(), matchId);
+        boolean start;
+        synchronized (PlayerProgressManager.class) {
+            PendingMatchPlayed pending = pendingMatchesPlayed.computeIfAbsent(
+                    operationKey,
+                    ignored -> new PendingMatchPlayed()
+            );
+            if (onSaved != null) pending.callback = onSaved;
+            start = !pending.inFlight;
+            if (start) pending.inFlight = true;
+        }
+        if (start) attemptMatchPlayedSave(player.server, operationKey);
+    }
+
+    private static void attemptMatchPlayedSave(MinecraftServer server, MatchPlayedKey operationKey) {
+        ServerPlayer player = server.getPlayerList().getPlayer(operationKey.playerId());
+        if (player == null) {
+            synchronized (PlayerProgressManager.class) {
+                PendingMatchPlayed pending = pendingMatchesPlayed.get(operationKey);
+                if (pending != null) {
+                    pending.inFlight = false;
+                    pending.nextAttemptTick = server.getTickCount() + 20;
+                }
+            }
+            return;
+        }
+        recordMatchPlayed(player, operationKey.matchId(), result ->
+                completeMatchPlayedAttempt(server, operationKey, result));
+    }
+
+    private static void completeMatchPlayedAttempt(
+            MinecraftServer server,
+            MatchPlayedKey operationKey,
+            MatchPlayedSaveResult result
+    ) {
+        List<Runnable> callbacks = List.of();
+        synchronized (PlayerProgressManager.class) {
+            PendingMatchPlayed pending = pendingMatchesPlayed.get(operationKey);
+            if (pending == null) return;
+            if (result == MatchPlayedSaveResult.SAVED
+                    || result == MatchPlayedSaveResult.ALREADY_SAVED) {
+                pendingMatchesPlayed.remove(operationKey);
+                callbacks = pending.callback == null ? List.of() : List.of(pending.callback);
+            } else {
+                pending.inFlight = false;
+                pending.failures++;
+                int backoff = Math.min(20 * 60, 20 << Math.min(5, pending.failures - 1));
+                pending.nextAttemptTick = server.getTickCount() + backoff;
+                TacticalTabletMod.LOGGER.warn(
+                        "Will retry matchesPlayed receipt playerId={} matchId={} in {} ticks",
+                        operationKey.playerId(), operationKey.matchId(), backoff);
+            }
+        }
+        for (Runnable callback : callbacks) {
+            try {
+                callback.run();
+            } catch (RuntimeException exception) {
+                TacticalTabletMod.LOGGER.error(
+                        "matchesPlayed completion callback failed playerId={} matchId={}",
+                        operationKey.playerId(), operationKey.matchId(), exception);
+            }
+        }
+    }
+
+    private static void awaitMatchPlayedSave(
+            MinecraftServer server,
+            String key,
+            PlayerProgress progress,
+            IdempotentCounterRollback rollback,
+            SaveTicket ticket,
+            Consumer<MatchPlayedSaveResult> completion
+    ) {
+        if (ticket == null) {
+            server.execute(() -> completeFailedMatchPlayedSave(key, progress, rollback, completion));
+            return;
+        }
+        ticket.completion().whenComplete((result, error) -> server.execute(() -> {
+            if (error == null && result != null && result.status() == DurableSaveResult.Status.WRITTEN) {
+                synchronized (PlayerProgressManager.class) {
+                    reconcileCompletedWrites();
+                }
+                completion.accept(MatchPlayedSaveResult.SAVED);
+                return;
+            }
+            if (error == null && result != null
+                    && (result.status() == DurableSaveResult.Status.SUPERSEDED
+                    || result.status() == DurableSaveResult.Status.STALE_REJECTED)) {
+                SaveTicket retry;
+                synchronized (PlayerProgressManager.class) {
+                    retry = enqueueSnapshot(key, progress);
+                }
+                awaitMatchPlayedSave(server, key, progress, rollback, retry, completion);
+                return;
+            }
+            completeFailedMatchPlayedSave(key, progress, rollback, completion);
+        }));
+    }
+
+    private static void completeFailedMatchPlayedSave(
+            String key,
+            PlayerProgress progress,
+            IdempotentCounterRollback rollback,
+            Consumer<MatchPlayedSaveResult> completion
+    ) {
+        synchronized (PlayerProgressManager.class) {
+            if (!PROGRESS_SERVICE.rollbackIdempotentCounter(progress, rollback)) {
+                TacticalTabletMod.LOGGER.error(
+                        "Could not safely roll back failed matchesPlayed receipt {}", rollback.receipt().transactionId());
+            }
+            markDirty(key);
+        }
+        completion.accept(MatchPlayedSaveResult.FAILED);
+    }
+
     public static synchronized int getMatchesPlayed(ServerPlayer player) {
         if (player == null) return 0;
 
@@ -1156,6 +1328,14 @@ public class PlayerProgressManager {
 
     public static synchronized void tick(MinecraftServer server) {
         if (server == null || progressRepository == null) return;
+
+        for (Map.Entry<MatchPlayedKey, PendingMatchPlayed> entry
+                : new ArrayList<>(pendingMatchesPlayed.entrySet())) {
+            PendingMatchPlayed pending = entry.getValue();
+            if (pending.inFlight || pending.nextAttemptTick > server.getTickCount()) continue;
+            pending.inFlight = true;
+            attemptMatchPlayedSave(server, entry.getKey());
+        }
 
         autosaveTicks++;
         backupTicks++;
@@ -2060,5 +2240,15 @@ public class PlayerProgressManager {
     }
 
     public record KnownPlayer(UUID uuid, String name) {
+    }
+
+    private record MatchPlayedKey(UUID playerId, UUID matchId) {
+    }
+
+    private static final class PendingMatchPlayed {
+        private Runnable callback;
+        private boolean inFlight;
+        private int failures;
+        private int nextAttemptTick;
     }
 }
