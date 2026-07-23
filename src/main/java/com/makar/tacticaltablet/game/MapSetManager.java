@@ -28,7 +28,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -45,6 +44,8 @@ public final class MapSetManager {
     public static final int MAP_VOTE_SECONDS = 30;
     public static final int RESTART_COUNTDOWN_SECONDS = 10;
     public static final int SET_REWARD_SECONDS = 15;
+    public static final int CANDIDATE_COUNT = 3;
+    public static final int RECENT_MAP_COOLDOWN = 3;
 
     private static final int DATA_VERSION = MapSetProgressionPolicy.CURRENT_DATA_VERSION;
     private static final String STATE_FILE = "map_set_state.json";
@@ -112,6 +113,7 @@ public final class MapSetManager {
             state.lastRotation = lastRotation;
             saveState();
         }
+        reconcileRecentPlayedMaps(server);
     }
 
     public static synchronized void onServerStopped() {
@@ -329,14 +331,46 @@ public final class MapSetManager {
         if (server == null || voting || restartSecondsLeft >= 0) return;
 
         initStorage(server);
-        votingMaps = List.copyOf(MapRotationManager.listMapNames(server));
-        if (votingMaps.isEmpty()) {
+        List<String> fullPool = MapVoteCandidatePolicy.normalizePool(MapRotationManager.listMapNames(server));
+        if (fullPool.isEmpty()) {
             TacticalTabletMod.LOGGER.error("Cannot start map voting: map rotation pool is empty.");
             broadcast(server, "[WAR] Map voting cannot start because the map rotation pool is empty.");
             return;
         }
         if (debug) {
             skipRewardingForDebug(server);
+        }
+
+        List<String> previousHistory = List.copyOf(state.recentPlayedMaps);
+        List<String> updatedHistory = MapVoteCandidatePolicy.normalizeRecentPlayedMaps(
+                fullPool, previousHistory, RECENT_MAP_COOLDOWN);
+        if (!debug && isSetComplete()) {
+            updatedHistory = MapVoteCandidatePolicy.recordPlayedMap(
+                    fullPool, updatedHistory, currentMapName(server), RECENT_MAP_COOLDOWN);
+        }
+        if (!updatedHistory.equals(previousHistory)) {
+            state.recentPlayedMaps = new ArrayList<>(updatedHistory);
+            if (!saveState()) {
+                state.recentPlayedMaps = new ArrayList<>(previousHistory);
+                TacticalTabletMod.LOGGER.error(
+                        "Cannot start map voting because played map history could not be persisted.");
+                broadcast(server, "[WAR] Map voting could not save its played-map history. Please retry.");
+                return;
+            }
+        }
+
+        votingMaps = MapVoteCandidatePolicy.selectCandidates(
+                fullPool,
+                state.recentPlayedMaps,
+                CANDIDATE_COUNT,
+                RECENT_MAP_COOLDOWN,
+                RANDOM
+        );
+        if (votingMaps.size() < CANDIDATE_COUNT) {
+            TacticalTabletMod.LOGGER.warn(
+                    "Map voting pool contains only {} unique map(s); showing every available map.",
+                    votingMaps.size()
+            );
         }
 
         votes.clear();
@@ -409,7 +443,8 @@ public final class MapSetManager {
             if (voteSecondsLeft > 0) return VoteTickResult.ACTIVE;
         }
 
-        String winner = resolveWinner();
+        String winner = selectedMap.isBlank() ? resolveWinner() : selectedMap;
+        selectedMap = winner;
         try {
             MapRotationManager.setNextMap(server, winner);
             MapRotationManager.arm(server);
@@ -422,7 +457,6 @@ public final class MapSetManager {
             return VoteTickResult.FAILED;
         }
 
-        selectedMap = winner;
         voting = false;
         restartSecondsLeft = RESTART_COUNTDOWN_SECONDS;
         broadcast(server, "[WAR] Выбрана карта «" + winner + "». Перезапуск сервера через "
@@ -495,24 +529,11 @@ public final class MapSetManager {
     }
 
     private static String resolveWinner() {
-        Map<String, Integer> counts = voteCounts();
-        int best = counts.values().stream().max(Comparator.naturalOrder()).orElse(0);
-        List<String> leaders = new ArrayList<>();
-
-        for (String map : votingMaps) {
-            if (counts.getOrDefault(map, 0) == best) leaders.add(map);
-        }
-
-        if (leaders.isEmpty()) return votingMaps.isEmpty() ? "" : votingMaps.get(0);
-        return leaders.get(RANDOM.nextInt(leaders.size()));
+        return MapVoteWinnerPolicy.selectWinner(votingMaps, voteCounts(), RANDOM);
     }
 
     private static String canonicalMapName(String value) {
-        String normalized = normalize(value);
-        for (String map : votingMaps) {
-            if (normalize(map).equals(normalized)) return map;
-        }
-        return null;
+        return MapVoteCandidatePolicy.canonicalMapName(votingMaps, value);
     }
 
     private static void initStorage(MinecraftServer server) {
@@ -595,6 +616,8 @@ public final class MapSetManager {
     static void normalizeState(SetState candidate) {
         candidate.mapName = candidate.mapName == null ? "" : candidate.mapName.trim();
         candidate.lastRotation = candidate.lastRotation == null ? "" : candidate.lastRotation.trim();
+        candidate.recentPlayedMaps = new ArrayList<>(MapVoteCandidatePolicy.normalizeStoredHistory(
+                candidate.recentPlayedMaps, RECENT_MAP_COOLDOWN));
         MapSetProgressionPolicy.Migration migration = MapSetProgressionPolicy.migrate(
                 candidate.dataVersion,
                 candidate.completedGames,
@@ -633,6 +656,23 @@ public final class MapSetManager {
         return server.getWorldPath(LevelResource.ROOT).getFileName().toString();
     }
 
+    private static void reconcileRecentPlayedMaps(MinecraftServer server) {
+        List<String> previousHistory = List.copyOf(state.recentPlayedMaps);
+        List<String> normalizedHistory = MapVoteCandidatePolicy.normalizeRecentPlayedMaps(
+                MapRotationManager.listMapNames(server),
+                previousHistory,
+                RECENT_MAP_COOLDOWN
+        );
+        if (normalizedHistory.equals(previousHistory)) return;
+
+        state.recentPlayedMaps = new ArrayList<>(normalizedHistory);
+        if (!saveState()) {
+            state.recentPlayedMaps = new ArrayList<>(previousHistory);
+            TacticalTabletMod.LOGGER.error(
+                    "Failed to reconcile played map history with the current rotation pool.");
+        }
+    }
+
     private static void resetRuntimeState() {
         votes.clear();
         voting = false;
@@ -663,6 +703,7 @@ public final class MapSetManager {
         int dataVersion = DATA_VERSION;
         String mapName = "";
         String lastRotation = "";
+        List<String> recentPlayedMaps = new ArrayList<>();
         int completedGames;
         boolean competitiveSet;
         boolean nextSetCompetitive;

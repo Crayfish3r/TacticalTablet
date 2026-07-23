@@ -607,7 +607,7 @@ public class GameStateManager {
         startCountdown = -1;
         cleanupMatchRuntime(server);
         beginMapVoting(server, true);
-        return true;
+        return MapSetManager.isVoting();
     }
 
     public static boolean forceStartTeamSelect(MinecraftServer server, MatchMode mode) {
@@ -861,6 +861,9 @@ public class GameStateManager {
         TeamMatchManager.reset(server);
         giveLobbyTabletsAndSync(server);
         MapSetManager.startVoting(server, debug);
+        if (!MapSetManager.isVoting()) {
+            matchPhase = MatchPhase.WAITING;
+        }
     }
 
     private static void beginSetRewarding(MinecraftServer server) {

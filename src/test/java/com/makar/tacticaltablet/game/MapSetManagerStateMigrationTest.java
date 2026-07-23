@@ -1,5 +1,7 @@
 package com.makar.tacticaltablet.game;
 
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import com.makar.tacticaltablet.game.set.SetLeaderboardSnapshot;
 import com.makar.tacticaltablet.game.set.SetRewardSummary;
 import org.junit.jupiter.api.Test;
@@ -13,6 +15,8 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MapSetManagerStateMigrationTest {
+
+    private static final Gson GSON = new GsonBuilder().create();
 
     @Test
     void legacyRewardedSetKeepsIdentityParticipantsAndRewardState() {
@@ -60,6 +64,33 @@ class MapSetManagerStateMigrationTest {
         assertSame(summary, state.rewardSummary);
         assertEquals(deadline, state.rewardEndsAtMillis);
         assertEquals(MapSetManager.RewardPhaseStatus.ACTIVE, state.rewardPhaseStatus);
+    }
+
+    @Test
+    void playedMapHistorySurvivesJsonRoundTripAndNormalizesAfterLoading() {
+        MapSetManager.SetState state = legacyState(5);
+        state.recentPlayedMaps = new java.util.ArrayList<>(
+                java.util.Arrays.asList(" Alpha ", "Bravo", null, "alpha", "Charlie", "Delta"));
+
+        String json = GSON.toJson(state);
+        MapSetManager.SetState restored = GSON.fromJson(json, MapSetManager.SetState.class);
+        MapSetManager.normalizeState(restored);
+
+        assertEquals(List.of("alpha", "Charlie", "Delta"), restored.recentPlayedMaps);
+    }
+
+    @Test
+    void oldJsonWithoutPlayedMapHistoryMigratesToAnEmptyList() {
+        MapSetManager.SetState restored = GSON.fromJson(
+                "{\"dataVersion\":5,\"mapName\":\"Alpha\",\"completedGames\":5}",
+                MapSetManager.SetState.class
+        );
+
+        MapSetManager.normalizeState(restored);
+
+        assertEquals(List.of(), restored.recentPlayedMaps);
+        assertEquals(5, restored.dataVersion);
+        assertEquals(5, restored.completedGames);
     }
 
     private static MapSetManager.SetState legacyState(int completedGames) {
