@@ -124,4 +124,17 @@ public final class GuiTextureRenderer {
             RenderSystem.disableBlend();
         }
     }
+
+    public static void beginAlphaBlend(GuiGraphics graphics) {
+        Objects.requireNonNull(graphics, "graphics");
+        RenderSystem.enableBlend();
+        RenderSystem.defaultBlendFunc();
+        graphics.setColor(1.0F, 1.0F, 1.0F, 1.0F);
+    }
+
+    public static void endAlphaBlend(GuiGraphics graphics) {
+        Objects.requireNonNull(graphics, "graphics");
+        graphics.setColor(1.0F, 1.0F, 1.0F, 1.0F);
+        RenderSystem.disableBlend();
+    }
 }

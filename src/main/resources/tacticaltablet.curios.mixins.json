@@ -1,0 +1,15 @@
+{
+  "required": false,
+  "minVersion": "0.8.5",
+  "package": "com.makar.tacticaltablet.mixin.client",
+  "compatibilityLevel": "JAVA_17",
+  "refmap": "tacticaltablet.refmap.json",
+  "plugin": "com.makar.tacticaltablet.mixin.CuriosMixinConfigPlugin",
+  "client": [
+    "CuriosScreenAlphaMixin",
+    "CuriosScreenV2AlphaMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

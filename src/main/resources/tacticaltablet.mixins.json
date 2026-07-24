@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "minVersion": "0.8.5",
+  "package": "com.makar.tacticaltablet.mixin.client",
+  "compatibilityLevel": "JAVA_17",
+  "refmap": "tacticaltablet.refmap.json",
+  "client": [
+    "InventoryScreenAlphaMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

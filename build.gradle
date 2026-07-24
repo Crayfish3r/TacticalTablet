@@ -2,6 +2,7 @@ plugins {
     id 'eclipse'
     id 'idea'
     id 'net.minecraftforge.gradle' version "${forgegradle_version}"
+    id 'org.spongepowered.mixin' version "${mixin_gradle_version}"
 }
 
 group = mod_group_id
@@ -17,6 +18,13 @@ java {
 
 repositories {
     mavenCentral()
+    maven {
+        name = 'Curios'
+        url = 'https://maven.theillusivec4.top/'
+        content {
+            includeGroup 'top.theillusivec4.curios'
+        }
+    }
     maven { url = 'https://maven.maxhenkel.de/repository/public' }
     exclusiveContent {
         forRepository {
@@ -60,8 +68,16 @@ minecraft {
     }
 }
 
+mixin {
+    add sourceSets.main, "${mod_id}.refmap.json"
+    config "${mod_id}.mixins.json"
+    config "${mod_id}.curios.mixins.json"
+}
+
 dependencies {
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
+    annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
+    compileOnly fg.deobf("top.theillusivec4.curios:curios-forge:${curios_version}")
     implementation "de.maxhenkel.voicechat:voicechat-api:${voicechat_api_version}"
     runtimeOnly fg.deobf("maven.modrinth:simple-voice-chat:forge-${voicechat_version}")
     testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
@@ -82,6 +98,7 @@ def modMetadataProperties = [
         forge_version_range    : forge_version_range,
         loader_version_range   : loader_version_range,
         voicechat_api_version  : voicechat_api_version,
+        curios_version_range   : curios_version_range,
         mod_id                 : mod_id,
         mod_name               : mod_name,
         mod_license            : mod_license,
