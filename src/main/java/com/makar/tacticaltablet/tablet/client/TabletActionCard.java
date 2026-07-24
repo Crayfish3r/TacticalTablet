@@ -2,9 +2,8 @@ package com.makar.tacticaltablet.tablet.client;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.resources.ResourceLocation;
-import com.mojang.blaze3d.systems.RenderSystem;
+import com.makar.tacticaltablet.progression.ClassTier;
 
 public final class TabletActionCard {
     private TabletActionCard() {
@@ -13,20 +12,29 @@ public final class TabletActionCard {
     public static void render(GuiGraphics graphics, int x, int y, int width, int height,
                               boolean hovered, ResourceLocation icon, boolean iconExists,
                               String title, Presentation presentation) {
-        int background = presentation.active() ? (hovered ? 0xFF294032 : 0xFF1D2B22) : 0xFF18231C;
-        int border = presentation.rarityColor();
-        graphics.fill(x, y, x + width, y + height, background);
-        graphics.fill(x, y, x + width, y + 1, border);
-        graphics.fill(x, y + height - 1, x + width, y + height, border);
-        graphics.fill(x, y, x + 2, y + height, border);
-        graphics.fill(x + width - 1, y, x + width, y + height, border);
+        ButtonTextureSpec texture = TabletButtonTextures.CLASS_BUTTON;
+        ClassButtonStyle.Tint tint = ClassButtonStyle.tint(
+                presentation.tier(),
+                presentation.active(),
+                hovered
+        );
+        GuiTextureRenderer.blitWithAlpha(
+                graphics,
+                texture,
+                x,
+                y,
+                width,
+                height,
+                tint.red(),
+                tint.green(),
+                tint.blue(),
+                tint.alpha()
+        );
 
         if (iconExists) {
-            RenderSystem.setShader(GameRenderer::getPositionTexShader);
-            RenderSystem.setShaderTexture(0, icon);
-            graphics.blit(icon, x + 6, y + 9, 0, 0, 16, 16, 16, 16);
+            GuiTextureRenderer.blitWithAlpha(graphics, icon, x + 6, y + 9, 16, 16, 16, 16);
         } else {
-            renderFallbackIcon(graphics, x + 6, y + 9, border);
+            renderFallbackIcon(graphics, x + 6, y + 9, ClassButtonStyle.color(presentation.tier()));
         }
 
         int titleColor = presentation.active() ? 0xFFE6F0E8 : 0xFF77867B;
@@ -46,6 +54,6 @@ public final class TabletActionCard {
         graphics.drawCenteredString(Minecraft.getInstance().font, "T", x + 8, y + 4, 0xFFE6F0E8);
     }
 
-    public record Presentation(boolean active, int rarityColor, String status, int statusColor, String marker) {
+    public record Presentation(boolean active, ClassTier tier, String status, int statusColor, String marker) {
     }
 }

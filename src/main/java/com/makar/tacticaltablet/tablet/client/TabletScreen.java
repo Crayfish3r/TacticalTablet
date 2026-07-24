@@ -24,7 +24,6 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.client.resources.sounds.SimpleSoundInstance;
 import net.minecraft.client.sounds.SoundManager;
 import net.minecraft.network.chat.Component;
@@ -51,52 +50,8 @@ public class TabletScreen extends Screen {
     private static final ResourceLocation PANEL_LEGEND =
             new ResourceLocation("tacticaltablet", "textures/gui/tablet_legend.png");
 
-    private static final ResourceLocation BTN =
-            new ResourceLocation("tacticaltablet", "textures/gui/button.png");
-    private static final ResourceLocation BTN_HOVER =
-            new ResourceLocation("tacticaltablet", "textures/gui/button_hover.png");
-    private static final ResourceLocation BTN_DISABLED =
-            new ResourceLocation("tacticaltablet", "textures/gui/button_disabled.png");
-
     private static final ResourceLocation CONFIRM_PANEL =
             new ResourceLocation("tacticaltablet", "textures/gui/confirm_panel.png");
-    private static final ResourceLocation CONFIRM_BUTTON =
-            new ResourceLocation("tacticaltablet", "textures/gui/confirm_button.png");
-    private static final ResourceLocation CONFIRM_BUTTON_HOVER =
-            new ResourceLocation("tacticaltablet", "textures/gui/confirm_button_hover.png");
-    private static final ResourceLocation CONFIRM_BUTTON_DISABLED =
-            new ResourceLocation("tacticaltablet", "textures/gui/confirm_button_disabled.png");
-
-    private static final ResourceLocation CLAN_ROW =
-            new ResourceLocation("tacticaltablet", "textures/gui/clan_row.png");
-    private static final ResourceLocation CLAN_ROW_HOVER =
-            new ResourceLocation("tacticaltablet", "textures/gui/clan_row_hover.png");
-    private static final ResourceLocation CLAN_ROW_ACTIVE =
-            new ResourceLocation("tacticaltablet", "textures/gui/clan_row_active.png");
-    private static final ResourceLocation CLAN_CREATE_BUTTON =
-            new ResourceLocation("tacticaltablet", "textures/gui/clan_create_button.png");
-    private static final ResourceLocation CLAN_CREATE_BUTTON_HOVER =
-            new ResourceLocation("tacticaltablet", "textures/gui/clan_create_button_hover.png");
-    private static final ResourceLocation CLAN_CREATE_BUTTON_DISABLED =
-            new ResourceLocation("tacticaltablet", "textures/gui/clan_create_button_disabled.png");
-    private static final ResourceLocation CLAN_BACK_BUTTON =
-            new ResourceLocation("tacticaltablet", "textures/gui/clan_back_button.png");
-    private static final ResourceLocation CLAN_BACK_BUTTON_HOVER =
-            new ResourceLocation("tacticaltablet", "textures/gui/clan_back_button_hover.png");
-    private static final ResourceLocation CLAN_ACTION_BUTTON =
-            new ResourceLocation("tacticaltablet", "textures/gui/clan_action_button.png");
-    private static final ResourceLocation CLAN_ACTION_BUTTON_HOVER =
-            new ResourceLocation("tacticaltablet", "textures/gui/clan_action_button_hover.png");
-    private static final ResourceLocation CLAN_ACTION_BUTTON_DISABLED =
-            new ResourceLocation("tacticaltablet", "textures/gui/clan_action_button_disabled.png");
-    private static final ResourceLocation CLAN_DANGER_BUTTON =
-            new ResourceLocation("tacticaltablet", "textures/gui/clan_danger_button.png");
-    private static final ResourceLocation CLAN_DANGER_BUTTON_HOVER =
-            new ResourceLocation("tacticaltablet", "textures/gui/clan_danger_button_hover.png");
-    private static final ResourceLocation CLAN_SMALL_BUTTON =
-            new ResourceLocation("tacticaltablet", "textures/gui/clan_small_button.png");
-    private static final ResourceLocation CLAN_SMALL_BUTTON_HOVER =
-            new ResourceLocation("tacticaltablet", "textures/gui/clan_small_button_hover.png");
     private static final ResourceLocation CLICK =
             new ResourceLocation("tacticaltablet", "click");
     private static final ResourceLocation TELEPORT =
@@ -189,7 +144,13 @@ public class TabletScreen extends Screen {
     private final ScrollableActionGrid<TabletAction> actionGrid =
             new ScrollableActionGrid<>(this::renderActionCard, this::pressAction);
     private final TabletNavigationRail navigationRail = new TabletNavigationRail(
-            Arrays.stream(PAGES).map(TabletPage::title).toList(), this::selectPage, () -> playSound(HOVER));
+            Arrays.stream(PAGES)
+                    .map(page -> new TabletNavigationRail.Item(
+                            page.title(),
+                            TabletButtonTextures.navigation(page.key())))
+                    .toList(),
+            this::selectPage,
+            () -> playSound(HOVER));
 
 
     public TabletScreen() {
@@ -239,11 +200,10 @@ public class TabletScreen extends Screen {
                         y0 + CLAN_LIST_TOP + i * CLAN_ROW_GAP,
                         CLAN_ROW_W,
                         CLAN_ROW_H,
-                        CLAN_ROW,
-                        CLAN_ROW_HOVER,
-                        CLAN_ROW_ACTIVE,
+                        TabletButtonTextures.CLAN_ROW,
                         Component.literal("[" + clan.tag() + "] " + clan.name()),
                         () -> clan.color(),
+                        () -> selectedClanIndex == index,
                         () -> {
                             selectedClanIndex = index;
                             pendingScrollOffset = 0;
@@ -258,9 +218,7 @@ public class TabletScreen extends Screen {
                     y0 + 172,
                     CLAN_CREATE_W,
                     CLAN_CREATE_H,
-                    CLAN_CREATE_BUTTON,
-                    CLAN_CREATE_BUTTON_HOVER,
-                    CLAN_CREATE_BUTTON_DISABLED,
+                    TabletButtonTextures.CLAN_CREATE,
                     Component.literal("\u0421\u043e\u0437\u0434\u0430\u0442\u044c"),
                     () -> Minecraft.getInstance().setScreen(new ClanCreateConfirmScreen())
             );
@@ -275,9 +233,7 @@ public class TabletScreen extends Screen {
                 y0 + 46,
                 CLAN_BACK_W,
                 CLAN_BACK_H,
-                CLAN_BACK_BUTTON,
-                CLAN_BACK_BUTTON_HOVER,
-                CLAN_BACK_BUTTON,
+                TabletButtonTextures.CLAN_BACK,
                 Component.literal("\u041d\u0430\u0437\u0430\u0434"),
                 () -> {
                     selectedClanIndex = -1;
@@ -314,24 +270,32 @@ public class TabletScreen extends Screen {
 
     private ClanTextureButton newClanActionButton(int x, int y, String label, Runnable action) {
         return new ClanTextureButton(x, y, CLAN_ACTION_W, CLAN_ACTION_H,
-                CLAN_ACTION_BUTTON, CLAN_ACTION_BUTTON_HOVER, CLAN_ACTION_BUTTON_DISABLED,
+                TabletButtonTextures.CLAN_ACTION,
                 Component.literal(label), action);
     }
 
     private ClanTextureButton newClanDangerButton(int x, int y, String label, Runnable action) {
         return new ClanTextureButton(x, y, CLAN_ACTION_W, CLAN_ACTION_H,
-                CLAN_DANGER_BUTTON, CLAN_DANGER_BUTTON_HOVER, CLAN_ACTION_BUTTON_DISABLED,
+                TabletButtonTextures.CLAN_DANGER,
                 Component.literal(label), action);
     }
 
     private ClanTextureButton newClanSmallButton(int x, int y, String label, Runnable action) {
         return new ClanTextureButton(x, y, CLAN_SMALL_W, CLAN_SMALL_H,
-                CLAN_SMALL_BUTTON, CLAN_SMALL_BUTTON_HOVER, CLAN_SMALL_BUTTON,
+                TabletButtonTextures.CLAN_SMALL,
                 Component.literal(label), action);
     }
 
-    private ClanTextureButton newClanPlainButton(int x, int y, int width, int height, String label, Runnable action) {
-        return new ClanTextureButton(x, y, width, height, Component.literal(label), action);
+    private ClanTextureButton newClanPlainButton(
+            int x,
+            int y,
+            int width,
+            int height,
+            ButtonTextureSet textures,
+            String label,
+            Runnable action
+    ) {
+        return new ClanTextureButton(x, y, width, height, textures, Component.literal(label), action);
     }
 
     private void addOwnerRequestButtons(int x0, int y0, ClanListPacket.ClanEntry clan) {
@@ -347,9 +311,11 @@ public class TabletScreen extends Screen {
         for (int i = 0; i < count; i++) {
             ClanListPacket.PendingEntry pending = clan.pendingEntries().get(pendingScrollOffset + i);
             int buttonY = listTop + i * CLAN_PENDING_ROW_H - 3;
-            this.addRenderableWidget(newClanPlainButton(okX, buttonY, 40, 14, "\u041e\u041a",
+            this.addRenderableWidget(newClanPlainButton(okX, buttonY, 40, 14,
+                    TabletButtonTextures.CLAN_REQUEST_ACCEPT, "\u041e\u041a",
                     () -> PacketHandler.sendToServer(new ClanAcceptJoinPacket(clan.id(), pending.uuid()))));
-            this.addRenderableWidget(newClanPlainButton(rejectX, buttonY, 44, 14, "\u041e\u0442\u043a\u043b.",
+            this.addRenderableWidget(newClanPlainButton(rejectX, buttonY, 44, 14,
+                    TabletButtonTextures.CLAN_REQUEST_REJECT, "\u041e\u0442\u043a\u043b.",
                     () -> PacketHandler.sendToServer(new ClanRejectJoinPacket(clan.id(), pending.uuid()))));
         }
     }
@@ -370,7 +336,8 @@ public class TabletScreen extends Screen {
             if (member.uuid().equals(clan.ownerUuid())) continue;
 
             int buttonY = listTop + i * CLAN_MEMBER_ROW_H - 3;
-            this.addRenderableWidget(newClanPlainButton(buttonX, buttonY, 42, 14, "\u041a\u0438\u043a",
+            this.addRenderableWidget(newClanPlainButton(buttonX, buttonY, 42, 14,
+                    TabletButtonTextures.CLAN_KICK, "\u041a\u0438\u043a",
                     () -> Minecraft.getInstance().setScreen(new ClanSimpleConfirmScreen(
                             "\u0418\u0441\u043a\u043b\u044e\u0447\u0438\u0442\u044c \u0438\u0433\u0440\u043e\u043a\u0430?",
                             member.name(),
@@ -396,10 +363,8 @@ public class TabletScreen extends Screen {
         int x = panelX();
         int y = panelY();
 
-        RenderSystem.setShader(GameRenderer::getPositionTexShader);
         ResourceLocation panel = getPanelTexture();
-        RenderSystem.setShaderTexture(0, panel);
-        g.blit(panel, x, y, 0, 0, UI_WIDTH, UI_HEIGHT, UI_WIDTH, UI_HEIGHT);
+        GuiTextureRenderer.blitWithAlpha(g, panel, x, y, UI_WIDTH, UI_HEIGHT, UI_WIDTH, UI_HEIGHT);
 
         renderShell(g, x, y);
 
@@ -447,11 +412,6 @@ public class TabletScreen extends Screen {
     }
 
     private void renderShell(GuiGraphics g, int x, int y) {
-        g.fill(x + NAV_X, y + NAV_Y, x + NAV_X + NAV_W, y + NAV_Y + NAV_H, 0xE6101713);
-        g.fill(x + HEADER_X, y + HEADER_Y, x + HEADER_X + HEADER_W, y + HEADER_Y + HEADER_H, 0xE618231C);
-        g.fill(x + CONTENT_X, y + CONTENT_Y, x + CONTENT_X + CONTENT_W, y + CONTENT_Y + CONTENT_H, 0xE6101713);
-        g.fill(x + 94, y + 200, x + 364, y + 210, 0xCC18231C);
-        g.fill(x + NAV_X + NAV_W - 1, y + NAV_Y, x + NAV_X + NAV_W, y + NAV_Y + NAV_H, 0xFF496454);
         drawHeader(g, x, y, PAGES[currentPage].title());
     }
 
@@ -980,7 +940,10 @@ public class TabletScreen extends Screen {
                                   int mouseX, int mouseY, float partialTick) {
         boolean hover = mouseX >= x && mouseX < x + width && mouseY >= y && mouseY < y + height;
         ActionPresentation presentation = describeAction(action);
-        int border = rarityColor(action);
+        ClassTier actualTier = ClassButtonStyle.actualTier(
+                action.fixedLevel(),
+                TabletClientState.getClassTier(action.classKey())
+        );
         ResourceLocation resolvedIcon = ClassDefinitions.byClassKey(action.classKey())
                 .map(definition -> ClassIconResolver.resolve(definition,
                         icon -> Minecraft.getInstance().getResourceManager().getResource(icon).isPresent()))
@@ -989,7 +952,7 @@ public class TabletScreen extends Screen {
         String status = fitText(presentation.status(), 92);
         TabletActionCard.render(g, x, y, width, height, hover, resolvedIcon,
                 Minecraft.getInstance().getResourceManager().getResource(resolvedIcon).isPresent(), title,
-                new TabletActionCard.Presentation(presentation.active(), border, status,
+                new TabletActionCard.Presentation(presentation.active(), actualTier, status,
                         presentation.statusColor(), presentation.marker()));
     }
 
@@ -1135,17 +1098,6 @@ public class TabletScreen extends Screen {
         };
     }
 
-    private int rarityColor(TabletAction action) {
-        int level = action.fixedLevel() >= 0 ? action.fixedLevel() : TabletClientState.getClassTier(action.classKey());
-        return switch (ClassTier.clamp(level)) {
-            case BASIC -> 0xFF71877A;
-            case RARE -> 0xFF5B8DEF;
-            case EPIC -> 0xFFA56BE8;
-            case LEGEND -> 0xFFE7C76A;
-            case MONSTER -> 0xFFD87575;
-        };
-    }
-
     private boolean isBaseClassAction(TabletAction action) {
         return !action.shop() && !action.exclusive() && !action.rtp() && !action.locked();
     }
@@ -1225,10 +1177,9 @@ public class TabletScreen extends Screen {
             boolean hover = isMouseOver(mouseX, mouseY);
             if (hover && !wasHovered) playSound(HOVER);
             wasHovered = hover;
-            int background = !active ? 0xFF18231C : hover ? 0xFF294032 : 0xFF1D2B22;
+            ButtonTextureSpec texture = TabletButtonTextures.RTP.select(active, false, hover);
             int color = active ? 0xFF72D68A : 0xFF77867B;
-            g.fill(getX(), getY(), getX() + width, getY() + height, background);
-            g.fill(getX(), getY() + height - 1, getX() + width, getY() + height, color);
+            GuiTextureRenderer.blitWithAlpha(g, texture, getX(), getY(), width, height);
             g.drawCenteredString(Minecraft.getInstance().font,
                     TabletClientState.isRtpUsed() ? "RTP ✓" : "RTP", getX() + width / 2, getY() + 6, color);
         }
@@ -1278,6 +1229,7 @@ public class TabletScreen extends Screen {
                     x + 18,
                     buttonY,
                     Component.literal("\u041e\u0422\u041c\u0415\u041d\u0410"),
+                    ConfirmButtonKind.CANCEL,
                     this::cancel
             ));
             ConfirmTextureButton confirmButton = new ConfirmTextureButton(
@@ -1293,14 +1245,12 @@ public class TabletScreen extends Screen {
         @Override
         public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
             this.renderBackground(g);
-            g.fill(0, 0, this.width, this.height, 0xAA000000);
 
             int x = (this.width - CONFIRM_W) / 2;
             int y = (this.height - CONFIRM_H) / 2;
 
-            RenderSystem.setShader(GameRenderer::getPositionTexShader);
-            RenderSystem.setShaderTexture(0, CONFIRM_PANEL);
-            g.blit(CONFIRM_PANEL, x, y, 0, 0, CONFIRM_W, CONFIRM_H, CONFIRM_W, CONFIRM_H);
+            GuiTextureRenderer.blitWithAlpha(
+                    g, CONFIRM_PANEL, x, y, CONFIRM_W, CONFIRM_H, CONFIRM_W, CONFIRM_H);
 
             g.drawCenteredString(Minecraft.getInstance().font, getConfirmTitle(), x + CONFIRM_W / 2, y + 17, 0xFF72D68A);
             g.drawCenteredString(Minecraft.getInstance().font, fitText(action.label(), CONFIRM_W - 30), x + CONFIRM_W / 2, y + 44, getShopTitleColor(action));
@@ -1402,6 +1352,7 @@ public class TabletScreen extends Screen {
                     x + 18,
                     buttonY,
                     Component.literal("\u041e\u0422\u041c\u0415\u041d\u0410"),
+                    ConfirmButtonKind.CANCEL,
                     this::returnToTablet
             ));
             this.addRenderableWidget(new ConfirmTextureButton(
@@ -1415,13 +1366,11 @@ public class TabletScreen extends Screen {
         @Override
         public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
             this.renderBackground(g);
-            g.fill(0, 0, this.width, this.height, 0xAA000000);
 
             int x = (this.width - CONFIRM_W) / 2;
             int y = (this.height - CONFIRM_H) / 2;
-            RenderSystem.setShader(GameRenderer::getPositionTexShader);
-            RenderSystem.setShaderTexture(0, CONFIRM_PANEL);
-            g.blit(CONFIRM_PANEL, x, y, 0, 0, CONFIRM_W, CONFIRM_H, CONFIRM_W, CONFIRM_H);
+            GuiTextureRenderer.blitWithAlpha(
+                    g, CONFIRM_PANEL, x, y, CONFIRM_W, CONFIRM_H, CONFIRM_W, CONFIRM_H);
             g.drawCenteredString(Minecraft.getInstance().font, "\u0421\u043e\u0437\u0434\u0430\u0442\u044c \u043a\u043b\u0430\u043d?", x + CONFIRM_W / 2, y + 18, 0xFF72D68A);
             g.drawCenteredString(Minecraft.getInstance().font, "\u0421\u0442\u043e\u0438\u043c\u043e\u0441\u0442\u044c: " + ClanConstants.CREATE_COST + " \u043c\u043e\u043d\u0435\u0442", x + CONFIRM_W / 2, y + 48, 0xFFFFFFFF);
             g.drawCenteredString(Minecraft.getInstance().font, "\u041c\u043e\u043d\u0435\u0442\u044b: " + TabletClientState.getCoins(), x + CONFIRM_W / 2, y + 66, 0xFF9FB2A4);
@@ -1454,7 +1403,13 @@ public class TabletScreen extends Screen {
             int y = (this.height - CONFIRM_H) / 2;
             int buttonY = y + 94;
 
-            this.addRenderableWidget(new ConfirmTextureButton(x + 18, buttonY, Component.literal("\u041e\u0422\u041c\u0415\u041d\u0410"), this::returnToTablet));
+            this.addRenderableWidget(new ConfirmTextureButton(
+                    x + 18,
+                    buttonY,
+                    Component.literal("\u041e\u0422\u041c\u0415\u041d\u0410"),
+                    ConfirmButtonKind.CANCEL,
+                    this::returnToTablet
+            ));
             this.addRenderableWidget(new ConfirmTextureButton(
                     x + CONFIRM_W - CONFIRM_BUTTON_W - 18,
                     buttonY,
@@ -1466,12 +1421,10 @@ public class TabletScreen extends Screen {
         @Override
         public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
             this.renderBackground(g);
-            g.fill(0, 0, this.width, this.height, 0xAA000000);
             int x = (this.width - CONFIRM_W) / 2;
             int y = (this.height - CONFIRM_H) / 2;
-            RenderSystem.setShader(GameRenderer::getPositionTexShader);
-            RenderSystem.setShaderTexture(0, CONFIRM_PANEL);
-            g.blit(CONFIRM_PANEL, x, y, 0, 0, CONFIRM_W, CONFIRM_H, CONFIRM_W, CONFIRM_H);
+            GuiTextureRenderer.blitWithAlpha(
+                    g, CONFIRM_PANEL, x, y, CONFIRM_W, CONFIRM_H, CONFIRM_W, CONFIRM_H);
             g.drawCenteredString(Minecraft.getInstance().font, "\u0412\u0441\u0442\u0443\u043f\u0438\u0442\u044c \u0432 \u043a\u043b\u0430\u043d?", x + CONFIRM_W / 2, y + 18, 0xFF72D68A);
             drawCenteredClanText(g, fitText("[" + clan.tag() + "] " + clan.name(), CONFIRM_W - 24),
                     x + CONFIRM_W / 2, y + 48, clan.color());
@@ -1516,7 +1469,13 @@ public class TabletScreen extends Screen {
             int y = (this.height - CONFIRM_H) / 2;
             int buttonY = y + 94;
 
-            this.addRenderableWidget(new ConfirmTextureButton(x + 18, buttonY, Component.literal("\u041e\u0422\u041c\u0415\u041d\u0410"), this::returnToTablet));
+            this.addRenderableWidget(new ConfirmTextureButton(
+                    x + 18,
+                    buttonY,
+                    Component.literal("\u041e\u0422\u041c\u0415\u041d\u0410"),
+                    ConfirmButtonKind.CANCEL,
+                    this::returnToTablet
+            ));
             this.addRenderableWidget(new ConfirmTextureButton(
                     x + CONFIRM_W - CONFIRM_BUTTON_W - 18,
                     buttonY,
@@ -1528,12 +1487,10 @@ public class TabletScreen extends Screen {
         @Override
         public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
             this.renderBackground(g);
-            g.fill(0, 0, this.width, this.height, 0xAA000000);
             int x = (this.width - CONFIRM_W) / 2;
             int y = (this.height - CONFIRM_H) / 2;
-            RenderSystem.setShader(GameRenderer::getPositionTexShader);
-            RenderSystem.setShaderTexture(0, CONFIRM_PANEL);
-            g.blit(CONFIRM_PANEL, x, y, 0, 0, CONFIRM_W, CONFIRM_H, CONFIRM_W, CONFIRM_H);
+            GuiTextureRenderer.blitWithAlpha(
+                    g, CONFIRM_PANEL, x, y, CONFIRM_W, CONFIRM_H, CONFIRM_W, CONFIRM_H);
             g.drawCenteredString(Minecraft.getInstance().font, fitText(title, CONFIRM_W - 24),
                     x + CONFIRM_W / 2, y + 18, 0xFF72D68A);
             g.drawCenteredString(Minecraft.getInstance().font, fitText(detail, CONFIRM_W - 24),
@@ -1589,7 +1546,13 @@ public class TabletScreen extends Screen {
                 this.addRenderableWidget(colorButton);
             }
 
-            this.addRenderableWidget(new ConfirmTextureButton(x + 70, y + 170, Component.literal("\u041e\u0422\u041c\u0415\u041d\u0410"), this::returnToTablet));
+            this.addRenderableWidget(new ConfirmTextureButton(
+                    x + 70,
+                    y + 170,
+                    Component.literal("\u041e\u0422\u041c\u0415\u041d\u0410"),
+                    ConfirmButtonKind.CANCEL,
+                    this::returnToTablet
+            ));
             changeButton = new ConfirmTextureButton(
                     x + UI_WIDTH - CONFIRM_BUTTON_W - 70,
                     y + 170,
@@ -1618,9 +1581,7 @@ public class TabletScreen extends Screen {
             int x = (this.width - UI_WIDTH) / 2;
             int y = (this.height - UI_HEIGHT) / 2;
             ResourceLocation panel = getPanelTexture();
-            RenderSystem.setShader(GameRenderer::getPositionTexShader);
-            RenderSystem.setShaderTexture(0, panel);
-            g.blit(panel, x, y, 0, 0, UI_WIDTH, UI_HEIGHT, UI_WIDTH, UI_HEIGHT);
+            GuiTextureRenderer.blitWithAlpha(g, panel, x, y, UI_WIDTH, UI_HEIGHT, UI_WIDTH, UI_HEIGHT);
 
             drawHeader(g, x, y, "\u0426\u0432\u0435\u0442 \u043a\u043b\u0430\u043d\u0430");
             drawCenteredClanText(g, "[" + clan.tag() + "] " + clan.name(), x + UI_WIDTH / 2, y + 74, selectedColor);
@@ -1680,7 +1641,13 @@ public class TabletScreen extends Screen {
                 this.addRenderableWidget(colorButton);
             }
 
-            this.addRenderableWidget(new ConfirmTextureButton(x + 70, y + 170, Component.literal("\u041e\u0422\u041c\u0415\u041d\u0410"), this::returnToTablet));
+            this.addRenderableWidget(new ConfirmTextureButton(
+                    x + 70,
+                    y + 170,
+                    Component.literal("\u041e\u0422\u041c\u0415\u041d\u0410"),
+                    ConfirmButtonKind.CANCEL,
+                    this::returnToTablet
+            ));
             createButton = new ConfirmTextureButton(
                     x + UI_WIDTH - CONFIRM_BUTTON_W - 70,
                     y + 170,
@@ -1705,9 +1672,7 @@ public class TabletScreen extends Screen {
             int x = (this.width - UI_WIDTH) / 2;
             int y = (this.height - UI_HEIGHT) / 2;
             ResourceLocation panel = getPanelTexture();
-            RenderSystem.setShader(GameRenderer::getPositionTexShader);
-            RenderSystem.setShaderTexture(0, panel);
-            g.blit(panel, x, y, 0, 0, UI_WIDTH, UI_HEIGHT, UI_WIDTH, UI_HEIGHT);
+            GuiTextureRenderer.blitWithAlpha(g, panel, x, y, UI_WIDTH, UI_HEIGHT, UI_WIDTH, UI_HEIGHT);
             drawHeader(g, x, y, "\u041d\u043e\u0432\u044b\u0439 \u043a\u043b\u0430\u043d");
             g.drawString(Minecraft.getInstance().font, "\u041d\u0430\u0437\u0432\u0430\u043d\u0438\u0435", x + 82, y + 66, 0xFF9FB2A4, false);
             g.drawString(Minecraft.getInstance().font, "\u0422\u0435\u0433", x + 82, y + 100, 0xFF9FB2A4, false);
@@ -1757,29 +1722,23 @@ public class TabletScreen extends Screen {
     private class ClanTextureButton extends Button {
 
         private final Runnable action;
-        private final ResourceLocation normalTexture;
-        private final ResourceLocation hoverTexture;
-        private final ResourceLocation disabledTexture;
+        private final ButtonTextureSet textures;
+        private final BooleanSupplier selected;
         private IntSupplier textColorSupplier;
         private boolean wasHovered;
-
-        private ClanTextureButton(int x, int y, int width, int height, Component label, Runnable action) {
-            this(x, y, width, height, BTN, BTN_HOVER, BTN_DISABLED, label, action);
-        }
 
         private ClanTextureButton(
                 int x,
                 int y,
                 int width,
                 int height,
-                ResourceLocation normalTexture,
-                ResourceLocation hoverTexture,
-                ResourceLocation disabledTexture,
+                ButtonTextureSet textures,
                 Component label,
                 IntSupplier textColorSupplier,
+                BooleanSupplier selected,
                 Runnable action
         ) {
-            this(x, y, width, height, normalTexture, hoverTexture, disabledTexture, label, action);
+            this(x, y, width, height, textures, label, selected, action);
             this.textColorSupplier = textColorSupplier;
         }
 
@@ -1788,17 +1747,27 @@ public class TabletScreen extends Screen {
                 int y,
                 int width,
                 int height,
-                ResourceLocation normalTexture,
-                ResourceLocation hoverTexture,
-                ResourceLocation disabledTexture,
+                ButtonTextureSet textures,
                 Component label,
+                Runnable action
+        ) {
+            this(x, y, width, height, textures, label, () -> false, action);
+        }
+
+        private ClanTextureButton(
+                int x,
+                int y,
+                int width,
+                int height,
+                ButtonTextureSet textures,
+                Component label,
+                BooleanSupplier selected,
                 Runnable action
         ) {
             super(Button.builder(label, button -> {}).bounds(x, y, width, height));
             this.action = action;
-            this.normalTexture = normalTexture;
-            this.hoverTexture = hoverTexture;
-            this.disabledTexture = disabledTexture;
+            this.textures = textures;
+            this.selected = selected;
             this.textColorSupplier = null;
         }
 
@@ -1820,12 +1789,11 @@ public class TabletScreen extends Screen {
             }
             wasHovered = hover;
 
-            int border = !this.active ? 0xFF333333 : hover ? 0xFFFFFFFF : 0xFF1E8F1E;
-            int fill = !this.active ? 0xAA111111 : hover ? 0xCC174617 : 0xAA082808;
-            g.fill(getX(), getY(), getX() + width, getY() + height, border);
-            g.fill(getX() + 1, getY() + 1, getX() + width - 1, getY() + height - 1, fill);
+            boolean isSelected = selected.getAsBoolean();
+            ButtonTextureSpec texture = textures.select(this.active, isSelected, hover);
+            GuiTextureRenderer.blitWithAlpha(g, texture, getX(), getY(), width, height);
             int labelColor = !this.active ? 0xFF77867B : textColorSupplier == null
-                    ? (hover ? 0xFFFFFFFF : 0xFF72D68A)
+                    ? (hover || isSelected ? 0xFFFFFFFF : 0xFF72D68A)
                     : textColorSupplier.getAsInt();
             int textX = getX() + width / 2;
             int textY = getY() + (height - 8) / 2;
@@ -1861,16 +1829,30 @@ public class TabletScreen extends Screen {
         @Override
         public void renderWidget(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
             boolean hover = this.isMouseOver(mouseX, mouseY);
-            int border = selected.getAsBoolean() ? 0xFFFFFFFF : hover ? 0xFF9FB2A4 : 0xFF496454;
-            g.fill(getX() - 1, getY() - 1, getX() + width + 1, getY() + height + 1, border);
-            if (isBlackClanColor(color)) {
-                g.fill(getX(), getY(), getX() + width, getY() + height, 0xFFFFFFFF);
-                g.fill(getX() + 2, getY() + 2, getX() + width - 2, getY() + height - 2, color);
-            } else {
-                g.fill(getX(), getY(), getX() + width, getY() + height, color);
-            }
+            ButtonTextureSpec texture = TabletButtonTextures.CLAN_COLOR.select(
+                    this.active,
+                    selected.getAsBoolean(),
+                    hover
+            );
+            ClassButtonStyle.Tint tint = new ClassButtonStyle.Tint(
+                    (color >> 16 & 0xFF) / 255.0F,
+                    (color >> 8 & 0xFF) / 255.0F,
+                    (color & 0xFF) / 255.0F,
+                    1.0F
+            );
+            GuiTextureRenderer.blitWithAlpha(
+                    g,
+                    texture,
+                    getX(),
+                    getY(),
+                    width,
+                    height,
+                    tint.red(),
+                    tint.green(),
+                    tint.blue(),
+                    tint.alpha()
+            );
             if (!this.active) {
-                g.fill(getX(), getY(), getX() + width, getY() + height, 0xAA000000);
                 g.drawString(Minecraft.getInstance().font, "x", getX() + 5, getY() + 4, 0xFFD87575, false);
             }
         }
@@ -1880,10 +1862,22 @@ public class TabletScreen extends Screen {
 
         private boolean wasHovered;
         private final Runnable action;
+        private final ConfirmButtonKind kind;
 
         private ConfirmTextureButton(int x, int y, Component label, Runnable action) {
+            this(x, y, label, ConfirmButtonKind.PRIMARY, action);
+        }
+
+        private ConfirmTextureButton(
+                int x,
+                int y,
+                Component label,
+                ConfirmButtonKind kind,
+                Runnable action
+        ) {
             super(Button.builder(label, button -> {}).bounds(x, y, CONFIRM_BUTTON_W, CONFIRM_BUTTON_H));
             this.action = action;
+            this.kind = kind;
         }
 
         @Override
@@ -1905,13 +1899,11 @@ public class TabletScreen extends Screen {
             }
             wasHovered = hover;
 
-            ResourceLocation texture = !this.active
-                    ? CONFIRM_BUTTON_DISABLED
-                    : hover ? CONFIRM_BUTTON_HOVER : CONFIRM_BUTTON;
-
-            RenderSystem.setShader(GameRenderer::getPositionTexShader);
-            RenderSystem.setShaderTexture(0, texture);
-            g.blit(texture, getX(), getY(), 0, 0, width, height, width, height);
+            ButtonTextureSet textureSet = kind == ConfirmButtonKind.CANCEL
+                    ? TabletButtonTextures.CONFIRM_CANCEL
+                    : TabletButtonTextures.CONFIRM_PRIMARY;
+            ButtonTextureSpec texture = textureSet.select(this.active, false, hover);
+            GuiTextureRenderer.blitWithAlpha(g, texture, getX(), getY(), width, height);
 
             g.drawCenteredString(
                     Minecraft.getInstance().font,
@@ -1921,6 +1913,11 @@ public class TabletScreen extends Screen {
                     this.active ? hover ? 0xFFFFFFFF : 0xFF72D68A : 0xFF77867B
             );
         }
+    }
+
+    private enum ConfirmButtonKind {
+        CANCEL,
+        PRIMARY
     }
 
 }

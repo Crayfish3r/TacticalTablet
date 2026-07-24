@@ -39,7 +39,7 @@ class CompetitiveClassTierArchitectureTest {
 
         String tabletScreen = source("tablet/client/TabletScreen.java");
         assertTrue(tabletScreen.contains("TabletClientState.getClassTier(action.classKey())"));
-        assertTrue(tabletScreen.contains("ClassTier.clamp(level)"));
+        assertTrue(tabletScreen.contains("ClassButtonStyle.actualTier("));
     }
 
     @Test

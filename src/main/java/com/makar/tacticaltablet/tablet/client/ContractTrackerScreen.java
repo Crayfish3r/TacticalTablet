@@ -30,6 +30,8 @@ public class ContractTrackerScreen extends Screen {
             new ResourceLocation("tacticaltablet", "textures/gui/contract_gui.png");
     private static final int UI_WIDTH = 220;
     private static final int UI_HEIGHT = 300;
+    private static final int PANEL_TEXTURE_WIDTH = 210;
+    private static final int PANEL_TEXTURE_HEIGHT = 350;
     private static final int MAP_SIZE = 148;
 
     private int lastTargetCount = -1;
@@ -73,9 +75,16 @@ public class ContractTrackerScreen extends Screen {
         int x = (this.width - UI_WIDTH) / 2;
         int y = (this.height - UI_HEIGHT) / 2;
 
-        RenderSystem.setShader(GameRenderer::getPositionTexShader);
-        RenderSystem.setShaderTexture(0, PANEL);
-        g.blit(PANEL, x, y, 0, 0, UI_WIDTH, UI_HEIGHT, UI_WIDTH, UI_HEIGHT);
+        GuiTextureRenderer.blitWithAlpha(
+                g,
+                PANEL,
+                x,
+                y,
+                UI_WIDTH,
+                UI_HEIGHT,
+                PANEL_TEXTURE_WIDTH,
+                PANEL_TEXTURE_HEIGHT
+        );
 
         if (!ContractClientState.isTrackerActive()) {
             drawSelection(g, x, y);

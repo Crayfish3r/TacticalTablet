@@ -4,13 +4,10 @@ import com.makar.tacticaltablet.game.MatchMode;
 import com.makar.tacticaltablet.game.MatchPhase;
 import com.makar.tacticaltablet.tablet.net.PacketHandler;
 import com.makar.tacticaltablet.tablet.net.VoteModePacket;
-import com.mojang.blaze3d.systems.RenderSystem;
-
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.client.resources.sounds.SimpleSoundInstance;
 import net.minecraft.client.sounds.SoundManager;
 import net.minecraft.network.chat.Component;
@@ -74,15 +71,11 @@ public class VotingScreen extends Screen {
     @Override
     public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
         this.renderBackground(g);
-        g.fill(0, 0, this.width, this.height, 0x99000000);
 
         int x = (this.width - PANEL_W) / 2;
         int y = (this.height - PANEL_H) / 2;
 
-        g.fill(x + 4, y + 4, x + PANEL_W + 4, y + PANEL_H + 4, 0x66000000);
-        RenderSystem.setShader(GameRenderer::getPositionTexShader);
-        RenderSystem.setShaderTexture(0, PANEL);
-        g.blit(PANEL, x, y, 0, 0, PANEL_W, PANEL_H, PANEL_W, PANEL_H);
+        GuiTextureRenderer.blitWithAlpha(g, PANEL, x, y, PANEL_W, PANEL_H, PANEL_W, PANEL_H);
 
         Minecraft minecraft = Minecraft.getInstance();
         g.drawCenteredString(minecraft.font, "ГОЛОСОВАНИЕ", x + PANEL_W / 2, y + 14, 0xFF66FF66);

@@ -14,7 +14,7 @@ public final class TabletNavigationRail {
     public static final int BUTTON_GAP = 5;
     private static final int VISIBLE_BUTTONS = 5;
 
-    private final List<String> labels;
+    private final List<Item> items;
     private final IntConsumer onSelect;
     private final Runnable onHover;
     private int x;
@@ -23,8 +23,8 @@ public final class TabletNavigationRail {
     private int scroll;
     private int lastHoveredIndex = -1;
 
-    public TabletNavigationRail(List<String> labels, IntConsumer onSelect, Runnable onHover) {
-        this.labels = List.copyOf(Objects.requireNonNull(labels, "labels"));
+    public TabletNavigationRail(List<Item> items, IntConsumer onSelect, Runnable onHover) {
+        this.items = List.copyOf(Objects.requireNonNull(items, "items"));
         this.onSelect = Objects.requireNonNull(onSelect, "onSelect");
         this.onHover = Objects.requireNonNull(onHover, "onHover");
     }
@@ -35,7 +35,7 @@ public final class TabletNavigationRail {
     }
 
     public void setSelectedIndex(int selectedIndex) {
-        this.selectedIndex = Math.max(0, Math.min(labels.size() - 1, selectedIndex));
+        this.selectedIndex = Math.max(0, Math.min(items.size() - 1, selectedIndex));
         if (this.selectedIndex < scroll) scroll = this.selectedIndex;
         if (this.selectedIndex >= scroll + VISIBLE_BUTTONS) scroll = this.selectedIndex - VISIBLE_BUTTONS + 1;
         clampScroll();
@@ -43,25 +43,24 @@ public final class TabletNavigationRail {
 
     public void render(GuiGraphics graphics, int mouseX, int mouseY) {
         int hoveredIndex = -1;
-        int end = Math.min(labels.size(), scroll + VISIBLE_BUTTONS);
+        int end = Math.min(items.size(), scroll + VISIBLE_BUTTONS);
         for (int index = scroll; index < end; index++) {
+            Item item = items.get(index);
             int buttonY = y + (index - scroll) * (BUTTON_HEIGHT + BUTTON_GAP);
             boolean hovered = inside(mouseX, mouseY, x, buttonY, WIDTH, BUTTON_HEIGHT);
             if (hovered) hoveredIndex = index;
             boolean selected = selectedIndex == index;
-            int background = selected ? 0xFF294032 : hovered ? 0xFF223529 : 0xFF18231C;
-            graphics.fill(x, buttonY, x + WIDTH, buttonY + BUTTON_HEIGHT, background);
-            graphics.fill(x, buttonY + BUTTON_HEIGHT - 1, x + WIDTH, buttonY + BUTTON_HEIGHT, 0xFF496454);
-            if (selected) graphics.fill(x, buttonY, x + 2, buttonY + BUTTON_HEIGHT, 0xFF72D68A);
+            ButtonTextureSpec texture = item.textures().select(true, selected, hovered);
+            GuiTextureRenderer.blitWithAlpha(graphics, texture, x, buttonY, WIDTH, BUTTON_HEIGHT);
             int color = selected || hovered ? 0xFFE6F0E8 : 0xFF9FB2A4;
-            graphics.drawCenteredString(Minecraft.getInstance().font, labels.get(index),
+            graphics.drawCenteredString(Minecraft.getInstance().font, item.label(),
                     x + WIDTH / 2, buttonY + 10, color);
         }
         if (hoveredIndex >= 0 && hoveredIndex != lastHoveredIndex && hoveredIndex != selectedIndex) onHover.run();
         lastHoveredIndex = hoveredIndex;
 
         if (scroll > 0) graphics.drawCenteredString(Minecraft.getInstance().font, "▲", x + WIDTH / 2, y - 8, 0xFF9FB2A4);
-        if (scroll + VISIBLE_BUTTONS < labels.size()) {
+        if (scroll + VISIBLE_BUTTONS < items.size()) {
             graphics.drawCenteredString(Minecraft.getInstance().font, "▼", x + WIDTH / 2, y + HEIGHT - 8, 0xFF9FB2A4);
         }
     }
@@ -75,7 +74,7 @@ public final class TabletNavigationRail {
     }
 
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
-        if (!inside(mouseX, mouseY, x, y, WIDTH, HEIGHT) || labels.size() <= VISIBLE_BUTTONS || delta == 0.0D) {
+        if (!inside(mouseX, mouseY, x, y, WIDTH, HEIGHT) || items.size() <= VISIBLE_BUTTONS || delta == 0.0D) {
             return false;
         }
         int before = scroll;
@@ -85,7 +84,7 @@ public final class TabletNavigationRail {
     }
 
     private int indexAt(double mouseX, double mouseY) {
-        int end = Math.min(labels.size(), scroll + VISIBLE_BUTTONS);
+        int end = Math.min(items.size(), scroll + VISIBLE_BUTTONS);
         for (int index = scroll; index < end; index++) {
             int buttonY = y + (index - scroll) * (BUTTON_HEIGHT + BUTTON_GAP);
             if (inside(mouseX, mouseY, x, buttonY, WIDTH, BUTTON_HEIGHT)) return index;
@@ -94,10 +93,17 @@ public final class TabletNavigationRail {
     }
 
     private void clampScroll() {
-        scroll = Math.max(0, Math.min(Math.max(0, labels.size() - VISIBLE_BUTTONS), scroll));
+        scroll = Math.max(0, Math.min(Math.max(0, items.size() - VISIBLE_BUTTONS), scroll));
     }
 
     private static boolean inside(double mouseX, double mouseY, int x, int y, int width, int height) {
         return mouseX >= x && mouseX < x + width && mouseY >= y && mouseY < y + height;
+    }
+
+    public record Item(String label, ButtonTextureSet textures) {
+        public Item {
+            Objects.requireNonNull(label, "label");
+            Objects.requireNonNull(textures, "textures");
+        }
     }
 }

@@ -2,6 +2,7 @@ package com.makar.tacticaltablet.client;
 
 import com.makar.tacticaltablet.core.TacticalTabletMod;
 import com.makar.tacticaltablet.tablet.client.TabletClientState;
+import com.makar.tacticaltablet.tablet.client.GuiTextureRenderer;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -24,7 +25,7 @@ public final class LivesHudOverlay {
     private static final int HEART_SIZE = 16;
     private static final int HEART_TEXTURE_SIZE = 16;
     private static final int PLAYERS_SIZE = 16;
-    private static final int PLAYERS_TEXTURE_SIZE = 32;
+    private static final int PLAYERS_TEXTURE_SIZE = 16;
     private static final int HOTBAR_WIDTH = 182;
     private static final int HOTBAR_HEIGHT = 22;
     private static final int SIDE_PADDING = 6;
@@ -66,12 +67,11 @@ public final class LivesHudOverlay {
         int x = Math.min(hotbarRight + SIDE_PADDING, screenWidth - totalWidth - 2);
         x = Math.max(2, x);
 
-        graphics.blit(
+        GuiTextureRenderer.blitWithAlpha(
+                graphics,
                 HEART_TEXTURE,
                 x,
                 y,
-                0,
-                0,
                 HEART_SIZE,
                 HEART_SIZE,
                 HEART_TEXTURE_SIZE,
@@ -91,12 +91,11 @@ public final class LivesHudOverlay {
 
         int playersX = x + livesWidth + COUNTER_GAP;
 
-        graphics.blit(
+        GuiTextureRenderer.blitWithAlpha(
+                graphics,
                 PLAYERS_TEXTURE,
                 playersX,
                 y,
-                0,
-                0,
                 PLAYERS_SIZE,
                 PLAYERS_SIZE,
                 PLAYERS_TEXTURE_SIZE,
