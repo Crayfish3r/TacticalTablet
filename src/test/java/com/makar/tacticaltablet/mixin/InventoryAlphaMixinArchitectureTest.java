@@ -61,6 +61,12 @@ class InventoryAlphaMixinArchitectureTest {
         assertTrue(helper.contains("RenderSystem.disableBlend();"));
         assertTrue(helper.contains("try {"));
         assertTrue(helper.contains("} finally {"));
+        String perBlitPath = helper.substring(
+                helper.indexOf("private static void withQueryFreeAlphaBlend"),
+                helper.indexOf("public static void withAlphaBlend")
+        );
+        assertFalse(perBlitPath.contains("glIsEnabled"));
+        assertFalse(perBlitPath.contains("glGetInteger"));
 
         assertAtomicBlitScope(source("client/CuriosScreenAlphaMixin.java"));
         assertAtomicBlitScope(source("client/CuriosScreenV2AlphaMixin.java"));

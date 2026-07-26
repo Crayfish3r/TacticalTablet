@@ -28,7 +28,7 @@ class SetScoringIntegrationArchitectureTest {
     @Test
     void assistsUseTheSameAcceptedEffectivePvpDamagePath() throws IOException {
         String events = source("src/main/java/com/makar/tacticaltablet/game/ServerEvents.java");
-        int acceptedDamage = events.indexOf("MatchDamageAccounting.shouldRecordDamage");
+        int acceptedDamage = events.indexOf("decision == MatchDamageDecision.Reason.ACCEPTED");
         int damageStat = events.indexOf("DiscordLeaderboardService.recordMatchDamage", acceptedDamage);
         int assistAttribution = events.indexOf("SetMatchRuntime.recordEffectivePvpDamage", acceptedDamage);
 

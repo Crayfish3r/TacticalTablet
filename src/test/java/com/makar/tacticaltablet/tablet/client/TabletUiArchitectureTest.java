@@ -81,7 +81,7 @@ class TabletUiArchitectureTest {
         int finallyBlock = renderer.indexOf("} finally {");
         int resetColor = renderer.indexOf("graphics.setColor(1.0F, 1.0F, 1.0F, 1.0F);");
 
-        assertTrue(renderer.contains("withAlphaBlend(graphics, () ->"));
+        assertTrue(renderer.contains("withQueryFreeAlphaBlend(graphics, () ->"));
         assertTrue(renderer.contains("BLEND_STATES.get().push(BlendState.capture())"));
         assertTrue(renderer.contains("RenderSystem.defaultBlendFunc();"));
         assertTrue(renderer.contains("RenderSystem.blendFuncSeparate("));
@@ -92,6 +92,13 @@ class TabletUiArchitectureTest {
         assertTrue(blit < finallyBlock);
         assertTrue(finallyBlock < resetColor);
         assertFalse(renderer.contains("GameRenderer::getPositionTexShader"));
+
+        String perBlitPath = renderer.substring(
+                renderer.indexOf("private static void withQueryFreeAlphaBlend"),
+                renderer.indexOf("public static void withAlphaBlend")
+        );
+        assertFalse(perBlitPath.contains("glIsEnabled"));
+        assertFalse(perBlitPath.contains("glGetInteger"));
     }
 
     @Test

@@ -7,6 +7,7 @@ import com.google.gson.JsonParser;
 import org.junit.jupiter.api.Test;
 
 import javax.imageio.ImageIO;
+import java.awt.Font;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.InputStream;
@@ -27,7 +28,11 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class EmbeddedClientResourcesTest {
-    private static final Path ASSETS = Path.of("src/main/resources/assets");
+    private static final Path RESOURCES = Path.of("src/main/resources");
+    private static final Path MOD_ASSETS = RESOURCES.resolve("assets");
+    private static final Path OVERRIDE_PACK =
+            RESOURCES.resolve("resourcepacks/tacticaltablet_overrides");
+    private static final Path OVERRIDE_ASSETS = OVERRIDE_PACK.resolve("assets");
     private static final Path MANIFEST =
             Path.of("src/test/resources/deluxewarfare-runtime-assets.tsv");
     private static final Set<String> FONT_FALLBACKS = Set.of(
@@ -52,7 +57,7 @@ class EmbeddedClientResourcesTest {
         )));
 
         for (ManifestEntry entry : entries) {
-            Path file = ASSETS.resolve(entry.path());
+            Path file = asset(entry.path());
             assertTrue(Files.isRegularFile(file), entry.path());
             assertEquals(entry.size(), Files.size(file), entry.path());
             assertEquals(entry.sha256(), sha256(file), entry.path());
@@ -68,12 +73,12 @@ class EmbeddedClientResourcesTest {
 
     @Test
     void guiPngsRetainTransparencyAndButtonsContainPartialAlpha() throws IOException {
-        Path guiRoot = ASSETS.resolve("tacticaltablet/textures/gui");
+        Path guiRoot = asset("tacticaltablet/textures/gui");
         List<Path> guiPngs = pngs(guiRoot);
-        guiPngs.add(ASSETS.resolve("minecraft/textures/gui/container/inventory.png"));
-        guiPngs.add(ASSETS.resolve("minecraft/textures/gui/recipe_button.png"));
-        guiPngs.add(ASSETS.resolve("curios/textures/gui/inventory.png"));
-        guiPngs.add(ASSETS.resolve("curios/textures/gui/inventory_revamp.png"));
+        guiPngs.add(asset("minecraft/textures/gui/container/inventory.png"));
+        guiPngs.add(asset("minecraft/textures/gui/recipe_button.png"));
+        guiPngs.add(asset("curios/textures/gui/inventory.png"));
+        guiPngs.add(asset("curios/textures/gui/inventory_revamp.png"));
 
         for (Path png : guiPngs) {
             BufferedImage image = readImage(png);
@@ -89,7 +94,7 @@ class EmbeddedClientResourcesTest {
     @Test
     void classButtonRemainsNeutralGrayscaleAndClassIconsAreComplete() throws IOException {
         BufferedImage classButton = readImage(
-                ASSETS.resolve("tacticaltablet/textures/gui/buttons/class_button.png")
+                asset("tacticaltablet/textures/gui/buttons/class_button.png")
         );
         for (int y = 0; y < classButton.getHeight(); y++) {
             for (int x = 0; x < classButton.getWidth(); x++) {
@@ -111,21 +116,23 @@ class EmbeddedClientResourcesTest {
                 "krot", "marine", "medic", "microwave", "railgunner", "class_fallback"
         );
         for (String icon : icons) {
-            Path file = ASSETS.resolve("tacticaltablet/textures/gui/classes/" + icon + ".png");
+            Path file = asset("tacticaltablet/textures/gui/classes/" + icon + ".png");
             BufferedImage image = readImage(file);
             assertEquals(16, image.getWidth(), icon);
             assertEquals(16, image.getHeight(), icon);
         }
         assertFalse(Files.exists(
-                ASSETS.resolve("tacticaltablet/textures/gui/classes/soldier.png")
+                asset("tacticaltablet/textures/gui/classes/soldier.png")
         ));
     }
 
     @Test
     void jsonResourcesAreValidAndLocalReferencesResolve() throws IOException {
         List<Path> jsonFiles;
-        try (Stream<Path> files = Files.walk(ASSETS)) {
-            jsonFiles = files.filter(Files::isRegularFile)
+        try (Stream<Path> modFiles = Files.walk(MOD_ASSETS);
+             Stream<Path> overrideFiles = Files.walk(OVERRIDE_ASSETS)) {
+            jsonFiles = Stream.concat(modFiles, overrideFiles)
+                    .filter(Files::isRegularFile)
                     .filter(path -> path.getFileName().toString().endsWith(".json"))
                     .toList();
         }
@@ -147,7 +154,7 @@ class EmbeddedClientResourcesTest {
     @Test
     void fontLocalizationAndRecoveryCompassOverridesRemainFunctional() throws IOException {
         JsonObject font = json(
-                ASSETS.resolve("minecraft/font/default.json")
+                asset("minecraft/font/default.json")
         ).getAsJsonObject();
         JsonArray providers = font.getAsJsonArray("providers");
         Set<String> references = Stream.iterate(0, index -> index + 1)
@@ -159,19 +166,40 @@ class EmbeddedClientResourcesTest {
                 .map(provider -> provider.get("id").getAsString())
                 .collect(java.util.stream.Collectors.toSet());
         assertEquals(FONT_FALLBACKS, references);
-        assertTrue(providers.toString().contains("deluxewarfare:tactical_mono.ttf"));
+        JsonObject ttf = Stream.iterate(0, index -> index + 1)
+                .limit(providers.size())
+                .map(providers::get)
+                .map(JsonElement::getAsJsonObject)
+                .filter(provider -> "ttf".equals(provider.get("type").getAsString()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("deluxewarfare:jetbrains_mono_medium.ttf", ttf.get("file").getAsString());
+        assertEquals(11.0D, ttf.get("size").getAsDouble());
+        assertEquals(1.0D, ttf.get("oversample").getAsDouble());
+        assertEquals(List.of(0.0D, 0.0D), Stream.iterate(0, index -> index + 1)
+                .limit(ttf.getAsJsonArray("shift").size())
+                .map(index -> ttf.getAsJsonArray("shift").get(index).getAsDouble())
+                .toList());
 
-        Path fontFile = ASSETS.resolve("deluxewarfare/font/tactical_mono.ttf");
+        Path fontFile = asset("deluxewarfare/font/jetbrains_mono_medium.ttf");
         assertTrue(Files.size(fontFile) > 0);
+        try (InputStream input = Files.newInputStream(fontFile)) {
+            Font medium = Font.createFont(Font.TRUETYPE_FONT, input);
+            assertEquals(-1, medium.canDisplayUpTo(
+                    "Русский English 0123456789 +-/%:.,!?()[]{}"
+            ));
+        } catch (java.awt.FontFormatException exception) {
+            throw new IOException("Invalid JetBrains Mono font", exception);
+        }
         for (String language : List.of("en_us", "ru_ru")) {
             JsonObject locale = json(
-                    ASSETS.resolve("minecraft/lang/" + language + ".json")
+                    asset("minecraft/lang/" + language + ".json")
             ).getAsJsonObject();
             assertEquals("", locale.get("container.crafting").getAsString());
         }
 
         JsonObject compass = json(
-                ASSETS.resolve("minecraft/models/item/recovery_compass.json")
+                asset("minecraft/models/item/recovery_compass.json")
         ).getAsJsonObject();
         JsonArray overrides = compass.getAsJsonArray("overrides");
         long extractionOverrides = Stream.iterate(0, index -> index + 1)
@@ -194,11 +222,37 @@ class EmbeddedClientResourcesTest {
         assertTrue(Files.isRegularFile(Path.of(
                 "src/main/resources/META-INF/licenses/Curios-LGPL-3.0-or-later.txt"
         )));
+        assertTrue(Files.isRegularFile(Path.of(
+                "src/main/resources/META-INF/licenses/JetBrains-Mono-Apache-2.0.txt"
+        )));
         String notices = Files.readString(Path.of(
                 "src/main/resources/THIRD_PARTY_NOTICES.txt"
         ));
-        assertTrue(notices.contains("DejaVu Sans Mono"));
+        assertTrue(notices.contains("JetBrains Mono Medium 1.0.3"));
+        assertTrue(notices.contains("Apache License, Version 2.0"));
         assertTrue(notices.contains("Curios GUI reference assets"));
+    }
+
+    @Test
+    void crossNamespaceOverridesLiveOnlyInTheRequiredTopPriorityPack() throws IOException {
+        assertFalse(Files.exists(MOD_ASSETS.resolve("curios")));
+        assertFalse(Files.exists(MOD_ASSETS.resolve("minecraft")));
+        assertFalse(Files.exists(MOD_ASSETS.resolve("deluxewarfare")));
+
+        JsonObject pack = json(OVERRIDE_PACK.resolve("pack.mcmeta")).getAsJsonObject()
+                .getAsJsonObject("pack");
+        assertEquals(15, pack.get("pack_format").getAsInt());
+
+        String registration = Files.readString(Path.of(
+                "src/main/java/com/makar/tacticaltablet/client/EmbeddedClientResourcePack.java"
+        ));
+        assertTrue(registration.contains("event.getPackType() != PackType.CLIENT_RESOURCES"));
+        assertTrue(registration.contains("Pack.Position.TOP"));
+        assertTrue(registration.contains("PackSource.BUILT_IN"));
+        assertTrue(registration.contains("Component.literal(\"Tactical Tablet Overrides\"),\n"
+                + "                true,"));
+        assertTrue(registration.contains("Pack.Position.TOP,\n"
+                + "                true,"));
     }
 
     private static void verifyModelReferences() throws IOException {
@@ -248,14 +302,14 @@ class EmbeddedClientResourcesTest {
             for (JsonElement texture : object.getAsJsonArray("textures")) {
                 String[] location = splitLocation(texture.getAsString());
                 assertTrue(Files.isRegularFile(
-                        ASSETS.resolve(location[0] + "/textures/particle/" + location[1] + ".png")
+                        asset(location[0] + "/textures/particle/" + location[1] + ".png")
                 ), texture.getAsString());
             }
         }
     }
 
     private static void verifySoundReferences() throws IOException {
-        JsonObject sounds = json(ASSETS.resolve("tacticaltablet/sounds.json")).getAsJsonObject();
+        JsonObject sounds = json(asset("tacticaltablet/sounds.json")).getAsJsonObject();
         for (JsonElement definition : sounds.asMap().values()) {
             for (JsonElement sound : definition.getAsJsonObject().getAsJsonArray("sounds")) {
                 String name = sound.isJsonPrimitive()
@@ -263,7 +317,7 @@ class EmbeddedClientResourcesTest {
                         : sound.getAsJsonObject().get("name").getAsString();
                 String[] location = splitLocation(name);
                 assertTrue(Files.isRegularFile(
-                        ASSETS.resolve(location[0] + "/sounds/" + location[1] + ".ogg")
+                        asset(location[0] + "/sounds/" + location[1] + ".ogg")
                 ), name);
             }
         }
@@ -275,7 +329,7 @@ class EmbeddedClientResourcesTest {
             return;
         }
         assertTrue(Files.isRegularFile(
-                ASSETS.resolve(location[0] + "/models/" + location[1] + ".json")
+                asset(location[0] + "/models/" + location[1] + ".json")
         ), reference);
     }
 
@@ -285,13 +339,13 @@ class EmbeddedClientResourcesTest {
             return;
         }
         assertTrue(Files.isRegularFile(
-                ASSETS.resolve(location[0] + "/textures/" + location[1] + ".png")
+                asset(location[0] + "/textures/" + location[1] + ".png")
         ), reference);
     }
 
     private static Path resolveRawResource(String reference) {
         String[] location = splitLocation(reference);
-        return ASSETS.resolve(location[0] + "/" + location[1]);
+        return asset(location[0] + "/" + location[1]);
     }
 
     private static String[] splitLocation(String reference) {
@@ -303,16 +357,18 @@ class EmbeddedClientResourcesTest {
 
     private static List<Path> jsonFilesUnder(String folder) throws IOException {
         List<Path> result = new ArrayList<>();
-        try (Stream<Path> namespaces = Files.list(ASSETS)) {
-            for (Path namespace : namespaces.toList()) {
-                Path root = namespace.resolve(folder);
-                if (!Files.isDirectory(root)) {
-                    continue;
-                }
-                try (Stream<Path> files = Files.walk(root)) {
-                    result.addAll(files.filter(Files::isRegularFile)
-                            .filter(file -> file.getFileName().toString().endsWith(".json"))
-                            .toList());
+        for (Path assetRoot : List.of(MOD_ASSETS, OVERRIDE_ASSETS)) {
+            try (Stream<Path> namespaces = Files.list(assetRoot)) {
+                for (Path namespace : namespaces.toList()) {
+                    Path root = namespace.resolve(folder);
+                    if (!Files.isDirectory(root)) {
+                        continue;
+                    }
+                    try (Stream<Path> files = Files.walk(root)) {
+                        result.addAll(files.filter(Files::isRegularFile)
+                                .filter(file -> file.getFileName().toString().endsWith(".json"))
+                                .toList());
+                    }
                 }
             }
         }
@@ -377,7 +433,16 @@ class EmbeddedClientResourcesTest {
     }
 
     private static String relative(Path path) {
-        return ASSETS.relativize(path).toString().replace('\\', '/');
+        Path root = path.startsWith(MOD_ASSETS) ? MOD_ASSETS : OVERRIDE_ASSETS;
+        return root.relativize(path).toString().replace('\\', '/');
+    }
+
+    private static Path asset(String path) {
+        int separator = path.indexOf('/');
+        String namespace = separator < 0 ? path : path.substring(0, separator);
+        return "tacticaltablet".equals(namespace)
+                ? MOD_ASSETS.resolve(path)
+                : OVERRIDE_ASSETS.resolve(path);
     }
 
     private static List<ManifestEntry> manifest() throws IOException {
@@ -389,11 +454,15 @@ class EmbeddedClientResourcesTest {
                         columns[0],
                         Long.parseLong(columns[1]),
                         columns[2],
-                        columns[3].isEmpty() ? null : Integer.valueOf(columns[3]),
-                        columns[4].isEmpty() ? null : Integer.valueOf(columns[4]),
-                        columns[5].isEmpty() ? null : Boolean.valueOf(columns[5])
+                        column(columns, 3).isEmpty() ? null : Integer.valueOf(column(columns, 3)),
+                        column(columns, 4).isEmpty() ? null : Integer.valueOf(column(columns, 4)),
+                        column(columns, 5).isEmpty() ? null : Boolean.valueOf(column(columns, 5))
                 ))
                 .toList();
+    }
+
+    private static String column(String[] columns, int index) {
+        return index < columns.length ? columns[index] : "";
     }
 
     private record ManifestEntry(

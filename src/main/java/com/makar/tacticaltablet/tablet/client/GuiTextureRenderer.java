@@ -108,7 +108,7 @@ public final class GuiTextureRenderer {
         Objects.requireNonNull(graphics, "graphics");
         Objects.requireNonNull(texture, "texture");
 
-        withAlphaBlend(graphics, () -> {
+        withQueryFreeAlphaBlend(graphics, () -> {
             graphics.setColor(red, green, blue, alpha);
             try {
                 graphics.blit(
@@ -126,6 +126,25 @@ public final class GuiTextureRenderer {
                 graphics.setColor(1.0F, 1.0F, 1.0F, 1.0F);
             }
         });
+    }
+
+    private static void withQueryFreeAlphaBlend(GuiGraphics graphics, Runnable drawCall) {
+        Deque<BlendState> states = BLEND_STATES.get();
+        if (!states.isEmpty()) {
+            drawCall.run();
+            return;
+        }
+
+        RenderSystem.assertOnRenderThread();
+        RenderSystem.enableBlend();
+        RenderSystem.defaultBlendFunc();
+        try {
+            drawCall.run();
+        } finally {
+            graphics.setColor(1.0F, 1.0F, 1.0F, 1.0F);
+            RenderSystem.disableBlend();
+            BLEND_STATES.remove();
+        }
     }
 
     public static void withAlphaBlend(GuiGraphics graphics, Runnable drawCall) {

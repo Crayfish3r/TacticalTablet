@@ -340,29 +340,39 @@ public class ServerEvents {
 
     @SubscribeEvent
     public static void onLivingDamage(LivingDamageEvent event) {
-        if (event.isCanceled()) return;
         if (!(event.getEntity() instanceof ServerPlayer victim)) return;
-        if (!(event.getSource().getEntity() instanceof ServerPlayer attacker)) return;
-        if (attacker.getUUID().equals(victim.getUUID())) return;
+        if (event.isCanceled()) {
+            CombatAttributionDiagnostics.record(
+                    MatchDamageDecision.Reason.ZERO_HEALTH_DAMAGE
+            );
+            return;
+        }
 
-        boolean attackerParticipant = attacker.getTags().contains("war.playing")
-                && LivesManager.isAliveParticipant(attacker);
-        boolean victimParticipant = victim.getTags().contains("war.playing")
-                && LivesManager.isAliveParticipant(victim);
-        boolean friendlyFire = GameStateManager.getCurrentMode().isTeamMode()
-                && TeamMatchManager.areTeammates(attacker, victim);
+        ServerPlayer attacker = ResponsiblePlayerResolver.resolve(event.getSource());
+        boolean attackerParticipant = ActivePvpParticipant.isEligible(attacker);
+        boolean victimParticipant = ActivePvpParticipant.isEligible(victim);
+        boolean friendlyFireOrSelfDamage = attacker != null
+                && (attacker.getUUID().equals(victim.getUUID())
+                || (GameStateManager.getCurrentMode().isTeamMode()
+                && TeamMatchManager.areTeammates(attacker, victim)));
         double actualHealthLost = MatchDamageAccounting.actualHealthLostFromFinalDamage(
                 victim.getHealth(),
                 event.getAmount()
         );
-
-        if (MatchDamageAccounting.shouldRecordDamage(
-                event.isCanceled(),
-                friendlyFire,
+        MatchDamageDecision.Reason decision = MatchDamageDecision.classify(
+                attacker != null,
                 attackerParticipant,
                 victimParticipant,
+                friendlyFireOrSelfDamage,
                 actualHealthLost
-        )) {
+        );
+        if (decision == MatchDamageDecision.Reason.ACCEPTED
+                && !CombatDamageEventClaims.claim(event)) {
+            return;
+        }
+        CombatAttributionDiagnostics.record(decision);
+
+        if (decision == MatchDamageDecision.Reason.ACCEPTED) {
             DiscordLeaderboardService.recordMatchDamage(attacker, actualHealthLost);
             SetMatchRuntime.recordEffectivePvpDamage(attacker.getUUID(), attacker.getGameProfile().getName(),
                     victim.getUUID(), attacker.server.getTickCount());
@@ -467,9 +477,7 @@ public class ServerEvents {
     }
 
     private static boolean isActiveMatchParticipant(ServerPlayer player) {
-        return player != null
-                && MatchAdmissionManager.isCurrentMatchParticipant(player.getUUID())
-                && player.getTags().contains("war.playing");
+        return ActivePvpParticipant.isEligible(player);
     }
 
     private static void processPlayerDeath(ServerPlayer victim, DamageSource source) {
@@ -492,7 +500,7 @@ public class ServerEvents {
             return;
         }
 
-        ServerPlayer killer = source.getEntity() instanceof ServerPlayer sourceKiller ? sourceKiller : null;
+        ServerPlayer killer = ResponsiblePlayerResolver.resolve(source);
 
         DeathTransitionManager.recordDeath(victim, source);
         CorpseLootManager.createCorpse(victim);

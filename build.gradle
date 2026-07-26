@@ -214,13 +214,28 @@ def sha256 = { byte[] bytes ->
             .toString()
 }
 
+def runtimeAssetSourcePath = { String logicalPath ->
+    logicalPath.startsWith('tacticaltablet/')
+            ? "src/main/resources/assets/${logicalPath}"
+            : "src/main/resources/resourcepacks/tacticaltablet_overrides/assets/${logicalPath}"
+}
+
+def runtimeAssetJarPath = { String logicalPath ->
+    logicalPath.startsWith('tacticaltablet/')
+            ? "assets/${logicalPath}"
+            : "resourcepacks/tacticaltablet_overrides/assets/${logicalPath}"
+}
+
 tasks.register('verifyEmbeddedClientResourceSources') {
     inputs.file(runtimeAssetManifest)
     inputs.dir(layout.projectDirectory.dir('src/main/resources/assets'))
+    inputs.dir(layout.projectDirectory.dir(
+            'src/main/resources/resourcepacks/tacticaltablet_overrides'
+    ))
     doLast {
         readRuntimeAssetManifest().each { expected ->
             File source = layout.projectDirectory.file(
-                    "src/main/resources/assets/${expected.path}"
+                    runtimeAssetSourcePath(expected.path)
             ).asFile
             if (!source.isFile()) {
                 throw new GradleException("Missing embedded client resource: ${expected.path}")
@@ -260,7 +275,7 @@ tasks.register('verifyJarEmbeddedClientResources') {
         def archive = new java.util.zip.ZipFile(archiveFile.get().asFile)
         try {
             readRuntimeAssetManifest().each { expected ->
-                String path = "assets/${expected.path}"
+                String path = runtimeAssetJarPath(expected.path)
                 def entry = archive.getEntry(path)
                 if (entry == null) {
                     throw new GradleException("JAR is missing embedded client resource: ${path}")
@@ -273,7 +288,9 @@ tasks.register('verifyJarEmbeddedClientResources') {
 
             [
                     'META-INF/licenses/Curios-LGPL-3.0-or-later.txt',
-                    'THIRD_PARTY_NOTICES.txt'
+                    'META-INF/licenses/JetBrains-Mono-Apache-2.0.txt',
+                    'THIRD_PARTY_NOTICES.txt',
+                    'resourcepacks/tacticaltablet_overrides/pack.mcmeta'
             ].each { required ->
                 if (archive.getEntry(required) == null) {
                     throw new GradleException("JAR is missing third-party notice: ${required}")

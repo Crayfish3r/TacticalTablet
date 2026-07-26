@@ -17,16 +17,16 @@ import java.util.List;
 )
 public final class EmbeddedResourceDiagnostics {
     private static final String ENABLE_PROPERTY = "tacticaltablet.verifyEmbeddedResources";
-    private static final List<ResourceLocation> PROBES = List.of(
-            resource("tacticaltablet", "textures/gui/tablet.png"),
-            resource("tacticaltablet", "textures/gui/buttons/class_button.png"),
-            resource("minecraft", "textures/gui/container/inventory.png"),
-            resource("minecraft", "textures/gui/recipe_button.png"),
-            resource("minecraft", "font/default.json"),
-            resource("minecraft", "lang/ru_ru.json"),
-            resource("curios", "textures/gui/inventory.png"),
-            resource("curios", "textures/gui/inventory_revamp.png"),
-            resource("deluxewarfare", "font/tactical_mono.ttf")
+    private static final List<Probe> PROBES = List.of(
+            probe("tacticaltablet", "textures/gui/tablet.png"),
+            probe("tacticaltablet", "textures/gui/buttons/class_button.png"),
+            override("minecraft", "textures/gui/container/inventory.png"),
+            override("minecraft", "textures/gui/recipe_button.png"),
+            override("minecraft", "font/default.json"),
+            override("minecraft", "lang/ru_ru.json"),
+            override("curios", "textures/gui/inventory.png"),
+            override("curios", "textures/gui/inventory_revamp.png"),
+            override("deluxewarfare", "font/jetbrains_mono_medium.ttf")
     );
 
     private EmbeddedResourceDiagnostics() {
@@ -39,16 +39,29 @@ public final class EmbeddedResourceDiagnostics {
         }
 
         event.registerReloadListener((ResourceManagerReloadListener) resourceManager -> {
-            for (ResourceLocation probe : PROBES) {
-                resourceManager.getResource(probe).ifPresentOrElse(
-                        resource -> TacticalTabletMod.LOGGER.info(
-                                "[embedded-resource-audit] {} -> {}",
-                                probe,
-                                resource.sourcePackId()
-                        ),
+            for (Probe probe : PROBES) {
+                resourceManager.getResource(probe.location()).ifPresentOrElse(
+                        resource -> {
+                            String actualSource = resource.sourcePackId();
+                            if (probe.expectedSourcePackId() != null
+                                    && !probe.expectedSourcePackId().equals(actualSource)) {
+                                TacticalTabletMod.LOGGER.error(
+                                        "[embedded-resource-audit] WRONG SOURCE {} -> {}, expected {}",
+                                        probe.location(),
+                                        actualSource,
+                                        probe.expectedSourcePackId()
+                                );
+                            } else {
+                                TacticalTabletMod.LOGGER.info(
+                                        "[embedded-resource-audit] {} -> {}",
+                                        probe.location(),
+                                        actualSource
+                                );
+                            }
+                        },
                         () -> TacticalTabletMod.LOGGER.error(
                                 "[embedded-resource-audit] MISSING {}",
-                                probe
+                                probe.location()
                         )
                 );
             }
@@ -56,6 +69,20 @@ public final class EmbeddedResourceDiagnostics {
     }
 
     private static ResourceLocation resource(String namespace, String path) {
-        return ResourceLocation.fromNamespaceAndPath(namespace, path);
+        return new ResourceLocation(namespace, path);
+    }
+
+    private static Probe probe(String namespace, String path) {
+        return new Probe(resource(namespace, path), null);
+    }
+
+    private static Probe override(String namespace, String path) {
+        return new Probe(
+                resource(namespace, path),
+                EmbeddedClientResourcePack.PACK_ID
+        );
+    }
+
+    private record Probe(ResourceLocation location, String expectedSourcePackId) {
     }
 }

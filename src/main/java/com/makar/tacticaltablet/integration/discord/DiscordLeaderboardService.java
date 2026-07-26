@@ -4,6 +4,8 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.makar.tacticaltablet.clan.ClanManager;
 import com.makar.tacticaltablet.core.TacticalTabletMod;
+import com.makar.tacticaltablet.game.CombatAttributionDiagnostics;
+import com.makar.tacticaltablet.game.CombatDamageEventClaims;
 import com.makar.tacticaltablet.game.GameStateManager;
 import com.makar.tacticaltablet.game.MapSetManager;
 import com.makar.tacticaltablet.game.MatchAdmissionManager;
@@ -122,6 +124,8 @@ public final class DiscordLeaderboardService {
 
     public static synchronized void startMatch(MinecraftServer server) {
         currentMatchStats.clear();
+        CombatAttributionDiagnostics.startMatch();
+        CombatDamageEventClaims.reset();
         currentMatchStartedAtMillis = System.currentTimeMillis();
         currentMatchAirdrops = 0;
         if (currentSetStartedAtMillis <= 0L) {
@@ -143,6 +147,8 @@ public final class DiscordLeaderboardService {
 
     public static synchronized void resetMatch() {
         currentMatchStats.clear();
+        CombatAttributionDiagnostics.startMatch();
+        CombatDamageEventClaims.reset();
         currentMatchStartedAtMillis = 0L;
         currentMatchAirdrops = 0;
     }
@@ -279,6 +285,8 @@ public final class DiscordLeaderboardService {
         currentSetMap = currentMapName(server);
         saveSetState(server);
 
+        CombatAttributionDiagnostics.finishMatch();
+        CombatDamageEventClaims.reset();
         currentMatchStats.clear();
         currentMatchStartedAtMillis = 0L;
         currentMatchAirdrops = 0;

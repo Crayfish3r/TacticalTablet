@@ -1016,15 +1016,30 @@ public class TabletScreen extends Screen {
     private ActionPresentation describeAction(TabletAction action) {
         boolean active = isActionActive(action);
         if (isClanWarSetupOnly()) return unavailable("Матч ещё не начался");
-        if (isMarineAction(action) && !isCurrentPlayerInClan()) return unavailable("Требуется клан", "C");
-        if (isMarineAction(action) && !isMarineUnlockedForCurrentClan()) {
-            if (canBuyMarineForCurrentClan()) {
-                return new ActionPresentation("Покупка • " + ClanManager.MARINE_CLASS_COST + " КК",
-                        "Глава клана может купить Морпеха", true, 0xFFE7C76A, "¤");
-            }
-            return unavailable("Требуется разблокировка клана", "C");
+        if (isMarineAction(action)) {
+            long cooldown = TabletClientState.getCooldown(action.actionId());
+            MarineActionPresentationPolicy.Presentation marine =
+                    MarineActionPresentationPolicy.describe(
+                            isCurrentPlayerInClan(),
+                            isMarineUnlockedForCurrentClan(),
+                            canBuyMarineForCurrentClan(),
+                            active,
+                            TabletClientState.isKitUsed(),
+                            cooldown > 0L ? formatTime(cooldown) : "",
+                            TabletClientState.isGameRunning(),
+                            ClanManager.MARINE_CLASS_COST
+                    );
+            return new ActionPresentation(
+                    marine.status(),
+                    marine.hint(),
+                    marine.active(),
+                    marine.color(),
+                    marine.marker()
+            );
         }
-        if (action.exclusive() && !TabletClientState.isClassPurchased(action.classKey())) {
+        if (action.exclusive()
+                && !isMarineAction(action)
+                && !TabletClientState.isClassPurchased(action.classKey())) {
             return unavailable("Эксклюзивный класс не выдан");
         }
         if (TabletClientState.isCompetitiveSet() && action.shop()) {
@@ -1061,7 +1076,6 @@ public class TabletScreen extends Screen {
         }
         if (TabletClientState.isKitUsed()) return unavailable("Уже использован", "✓");
         if (!TabletClientState.isGameRunning()) return unavailable("Нет активной игры");
-
         if (isBaseClassAction(action)) {
             int tier = TabletClientState.getClassTier(action.classKey());
             int xp = TabletClientState.getXP(action.classKey());

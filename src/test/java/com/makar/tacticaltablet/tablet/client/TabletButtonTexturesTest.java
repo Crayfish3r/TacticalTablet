@@ -114,7 +114,7 @@ class TabletButtonTexturesTest {
 
     private static ButtonTextureSpec spec(String name) {
         return new ButtonTextureSpec(
-                ResourceLocation.fromNamespaceAndPath("tacticaltablet", PREFIX + name + ".png"),
+                new ResourceLocation("tacticaltablet", PREFIX + name + ".png"),
                 10,
                 10
         );

@@ -110,7 +110,7 @@ public final class ClassDefinitions {
     private static ClassDefinition definition(String classKey, String name, ClassCategory category,
                                               int actionId, int price, int tier, int order) {
         return new ClassDefinition(
-                ResourceLocation.fromNamespaceAndPath("tacticaltablet", classKey),
+                new ResourceLocation("tacticaltablet", classKey),
                 Component.literal(name),
                 classKey,
                 category,
@@ -123,6 +123,6 @@ public final class ClassDefinitions {
     }
 
     private static ResourceLocation texture(String path) {
-        return ResourceLocation.fromNamespaceAndPath("tacticaltablet", "textures/gui/" + path);
+        return new ResourceLocation("tacticaltablet", "textures/gui/" + path);
     }
 }

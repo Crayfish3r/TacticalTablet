@@ -96,7 +96,7 @@ public final class TabletButtonTextures {
 
     private static ButtonTextureSpec texture(String fileName, int width, int height) {
         return new ButtonTextureSpec(
-                ResourceLocation.fromNamespaceAndPath("tacticaltablet", ROOT + fileName),
+                new ResourceLocation("tacticaltablet", ROOT + fileName),
                 width,
                 height
         );
