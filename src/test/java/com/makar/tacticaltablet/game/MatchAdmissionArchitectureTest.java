@@ -19,7 +19,8 @@ class MatchAdmissionArchitectureTest {
         String rtp = read("game/respawn/RtpTimerManager.java");
         String respawn = read("game/respawn/DeathTransitionManager.java");
 
-        assertTrue(events.contains("enforceLateSpectator(player, true)"));
+        assertTrue(events.contains("finalizePlayerJoin(player)"));
+        assertTrue(events.contains("enforceFinalizedLateSpectator(player, true)"));
         assertTrue(events.contains("MatchAdmissionManager.isLateSpectator(newPlayer)"));
         assertTrue(tablet.contains("enforceLateSpectator(player, false)"));
         assertTrue(rtp.contains("MatchAdmissionManager.isLateSpectator(player)"));
@@ -68,6 +69,39 @@ class MatchAdmissionArchitectureTest {
         assertTrue(zone.contains("public static OptionalInt getCurrentPhaseNumber()"));
         assertTrue(zone.contains("return OptionalInt.empty()"));
         assertTrue(zone.contains("PHASES[currentPhaseIndex].number"));
+    }
+
+    @Test
+    void loginHasExactlyOneExhaustiveTerminalAdmissionDecision() throws IOException {
+        String events = read("game/ServerEvents.java");
+        String outcomes = read("game/MatchAdmissionOutcome.java");
+
+        assertTrue(events.contains("switch (admission.outcome())"));
+        assertTrue(events.contains("case DISCONNECTED"));
+        assertTrue(events.contains("case LATE_SPECTATOR"));
+        assertTrue(events.contains("case ACTIVE_PARTICIPANT, RETURNING_PARTICIPANT"));
+        assertTrue(events.contains("case NORMAL_LOBBY_PLAYER"));
+        assertFalse(events.contains("MatchAdmissionManager.inspectStatus(player)"));
+        assertFalse(events.contains("MatchAdmissionManager.admitEligiblePlayer(player)"));
+
+        assertTrue(outcomes.contains("ACTIVE_PARTICIPANT"));
+        assertTrue(outcomes.contains("RETURNING_PARTICIPANT"));
+        assertTrue(outcomes.contains("LATE_SPECTATOR"));
+        assertTrue(outcomes.contains("NORMAL_LOBBY_PLAYER"));
+        assertTrue(outcomes.contains("DISCONNECTED"));
+    }
+
+    @Test
+    void finalAdmissionRechecksStateAndLateEnforcementIsIdempotent() throws IOException {
+        String service = read("game/MatchAdmissionService.java");
+        String manager = read("game/MatchAdmissionManager.java");
+
+        assertTrue(service.contains("beforeFinalCheck.run()"));
+        assertTrue(service.contains("Inspection current = inspect(playerId)"));
+        assertTrue(service.contains("Inspection committed = inspect(playerId)"));
+        assertTrue(service.contains("terminalWithoutRegistration"));
+        assertTrue(manager.contains("DATA_LATE_NOTIFICATION_MATCH"));
+        assertTrue(manager.contains("!matchKey.equals(notifiedMatch)"));
     }
 
     private static String read(String relativePath) throws IOException {

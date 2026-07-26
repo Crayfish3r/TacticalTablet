@@ -21,9 +21,12 @@ import net.minecraft.network.protocol.game.ClientboundSetTitleTextPacket;
 import net.minecraft.network.protocol.game.ClientboundSetTitlesAnimationPacket;
 import net.minecraft.server.level.ServerPlayer;
 
+import java.util.Optional;
 import java.util.UUID;
 
 public final class MatchAdmissionManager {
+    private static final String DATA_LATE_NOTIFICATION_MATCH =
+            "tacticaltablet.late_admission_notification_match";
     private static final Component LATE_JOIN_TITLE = Component.literal("ПОЗДНЕЕ ПОДКЛЮЧЕНИЕ");
     private static final Component LATE_JOIN_SUBTITLE =
             Component.literal("Возрождение — только в следующей игре!");
@@ -53,16 +56,47 @@ public final class MatchAdmissionManager {
         return ADMISSION_SERVICE.inspect(playerId).status();
     }
 
-    public static MatchAdmissionStatus admitEligiblePlayer(ServerPlayer player) {
-        if (player == null) return MatchAdmissionStatus.NO_ACTIVE_MATCH;
-        MatchAdmissionService.Inspection result = ADMISSION_SERVICE.admit(player.getUUID());
-        if (result.status() == MatchAdmissionStatus.LATE_SPECTATOR && result.phase() < 3) {
-            TacticalTabletMod.LOGGER.error(
-                    "Failed to register early match participant matchId={} playerId={} zonePhase={}",
-                    result.matchId(), player.getUUID(), result.phase()
+    public static MatchAdmissionDecision finalizePlayerJoin(ServerPlayer player) {
+        if (player == null) {
+            return new MatchAdmissionDecision(
+                    MatchAdmissionOutcome.DISCONNECTED,
+                    Optional.empty()
             );
         }
-        return result.status();
+
+        MatchAdmissionService.Admission admission = ADMISSION_SERVICE.finalizeAdmission(
+                player.getUUID(),
+                player::hasDisconnected
+        );
+        if (admission.internalFailure()) {
+            TacticalTabletMod.LOGGER.error(
+                    "Match admission failed safely playerId={} initialState={} initialStatus={} "
+                            + "initialPhase={} initialRevision={} currentState={} currentStatus={} "
+                            + "currentPhase={} currentRevision={} diagnostic={}",
+                    player.getUUID(),
+                    admission.initial().matchState(),
+                    admission.initial().status(),
+                    admission.initial().phase(),
+                    admission.initial().revision(),
+                    admission.current().matchState(),
+                    admission.current().status(),
+                    admission.current().phase(),
+                    admission.current().revision(),
+                    admission.diagnostic()
+            );
+        }
+        return new MatchAdmissionDecision(
+                admission.outcome(),
+                Optional.ofNullable(admission.current().matchId())
+        );
+    }
+
+    /**
+     * Compatibility layer for integrations compiled against the previous status-only API.
+     */
+    @Deprecated
+    public static MatchAdmissionStatus admitEligiblePlayer(ServerPlayer player) {
+        return finalizePlayerJoin(player).outcome().legacyStatus();
     }
 
     public static boolean isLateSpectator(ServerPlayer player) {
@@ -83,6 +117,11 @@ public final class MatchAdmissionManager {
 
     public static boolean enforceLateSpectator(ServerPlayer player, boolean showNotification) {
         if (player == null || !isLateSpectator(player)) return false;
+        return enforceFinalizedLateSpectator(player, showNotification);
+    }
+
+    static boolean enforceFinalizedLateSpectator(ServerPlayer player, boolean showNotification) {
+        if (player == null || player.hasDisconnected()) return false;
 
         RtpTimerManager.cancel(player);
         PostRtpProtectionManager.clear(player);
@@ -99,10 +138,16 @@ public final class MatchAdmissionManager {
         player.removeTag(ClanWarManager.TAG_REGROUP_PENDING);
         LivesManager.moveEliminatedToSpectator(player);
 
-        if (showNotification) {
+        String matchKey = GameStateManager.getLifecycleSnapshot()
+                .matchId()
+                .map(UUID::toString)
+                .orElse("no-active-match");
+        String notifiedMatch = player.getPersistentData().getString(DATA_LATE_NOTIFICATION_MATCH);
+        if (showNotification && !matchKey.equals(notifiedMatch)) {
             player.connection.send(new ClientboundSetTitlesAnimationPacket(10, 580, 10));
             player.connection.send(new ClientboundSetTitleTextPacket(LATE_JOIN_TITLE));
             player.connection.send(new ClientboundSetSubtitleTextPacket(LATE_JOIN_SUBTITLE));
+            player.getPersistentData().putString(DATA_LATE_NOTIFICATION_MATCH, matchKey);
         }
         return true;
     }

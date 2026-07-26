@@ -92,33 +92,39 @@ public class ServerEvents {
             PrefixManager.updateLastKnownName(player.getUUID(), player.getGameProfile().getName());
             TeamMatchManager.rememberPlayer(player);
             NameTagManager.applyToAll(player.server);
-            MatchAdmissionStatus admission = MatchAdmissionManager.inspectStatus(player);
-            if (admission == MatchAdmissionStatus.LATE_SPECTATOR) {
-                MatchAdmissionManager.enforceLateSpectator(player, true);
-                MapSetManager.sync(player, MapSetManager.isVoting());
-                GameStateManager.showCurrentSetRewardOnJoin(player);
-                TeamMatchManager.applyScoreboardTeams(player.server);
-                ClassXPManager.sync(player);
-                syncPrefixes(player.server);
-                return;
-            }
-            if (admission == MatchAdmissionStatus.ADMITTED) {
-                if (MatchAdmissionManager.admitEligiblePlayer(player) != MatchAdmissionStatus.ADMITTED) {
-                    TacticalTabletMod.LOGGER.error(
-                            "Could not admit player {} to the active early-phase match",
-                            player.getUUID());
+            MatchAdmissionDecision admission = MatchAdmissionManager.finalizePlayerJoin(player);
+            switch (admission.outcome()) {
+                case DISCONNECTED -> {
                     return;
                 }
-                var lifecycle = GameStateManager.getLifecycleSnapshot();
-                var matchId = lifecycle.matchId().orElse(null);
-                if (matchId != null && lifecycle.participantIds().contains(player.getUUID())) {
+                case LATE_SPECTATOR -> {
+                    MatchAdmissionManager.enforceFinalizedLateSpectator(player, true);
+                    finishLateSpectatorJoin(player);
+                    return;
+                }
+                case ACTIVE_PARTICIPANT, RETURNING_PARTICIPANT -> {
+                    var matchId = admission.matchId().orElse(null);
+                    if (matchId == null) {
+                        TacticalTabletMod.LOGGER.error(
+                                "Finalized participant admission has no match id playerId={} outcome={}",
+                                player.getUUID(), admission.outcome()
+                        );
+                        MatchAdmissionManager.enforceFinalizedLateSpectator(player, false);
+                        finishLateSpectatorJoin(player);
+                        return;
+                    }
                     var server = player.server;
                     var playerId = player.getUUID();
                     PlayerProgressManager.ensureMatchPlayed(player, matchId, () -> {
                         ServerPlayer online = server.getPlayerList().getPlayer(playerId);
-                        if (online != null) finishPlayerJoin(online);
+                        if (online != null && !online.hasDisconnected()) {
+                            finishPlayerJoin(online);
+                        }
                     });
                     return;
+                }
+                case NORMAL_LOBBY_PLAYER -> {
+                    // Continue through the standard lobby/intermission initialization below.
                 }
             }
             LivesManager.reconcileMatchStateOnJoin(player);
@@ -156,6 +162,14 @@ public class ServerEvents {
             ClassXPManager.sync(player);
             syncPrefixes(player.server);
         }
+    }
+
+    private static void finishLateSpectatorJoin(ServerPlayer player) {
+        MapSetManager.sync(player, MapSetManager.isVoting());
+        GameStateManager.showCurrentSetRewardOnJoin(player);
+        TeamMatchManager.applyScoreboardTeams(player.server);
+        ClassXPManager.sync(player);
+        syncPrefixes(player.server);
     }
 
     private static void finishPlayerJoin(ServerPlayer player) {
