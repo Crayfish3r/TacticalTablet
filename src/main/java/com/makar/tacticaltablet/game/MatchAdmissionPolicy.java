@@ -1,20 +1,18 @@
 package com.makar.tacticaltablet.game;
 
 final class MatchAdmissionPolicy {
-    static final int LATE_JOIN_PHASE = 3;
-
     private MatchAdmissionPolicy() {
     }
 
     static MatchAdmissionStatus classify(
             boolean activeMatch,
             boolean alreadyAdmitted,
-            int currentZonePhase
+            boolean admissionWindowOpen
     ) {
-        if (!activeMatch || currentZonePhase < 1) {
+        if (!activeMatch) {
             return MatchAdmissionStatus.NO_ACTIVE_MATCH;
         }
-        if (alreadyAdmitted || currentZonePhase < LATE_JOIN_PHASE) {
+        if (alreadyAdmitted || admissionWindowOpen) {
             return MatchAdmissionStatus.ADMITTED;
         }
         return MatchAdmissionStatus.LATE_SPECTATOR;

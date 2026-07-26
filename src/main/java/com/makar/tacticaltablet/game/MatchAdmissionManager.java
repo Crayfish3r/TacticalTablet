@@ -9,7 +9,6 @@ import com.makar.tacticaltablet.game.respawn.DeathTransitionManager;
 import com.makar.tacticaltablet.game.respawn.PostRtpProtectionManager;
 import com.makar.tacticaltablet.game.respawn.RtpTimerManager;
 import com.makar.tacticaltablet.game.team.TeamMatchManager;
-import com.makar.tacticaltablet.game.zone.ZoneManager;
 import com.makar.tacticaltablet.inventory.InventoryManager;
 import com.makar.tacticaltablet.progression.PassiveClassXPManager;
 import com.makar.tacticaltablet.tablet.PlayerTabletState;
@@ -30,10 +29,11 @@ public final class MatchAdmissionManager {
     private static final Component LATE_JOIN_TITLE = Component.literal("ПОЗДНЕЕ ПОДКЛЮЧЕНИЕ");
     private static final Component LATE_JOIN_SUBTITLE =
             Component.literal("Возрождение — только в следующей игре!");
+    private static final MatchAdmissionWindow ADMISSION_WINDOW = new MatchAdmissionWindow();
 
     private static final MatchAdmissionService ADMISSION_SERVICE = new MatchAdmissionService(
             GameStateManager::getLifecycleSnapshot,
-            () -> ZoneManager.getCurrentPhaseNumber().orElse(0),
+            ADMISSION_WINDOW::snapshot,
             GameStateManager::registerCurrentMatchParticipant
     );
 
@@ -49,7 +49,9 @@ public final class MatchAdmissionManager {
     }
 
     public static MatchAdmissionStatus inspectStatus(ServerPlayer player) {
-        return player == null ? MatchAdmissionStatus.NO_ACTIVE_MATCH : inspectStatus(player.getUUID());
+        if (player == null) return MatchAdmissionStatus.NO_ACTIVE_MATCH;
+        observeServerTick(player.server.getTickCount());
+        return inspectStatus(player.getUUID());
     }
 
     public static MatchAdmissionStatus inspectStatus(UUID playerId) {
@@ -64,6 +66,7 @@ public final class MatchAdmissionManager {
             );
         }
 
+        observeServerTick(player.server.getTickCount());
         MatchAdmissionService.Admission admission = ADMISSION_SERVICE.finalizeAdmission(
                 player.getUUID(),
                 player::hasDisconnected
@@ -71,16 +74,19 @@ public final class MatchAdmissionManager {
         if (admission.internalFailure()) {
             TacticalTabletMod.LOGGER.error(
                     "Match admission failed safely playerId={} initialState={} initialStatus={} "
-                            + "initialPhase={} initialRevision={} currentState={} currentStatus={} "
-                            + "currentPhase={} currentRevision={} diagnostic={}",
+                            + "initialTick={} initialDeadline={} initialRevision={} currentState={} "
+                            + "currentStatus={} currentTick={} currentDeadline={} currentRevision={} "
+                            + "diagnostic={}",
                     player.getUUID(),
                     admission.initial().matchState(),
                     admission.initial().status(),
-                    admission.initial().phase(),
+                    admission.initial().currentTick(),
+                    admission.initial().deadlineTick(),
                     admission.initial().revision(),
                     admission.current().matchState(),
                     admission.current().status(),
-                    admission.current().phase(),
+                    admission.current().currentTick(),
+                    admission.current().deadlineTick(),
                     admission.current().revision(),
                     admission.diagnostic()
             );
@@ -113,6 +119,23 @@ public final class MatchAdmissionManager {
         return snapshot.matchId().isPresent()
                 && (snapshot.state() == MatchState.STARTING || snapshot.state() == MatchState.RUNNING)
                 && snapshot.participantIds().contains(playerId);
+    }
+
+    static void openAdmissionWindow(UUID matchId, long startTick) {
+        if (matchId == null) return;
+        ADMISSION_WINDOW.open(matchId, startTick);
+    }
+
+    static void observeServerTick(long currentTick) {
+        ADMISSION_WINDOW.advance(currentTick);
+    }
+
+    static void clearAdmissionWindow(UUID expectedMatchId) {
+        ADMISSION_WINDOW.clear(expectedMatchId);
+    }
+
+    static void clearAdmissionWindow() {
+        ADMISSION_WINDOW.clear(null);
     }
 
     public static boolean enforceLateSpectator(ServerPlayer player, boolean showNotification) {

@@ -7,34 +7,34 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.function.BiPredicate;
 import java.util.function.BooleanSupplier;
-import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 
 final class MatchAdmissionService {
     private static final int MAX_REGISTRATION_ATTEMPTS = 2;
 
     private final Supplier<MatchLifecycleSnapshot> snapshotSupplier;
-    private final IntSupplier phaseSupplier;
+    private final Supplier<MatchAdmissionWindow.Snapshot> admissionWindowSupplier;
     private final BiPredicate<UUID, UUID> participantRegistrar;
     private final Runnable beforeFinalCheck;
 
     MatchAdmissionService(
             Supplier<MatchLifecycleSnapshot> snapshotSupplier,
-            IntSupplier phaseSupplier,
+            Supplier<MatchAdmissionWindow.Snapshot> admissionWindowSupplier,
             BiPredicate<UUID, UUID> participantRegistrar
     ) {
-        this(snapshotSupplier, phaseSupplier, participantRegistrar, () -> {
+        this(snapshotSupplier, admissionWindowSupplier, participantRegistrar, () -> {
         });
     }
 
     MatchAdmissionService(
             Supplier<MatchLifecycleSnapshot> snapshotSupplier,
-            IntSupplier phaseSupplier,
+            Supplier<MatchAdmissionWindow.Snapshot> admissionWindowSupplier,
             BiPredicate<UUID, UUID> participantRegistrar,
             Runnable beforeFinalCheck
     ) {
         this.snapshotSupplier = Objects.requireNonNull(snapshotSupplier, "snapshotSupplier");
-        this.phaseSupplier = Objects.requireNonNull(phaseSupplier, "phaseSupplier");
+        this.admissionWindowSupplier =
+                Objects.requireNonNull(admissionWindowSupplier, "admissionWindowSupplier");
         this.participantRegistrar = Objects.requireNonNull(participantRegistrar, "participantRegistrar");
         this.beforeFinalCheck = Objects.requireNonNull(beforeFinalCheck, "beforeFinalCheck");
     }
@@ -44,18 +44,21 @@ final class MatchAdmissionService {
             return inactiveInspection();
         }
         MatchLifecycleSnapshot snapshot = snapshotSupplier.get();
+        MatchAdmissionWindow.Snapshot admissionWindow = admissionWindowSupplier.get();
         UUID matchId = snapshot.matchId().orElse(null);
-        int phase = phaseSupplier.getAsInt();
-        boolean active = matchId != null
+        boolean lifecycleActive = matchId != null
                 && (snapshot.state() == MatchState.STARTING || snapshot.state() == MatchState.RUNNING);
+        boolean active = lifecycleActive && admissionWindow.belongsTo(matchId);
         boolean participant = snapshot.participantIds().contains(playerId);
         return new Inspection(
-                MatchAdmissionPolicy.classify(active, participant, phase),
+                MatchAdmissionPolicy.classify(active, participant, admissionWindow.open()),
                 matchId,
-                phase,
                 participant,
                 snapshot.state(),
-                snapshot.revision()
+                snapshot.revision(),
+                admissionWindow.startedAtTick(),
+                admissionWindow.deadlineTick(),
+                admissionWindow.currentTick()
         );
     }
 
@@ -168,9 +171,11 @@ final class MatchAdmissionService {
         return new Inspection(
                 MatchAdmissionStatus.NO_ACTIVE_MATCH,
                 null,
-                0,
                 false,
                 MatchState.IDLE,
+                0L,
+                0L,
+                0L,
                 0L
         );
     }
@@ -178,10 +183,12 @@ final class MatchAdmissionService {
     record Inspection(
             MatchAdmissionStatus status,
             UUID matchId,
-            int phase,
             boolean alreadyParticipant,
             MatchState matchState,
-            long revision
+            long revision,
+            long startedAtTick,
+            long deadlineTick,
+            long currentTick
     ) {
     }
 

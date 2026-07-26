@@ -219,6 +219,7 @@ public class GameStateManager {
 
     public static void onServerTick(MinecraftServer server) {
         if (server == null) return;
+        MatchAdmissionManager.observeServerTick(server.getTickCount());
         if (++tickCounter < 20) return;
         tickCounter = 0;
         SetRewardSummary pendingSetReport = MapSetManager.getRewardSummary();
@@ -308,16 +309,27 @@ public class GameStateManager {
     private static void handleStartResult(MinecraftServer server, MatchStartResult result) {
         switch (result.status()) {
             case STARTED -> {
+                UUID matchId = result.matchId().orElse(null);
+                if (matchId == null) {
+                    TacticalTabletMod.LOGGER.error(
+                            "Started match has no match id; late admission window remains closed");
+                } else {
+                    MatchAdmissionManager.openAdmissionWindow(matchId, server.getTickCount());
+                }
             }
             case REJECTED -> handleRejectedStart(server, result);
             case ALREADY_STARTING -> broadcast(server, "[WAR] Match start is already in progress.");
             case ALREADY_RUNNING -> broadcast(server, "[WAR] Match is already running.");
             case BLOCKED_REQUIRES_CLEANUP -> broadcast(server,
                     "[WAR] New match start blocked: previous start attempt requires cleanup.");
-            case FAILED_ROLLED_BACK -> broadcast(server,
-                    "[WAR] Match start failed and was rolled back. Check the log.");
-            case FAILED_REQUIRES_CLEANUP -> broadcast(server,
-                    "[WAR] Match start failed. Cleanup is required; check the log.");
+            case FAILED_ROLLED_BACK -> {
+                result.matchId().ifPresent(MatchAdmissionManager::clearAdmissionWindow);
+                broadcast(server, "[WAR] Match start failed and was rolled back. Check the log.");
+            }
+            case FAILED_REQUIRES_CLEANUP -> {
+                result.matchId().ifPresent(MatchAdmissionManager::clearAdmissionWindow);
+                broadcast(server, "[WAR] Match start failed. Cleanup is required; check the log.");
+            }
             case STALE_OPERATION -> TacticalTabletMod.LOGGER.warn(
                     "Stale match start operation rejected: {}", result.diagnostic());
         }
@@ -364,6 +376,7 @@ public class GameStateManager {
                 || matchPhase == MatchPhase.SET_REWARDING || matchPhase == MatchPhase.MAP_VOTING
                 || matchPhase == MatchPhase.RESTARTING) return;
 
+        getLifecycleSnapshot().matchId().ifPresent(MatchAdmissionManager::clearAdmissionWindow);
         matchHadEnoughPlayers = false;
         matchStartingParticipants = 0;
         startCountdown = -1;
@@ -450,6 +463,7 @@ public class GameStateManager {
         ClassXPManager.syncAll(server);
     }
     public static void resetRuntime(MinecraftServer server) {
+        MatchAdmissionManager.clearAdmissionWindow();
         matchHadEnoughPlayers = false;
         matchStartingParticipants = 0;
         tickCounter = 0;
@@ -501,6 +515,7 @@ public class GameStateManager {
     private static void cleanupMatchRuntime(MinecraftServer server) {
         if (server == null) return;
 
+        MatchAdmissionManager.clearAdmissionWindow();
         setGameState(server, WAITING);
         SpectatorCameraManager.onMatchEnd(server);
         VoiceChatTeamManager.endMatch(server);

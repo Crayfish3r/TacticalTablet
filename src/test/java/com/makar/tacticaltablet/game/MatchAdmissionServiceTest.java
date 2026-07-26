@@ -28,7 +28,7 @@ class MatchAdmissionServiceTest {
     }
 
     @Test
-    void newEarlyPlayerIsRegisteredAsActiveParticipant() {
+    void newPlayerWithinTenMinutesIsRegisteredAsActiveParticipant() {
         Fixture fixture = new Fixture();
 
         MatchAdmissionService.Admission result = fixture.finalizeAdmission();
@@ -40,9 +40,9 @@ class MatchAdmissionServiceTest {
     }
 
     @Test
-    void phaseTurningLateBeforeFinalCheckProducesLateSpectator() {
+    void deadlinePassingBeforeFinalCheckProducesLateSpectator() {
         Fixture fixture = new Fixture();
-        MatchAdmissionService service = fixture.service(() -> fixture.phase.set(3));
+        MatchAdmissionService service = fixture.service(fixture::advanceToDeadline);
 
         MatchAdmissionService.Admission result =
                 service.finalizeAdmission(fixture.playerId, fixture.disconnected::get);
@@ -65,14 +65,14 @@ class MatchAdmissionServiceTest {
     }
 
     @Test
-    void registrationRejectionIsReclassifiedAgainstLatePhase() {
+    void registrationRejectionIsReclassifiedAgainstDeadline() {
         Fixture fixture = new Fixture();
         MatchAdmissionService service = fixture.service(
                 () -> {
                 },
                 (matchId, playerId) -> {
                     fixture.registrations.incrementAndGet();
-                    fixture.phase.set(3);
+                    fixture.advanceToDeadline();
                     return false;
                 }
         );
@@ -107,9 +107,9 @@ class MatchAdmissionServiceTest {
     }
 
     @Test
-    void participantReconnectDuringLatePhaseRemainsReturningParticipant() {
+    void participantReconnectAfterTenMinutesRemainsReturningParticipant() {
         Fixture fixture = new Fixture();
-        fixture.phase.set(4);
+        fixture.advanceToDeadline();
         fixture.participants.set(Set.of(fixture.playerId));
 
         MatchAdmissionService.Admission result = fixture.finalizeAdmission();
@@ -136,6 +136,7 @@ class MatchAdmissionServiceTest {
         Fixture fixture = new Fixture();
 
         MatchAdmissionService.Admission first = fixture.finalizeAdmission();
+        fixture.advanceToDeadline();
         MatchAdmissionService.Admission second = fixture.finalizeAdmission();
 
         assertEquals(MatchAdmissionOutcome.ACTIVE_PARTICIPANT, first.outcome());
@@ -146,11 +147,13 @@ class MatchAdmissionServiceTest {
     @Test
     void lateSpectatorNeverEntersParticipantRegistry() {
         Fixture fixture = new Fixture();
-        fixture.phase.set(3);
+        fixture.advanceToDeadline();
 
-        MatchAdmissionService.Admission result = fixture.finalizeAdmission();
+        MatchAdmissionService.Admission first = fixture.finalizeAdmission();
+        MatchAdmissionService.Admission repeated = fixture.finalizeAdmission();
 
-        assertEquals(MatchAdmissionOutcome.LATE_SPECTATOR, result.outcome());
+        assertEquals(MatchAdmissionOutcome.LATE_SPECTATOR, first.outcome());
+        assertEquals(MatchAdmissionOutcome.LATE_SPECTATOR, repeated.outcome());
         assertTrue(fixture.participants.get().isEmpty());
         assertEquals(0, fixture.registrations.get());
     }
@@ -158,8 +161,19 @@ class MatchAdmissionServiceTest {
     @Test
     void endedMatchRemovesLateJoinRestriction() {
         Fixture fixture = new Fixture();
-        fixture.phase.set(5);
+        fixture.advanceToDeadline();
         fixture.state.set(MatchState.ENDING);
+
+        MatchAdmissionService.Admission result = fixture.finalizeAdmission();
+
+        assertEquals(MatchAdmissionOutcome.NORMAL_LOBBY_PLAYER, result.outcome());
+        assertEquals(0, fixture.registrations.get());
+    }
+
+    @Test
+    void windowForDifferentMatchCannotAdmitPlayer() {
+        Fixture fixture = new Fixture();
+        fixture.window.open(UUID.randomUUID(), Fixture.START_TICK);
 
         MatchAdmissionService.Admission result = fixture.finalizeAdmission();
 
@@ -209,13 +223,19 @@ class MatchAdmissionServiceTest {
     }
 
     private static final class Fixture {
+        private static final long START_TICK = 1_000L;
+
         private final UUID matchId = UUID.randomUUID();
         private final UUID playerId = UUID.randomUUID();
         private final AtomicReference<MatchState> state = new AtomicReference<>(MatchState.RUNNING);
-        private final AtomicInteger phase = new AtomicInteger(2);
+        private final MatchAdmissionWindow window = new MatchAdmissionWindow();
         private final AtomicReference<Set<UUID>> participants = new AtomicReference<>(Set.of());
         private final AtomicInteger registrations = new AtomicInteger();
         private final AtomicBoolean disconnected = new AtomicBoolean();
+
+        private Fixture() {
+            window.open(matchId, START_TICK);
+        }
 
         private MatchAdmissionService service() {
             return service(() -> {
@@ -244,7 +264,7 @@ class MatchAdmissionServiceTest {
         ) {
             return new MatchAdmissionService(
                     () -> snapshot(matchId, state.get(), participants.get()),
-                    phase::get,
+                    window::snapshot,
                     registrar,
                     beforeFinalCheck
             );
@@ -252,6 +272,11 @@ class MatchAdmissionServiceTest {
 
         private MatchAdmissionService.Admission finalizeAdmission() {
             return service().finalizeAdmission(playerId, disconnected::get);
+        }
+
+        private void advanceToDeadline() {
+            window.advance(START_TICK
+                    + 600L * 20L);
         }
     }
 

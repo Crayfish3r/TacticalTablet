@@ -72,6 +72,35 @@ class MatchAdmissionArchitectureTest {
     }
 
     @Test
+    void admissionDeadlineIsIndependentFromZonePacingAndClientState() throws IOException {
+        String policy = read("game/MatchAdmissionPolicy.java");
+        String window = read("game/MatchAdmissionWindow.java");
+        String service = read("game/MatchAdmissionService.java");
+        String manager = read("game/MatchAdmissionManager.java");
+
+        assertTrue(window.contains("private static final int DEFAULT_LATE_JOIN_CUTOFF_SECONDS = 600"));
+        assertTrue(window.contains("private static final long TICKS_PER_SECOND = 20L"));
+        assertTrue(window.contains("currentTick < deadlineTick"));
+        assertTrue(window.contains("nextMatchId.equals(matchId)"));
+        assertFalse(policy.contains("LATE_JOIN_PHASE"));
+        assertFalse(policy.contains("ZoneManager"));
+        assertFalse(service.contains("phaseSupplier"));
+        assertFalse(service.contains("currentZonePhase"));
+        assertFalse(manager.contains("ZoneManager"));
+    }
+
+    @Test
+    void gameLifecycleOpensAndClearsMatchScopedAdmissionWindow() throws IOException {
+        String game = read("game/GameStateManager.java");
+
+        assertTrue(game.contains("case STARTED ->"));
+        assertTrue(game.contains("MatchAdmissionManager.openAdmissionWindow(matchId, server.getTickCount())"));
+        assertTrue(game.contains("MatchAdmissionManager.observeServerTick(server.getTickCount())"));
+        assertTrue(game.contains("getLifecycleSnapshot().matchId().ifPresent(MatchAdmissionManager::clearAdmissionWindow)"));
+        assertTrue(game.contains("MatchAdmissionManager.clearAdmissionWindow();"));
+    }
+
+    @Test
     void loginHasExactlyOneExhaustiveTerminalAdmissionDecision() throws IOException {
         String events = read("game/ServerEvents.java");
         String outcomes = read("game/MatchAdmissionOutcome.java");
