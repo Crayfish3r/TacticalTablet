@@ -49,6 +49,7 @@ minecraft {
             workingDirectory project.file('run')
             property 'forge.logging.markers', 'REGISTRIES'
             property 'forge.logging.console.level', 'debug'
+            property 'tacticaltablet.verifyEmbeddedResources', 'true'
             mods {
                 "${mod_id}" {
                     source sourceSets.main
@@ -188,7 +189,121 @@ tasks.register('verifyJarModsToml') {
     }
 }
 
+def runtimeAssetManifest = layout.projectDirectory.file(
+        'src/test/resources/deluxewarfare-runtime-assets.tsv'
+)
+
+def readRuntimeAssetManifest = {
+    runtimeAssetManifest.asFile.readLines('UTF-8')
+            .drop(1)
+            .findAll { !it.isBlank() }
+            .collect { line ->
+                def columns = line.split('\t', -1)
+                [
+                        path  : columns[0],
+                        size  : columns[1] as long,
+                        sha256: columns[2]
+                ]
+            }
+}
+
+def sha256 = { byte[] bytes ->
+    java.security.MessageDigest.getInstance('SHA-256')
+            .digest(bytes)
+            .encodeHex()
+            .toString()
+}
+
+tasks.register('verifyEmbeddedClientResourceSources') {
+    inputs.file(runtimeAssetManifest)
+    inputs.dir(layout.projectDirectory.dir('src/main/resources/assets'))
+    doLast {
+        readRuntimeAssetManifest().each { expected ->
+            File source = layout.projectDirectory.file(
+                    "src/main/resources/assets/${expected.path}"
+            ).asFile
+            if (!source.isFile()) {
+                throw new GradleException("Missing embedded client resource: ${expected.path}")
+            }
+            if (source.length() != expected.size) {
+                throw new GradleException("Unexpected size for embedded client resource: ${expected.path}")
+            }
+            if (sha256(source.bytes) != expected.sha256) {
+                throw new GradleException("Unexpected SHA-256 for embedded client resource: ${expected.path}")
+            }
+        }
+
+        File resources = layout.projectDirectory.dir('src/main/resources').asFile
+        def forbidden = fileTree(resources) {
+            include '**/*.zip'
+            include '**/pack.png'
+            include '**/README_RU.txt'
+            include '**/EDITING_GUIDE_RU.md'
+            include '**/SOURCE_SNAPSHOT.txt'
+            include '**/UPDATE_NOTES*'
+            include '**/TEMPLATES/**'
+        }.files
+        if (!forbidden.isEmpty()) {
+            throw new GradleException(
+                    "External resource-pack files leaked into runtime resources: ${forbidden}"
+            )
+        }
+    }
+}
+
+tasks.register('verifyJarEmbeddedClientResources') {
+    dependsOn tasks.named('jar')
+    inputs.file(runtimeAssetManifest)
+    def archiveFile = tasks.named('jar', Jar).flatMap { it.archiveFile }
+    inputs.file(archiveFile)
+    doLast {
+        def archive = new java.util.zip.ZipFile(archiveFile.get().asFile)
+        try {
+            readRuntimeAssetManifest().each { expected ->
+                String path = "assets/${expected.path}"
+                def entry = archive.getEntry(path)
+                if (entry == null) {
+                    throw new GradleException("JAR is missing embedded client resource: ${path}")
+                }
+                byte[] bytes = archive.getInputStream(entry).bytes
+                if (bytes.length != expected.size || sha256(bytes) != expected.sha256) {
+                    throw new GradleException("JAR resource differs from source manifest: ${path}")
+                }
+            }
+
+            [
+                    'META-INF/licenses/Curios-LGPL-3.0-or-later.txt',
+                    'THIRD_PARTY_NOTICES.txt'
+            ].each { required ->
+                if (archive.getEntry(required) == null) {
+                    throw new GradleException("JAR is missing third-party notice: ${required}")
+                }
+            }
+
+            def forbidden = archive.entries().findAll { entry ->
+                String path = entry.name
+                path.endsWith('.zip')
+                        || path == 'pack.png'
+                        || path == 'README_RU.txt'
+                        || path == 'EDITING_GUIDE_RU.md'
+                        || path == 'SOURCE_SNAPSHOT.txt'
+                        || path.startsWith('UPDATE_NOTES')
+                        || path.startsWith('TEMPLATES/')
+            }.collect { it.name }
+            if (!forbidden.isEmpty()) {
+                throw new GradleException(
+                        "External resource-pack files leaked into JAR: ${forbidden}"
+                )
+            }
+        } finally {
+            archive.close()
+        }
+    }
+}
+
 tasks.named('check') {
     dependsOn tasks.named('verifyProcessedModsToml')
     dependsOn tasks.named('verifyJarModsToml')
+    dependsOn tasks.named('verifyEmbeddedClientResourceSources')
+    dependsOn tasks.named('verifyJarEmbeddedClientResources')
 }

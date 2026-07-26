@@ -76,25 +76,22 @@ class TabletUiArchitectureTest {
     void alphaRendererConfiguresBlendAndAlwaysRestoresRenderState() throws IOException {
         String renderer = source("GuiTextureRenderer.java");
 
-        int enableBlend = renderer.indexOf("RenderSystem.enableBlend();");
-        int defaultBlend = renderer.indexOf("RenderSystem.defaultBlendFunc();");
-        int shader = renderer.indexOf("RenderSystem.setShader(GameRenderer::getPositionTexShader);");
-        int texture = renderer.indexOf("RenderSystem.setShaderTexture(0, texture);");
         int color = renderer.indexOf("graphics.setColor(red, green, blue, alpha);");
         int blit = renderer.indexOf("graphics.blit(");
         int finallyBlock = renderer.indexOf("} finally {");
         int resetColor = renderer.indexOf("graphics.setColor(1.0F, 1.0F, 1.0F, 1.0F);");
-        int disableBlend = renderer.indexOf("RenderSystem.disableBlend();");
 
-        assertTrue(enableBlend >= 0);
-        assertTrue(enableBlend < defaultBlend);
-        assertTrue(defaultBlend < shader);
-        assertTrue(shader < texture);
-        assertTrue(texture < color);
+        assertTrue(renderer.contains("withAlphaBlend(graphics, () ->"));
+        assertTrue(renderer.contains("BLEND_STATES.get().push(BlendState.capture())"));
+        assertTrue(renderer.contains("RenderSystem.defaultBlendFunc();"));
+        assertTrue(renderer.contains("RenderSystem.blendFuncSeparate("));
+        assertTrue(renderer.contains("if (enabled)"));
+        assertTrue(renderer.contains("RenderSystem.enableBlend();"));
+        assertTrue(renderer.contains("RenderSystem.disableBlend();"));
         assertTrue(color < blit);
         assertTrue(blit < finallyBlock);
         assertTrue(finallyBlock < resetColor);
-        assertTrue(resetColor < disableBlend);
+        assertFalse(renderer.contains("GameRenderer::getPositionTexShader"));
     }
 
     @Test

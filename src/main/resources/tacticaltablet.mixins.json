@@ -1,5 +1,5 @@
 {
-  "required": true,
+  "required": false,
   "minVersion": "0.8.5",
   "package": "com.makar.tacticaltablet.mixin.client",
   "compatibilityLevel": "JAVA_17",
@@ -8,6 +8,6 @@
     "InventoryScreenAlphaMixin"
   ],
   "injectors": {
-    "defaultRequire": 1
+    "defaultRequire": 0
   }
 }

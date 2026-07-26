@@ -21,8 +21,11 @@ class InventoryAlphaMixinArchitectureTest {
         String modsToml = resource("META-INF/mods.toml");
 
         assertTrue(vanillaConfig.contains("\"client\""));
+        assertTrue(vanillaConfig.contains("\"required\": false"));
+        assertTrue(vanillaConfig.contains("\"defaultRequire\": 0"));
         assertTrue(vanillaConfig.contains("InventoryScreenAlphaMixin"));
         assertTrue(curiosConfig.contains("\"required\": false"));
+        assertTrue(curiosConfig.contains("\"defaultRequire\": 0"));
         assertTrue(curiosConfig.contains("\"client\""));
         assertTrue(curiosConfig.contains("CuriosMixinConfigPlugin"));
         assertFalse(curiosConfig.contains("\"mixins\""));
@@ -45,30 +48,35 @@ class InventoryAlphaMixinArchitectureTest {
     }
 
     @Test
-    void mixinsScopeStandardAlphaBlendAwayFromThePlayerModel() throws IOException {
+    void mixinsWrapOnlyTextureBlitsInExceptionSafeNonFatalScopes() throws IOException {
         String helper = Files.readString(Path.of(
                 "src/main/java/com/makar/tacticaltablet/tablet/client/GuiTextureRenderer.java"
         ));
         assertTrue(helper.contains("RenderSystem.enableBlend();"));
         assertTrue(helper.contains("RenderSystem.defaultBlendFunc();"));
         assertTrue(helper.contains("graphics.setColor(1.0F, 1.0F, 1.0F, 1.0F);"));
+        assertTrue(helper.contains("BlendState.capture()"));
+        assertTrue(helper.contains("previous.restore()"));
+        assertTrue(helper.contains("if (enabled)"));
         assertTrue(helper.contains("RenderSystem.disableBlend();"));
+        assertTrue(helper.contains("try {"));
+        assertTrue(helper.contains("} finally {"));
 
-        assertCuriosScope(source("client/CuriosScreenAlphaMixin.java"));
-        assertCuriosScope(source("client/CuriosScreenV2AlphaMixin.java"));
+        assertAtomicBlitScope(source("client/CuriosScreenAlphaMixin.java"));
+        assertAtomicBlitScope(source("client/CuriosScreenV2AlphaMixin.java"));
 
         String vanilla = source("client/InventoryScreenAlphaMixin.java");
         assertTrue(vanilla.contains("BACKGROUND_BLIT"));
-        assertTrue(vanilla.contains("At.Shift.BEFORE"));
-        assertTrue(vanilla.contains("At.Shift.AFTER"));
+        assertAtomicBlitScope(vanilla);
     }
 
-    private static void assertCuriosScope(String source) {
-        assertTrue(source.contains("@Pseudo"));
-        assertTrue(source.contains("PLAYER_MODEL_RENDER"));
-        assertTrue(source.contains("tacticaltablet$pauseBlendForPlayerModel"));
-        assertTrue(source.contains("tacticaltablet$resumeBackgroundBlend"));
-        assertTrue(source.contains("@At(\"RETURN\")"));
+    private static void assertAtomicBlitScope(String source) {
+        assertTrue(source.contains("@Redirect"));
+        assertTrue(source.contains("require = 0"));
+        assertTrue(source.contains("GuiTextureRenderer.withAlphaBlend"));
+        assertFalse(source.contains("renderEntityInInventoryFollowsMouse"));
+        assertFalse(source.contains("@At(\"HEAD\")"));
+        assertFalse(source.contains("@At(\"RETURN\")"));
     }
 
     private static String source(String relativePath) throws IOException {

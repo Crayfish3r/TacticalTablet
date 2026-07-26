@@ -2,11 +2,13 @@ package com.makar.tacticaltablet.mixin.client;
 
 import com.makar.tacticaltablet.tablet.client.GuiTextureRenderer;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraftforge.common.util.LazyOptional;
+import net.minecraftforge.common.util.NonNullConsumer;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Pseudo;
 import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import org.spongepowered.asm.mixin.injection.Redirect;
 import top.theillusivec4.curios.client.gui.CuriosScreen;
 
 @Pseudo
@@ -14,69 +16,54 @@ import top.theillusivec4.curios.client.gui.CuriosScreen;
 abstract class CuriosScreenAlphaMixin {
     private static final String RENDER_BG =
             "renderBg(Lnet/minecraft/client/gui/GuiGraphics;FII)V";
-    private static final String PLAYER_MODEL_RENDER =
-            "Lnet/minecraft/client/gui/screens/inventory/InventoryScreen;"
-                    + "renderEntityInInventoryFollowsMouse"
-                    + "(Lnet/minecraft/client/gui/GuiGraphics;IIIFF"
-                    + "Lnet/minecraft/world/entity/LivingEntity;)V";
+    private static final String BACKGROUND_BLIT =
+            "Lnet/minecraft/client/gui/GuiGraphics;blit"
+                    + "(Lnet/minecraft/resources/ResourceLocation;IIIIII)V";
+    private static final String RENDER_EXTRA_SLOTS =
+            "Lnet/minecraftforge/common/util/LazyOptional;ifPresent"
+                    + "(Lnet/minecraftforge/common/util/NonNullConsumer;)V";
 
-    @Inject(method = RENDER_BG, at = @At("HEAD"), require = 1)
-    private void tacticaltablet$beginBackgroundBlend(
-            GuiGraphics guiGraphics,
-            float partialTicks,
-            int mouseX,
-            int mouseY,
-            CallbackInfo callback
-    ) {
-        GuiTextureRenderer.beginAlphaBlend(guiGraphics);
-    }
-
-    @Inject(
+    @Redirect(
             method = RENDER_BG,
             at = @At(
                     value = "INVOKE",
-                    target = PLAYER_MODEL_RENDER,
-                    shift = At.Shift.BEFORE
+                    target = BACKGROUND_BLIT
             ),
-            require = 1
+            require = 0
     )
-    private void tacticaltablet$pauseBlendForPlayerModel(
+    private void tacticaltablet$renderBackgroundWithAlpha(
             GuiGraphics guiGraphics,
-            float partialTicks,
-            int mouseX,
-            int mouseY,
-            CallbackInfo callback
+            ResourceLocation texture,
+            int x,
+            int y,
+            int u,
+            int v,
+            int width,
+            int height
     ) {
-        GuiTextureRenderer.endAlphaBlend(guiGraphics);
+        GuiTextureRenderer.withAlphaBlend(
+                guiGraphics,
+                () -> guiGraphics.blit(texture, x, y, u, v, width, height)
+        );
     }
 
-    @Inject(
+    @Redirect(
             method = RENDER_BG,
-            at = @At(
-                    value = "INVOKE",
-                    target = PLAYER_MODEL_RENDER,
-                    shift = At.Shift.AFTER
-            ),
-            require = 1
+            at = @At(value = "INVOKE", target = RENDER_EXTRA_SLOTS, remap = false),
+            require = 0
     )
-    private void tacticaltablet$resumeBackgroundBlend(
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private void tacticaltablet$renderExtraSlotsWithAlpha(
+            LazyOptional optional,
+            NonNullConsumer renderer,
             GuiGraphics guiGraphics,
             float partialTicks,
             int mouseX,
-            int mouseY,
-            CallbackInfo callback
+            int mouseY
     ) {
-        GuiTextureRenderer.beginAlphaBlend(guiGraphics);
-    }
-
-    @Inject(method = RENDER_BG, at = @At("RETURN"), require = 1)
-    private void tacticaltablet$endBackgroundBlend(
-            GuiGraphics guiGraphics,
-            float partialTicks,
-            int mouseX,
-            int mouseY,
-            CallbackInfo callback
-    ) {
-        GuiTextureRenderer.endAlphaBlend(guiGraphics);
+        optional.ifPresent(value -> GuiTextureRenderer.withAlphaBlend(
+                guiGraphics,
+                () -> renderer.accept(value)
+        ));
     }
 }
