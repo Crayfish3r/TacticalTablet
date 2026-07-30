@@ -22,11 +22,9 @@ public final class EmbeddedResourceDiagnostics {
             probe("tacticaltablet", "textures/gui/buttons/class_button.png"),
             override("minecraft", "textures/gui/container/inventory.png"),
             override("minecraft", "textures/gui/recipe_button.png"),
-            override("minecraft", "font/default.json"),
             override("minecraft", "lang/ru_ru.json"),
             override("curios", "textures/gui/inventory.png"),
-            override("curios", "textures/gui/inventory_revamp.png"),
-            override("deluxewarfare", "font/jetbrains_mono_medium.ttf")
+            override("curios", "textures/gui/inventory_revamp.png")
     );
 
     private EmbeddedResourceDiagnostics() {

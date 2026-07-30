@@ -29,7 +29,9 @@ import net.minecraftforge.event.BuildCreativeModeTabContentsEvent;
 import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.fml.ModLoadingContext;
 import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.fml.config.ModConfig;
 import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import org.slf4j.Logger;
@@ -48,6 +50,11 @@ public class TacticalTabletMod {
         ModEntities.ENTITIES.register(modEventBus);
         ModSounds.SOUND_EVENTS.register(modEventBus);
         ModParticles.PARTICLES.register(modEventBus);
+
+        ModLoadingContext.get().registerConfig(
+                ModConfig.Type.SERVER,
+                TacticalTabletServerConfig.SPEC
+        );
 
         modEventBus.addListener(this::setup);
         modEventBus.addListener(this::addCreative);

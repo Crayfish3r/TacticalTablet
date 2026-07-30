@@ -1,14 +1,6 @@
 THIRD-PARTY NOTICES
 ===================
 
-JetBrains Mono Medium 1.0.3
---------------------------
-Copyright 2020 The JetBrains Mono Project Authors.
-
-The font is distributed under the Apache License, Version 2.0. A copy of the
-license is included as META-INF/licenses/JetBrains-Mono-Apache-2.0.txt.
-Source: https://github.com/JetBrains/JetBrainsMono/releases/tag/v1.0.3
-
 Curios GUI reference assets
 ---------------------------
 Copyright (C) 2018-2020 C4

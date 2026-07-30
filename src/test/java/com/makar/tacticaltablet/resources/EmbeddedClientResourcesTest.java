@@ -7,7 +7,6 @@ import com.google.gson.JsonParser;
 import org.junit.jupiter.api.Test;
 
 import javax.imageio.ImageIO;
-import java.awt.Font;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.InputStream;
@@ -19,7 +18,6 @@ import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -35,21 +33,14 @@ class EmbeddedClientResourcesTest {
     private static final Path OVERRIDE_ASSETS = OVERRIDE_PACK.resolve("assets");
     private static final Path MANIFEST =
             Path.of("src/test/resources/deluxewarfare-runtime-assets.tsv");
-    private static final Set<String> FONT_FALLBACKS = Set.of(
-            "minecraft:include/space",
-            "minecraft:include/default",
-            "minecraft:include/unifont"
-    );
-
     @Test
     void everyMigratedRuntimeAssetMatchesTheRepositoryManifest() throws Exception {
         List<ManifestEntry> entries = manifest();
 
-        assertEquals(151, entries.size());
+        assertEquals(149, entries.size());
         assertEquals(Map.of(
                 "curios", 2L,
-                "deluxewarfare", 1L,
-                "minecraft", 11L,
+                "minecraft", 10L,
                 "tacticaltablet", 137L
         ), entries.stream().collect(java.util.stream.Collectors.groupingBy(
                 entry -> entry.path().substring(0, entry.path().indexOf('/')),
@@ -152,45 +143,12 @@ class EmbeddedClientResourcesTest {
     }
 
     @Test
-    void fontLocalizationAndRecoveryCompassOverridesRemainFunctional() throws IOException {
-        JsonObject font = json(
-                asset("minecraft/font/default.json")
-        ).getAsJsonObject();
-        JsonArray providers = font.getAsJsonArray("providers");
-        Set<String> references = Stream.iterate(0, index -> index + 1)
-                .limit(providers.size())
-                .map(providers::get)
-                .filter(JsonElement::isJsonObject)
-                .map(JsonElement::getAsJsonObject)
-                .filter(provider -> "reference".equals(provider.get("type").getAsString()))
-                .map(provider -> provider.get("id").getAsString())
-                .collect(java.util.stream.Collectors.toSet());
-        assertEquals(FONT_FALLBACKS, references);
-        JsonObject ttf = Stream.iterate(0, index -> index + 1)
-                .limit(providers.size())
-                .map(providers::get)
-                .map(JsonElement::getAsJsonObject)
-                .filter(provider -> "ttf".equals(provider.get("type").getAsString()))
-                .findFirst()
-                .orElseThrow();
-        assertEquals("deluxewarfare:jetbrains_mono_medium.ttf", ttf.get("file").getAsString());
-        assertEquals(11.0D, ttf.get("size").getAsDouble());
-        assertEquals(1.0D, ttf.get("oversample").getAsDouble());
-        assertEquals(List.of(0.0D, 0.0D), Stream.iterate(0, index -> index + 1)
-                .limit(ttf.getAsJsonArray("shift").size())
-                .map(index -> ttf.getAsJsonArray("shift").get(index).getAsDouble())
-                .toList());
+    void localizationAndRecoveryCompassOverridesRemainFunctional() throws IOException {
+        assertFalse(Files.exists(asset("minecraft/font/default.json")));
+        assertFalse(Files.exists(asset(
+                "deluxewarfare/font/jetbrains_mono_medium.ttf"
+        )));
 
-        Path fontFile = asset("deluxewarfare/font/jetbrains_mono_medium.ttf");
-        assertTrue(Files.size(fontFile) > 0);
-        try (InputStream input = Files.newInputStream(fontFile)) {
-            Font medium = Font.createFont(Font.TRUETYPE_FONT, input);
-            assertEquals(-1, medium.canDisplayUpTo(
-                    "Русский English 0123456789 +-/%:.,!?()[]{}"
-            ));
-        } catch (java.awt.FontFormatException exception) {
-            throw new IOException("Invalid JetBrains Mono font", exception);
-        }
         for (String language : List.of("en_us", "ru_ru")) {
             JsonObject locale = json(
                     asset("minecraft/lang/" + language + ".json")
@@ -215,21 +173,20 @@ class EmbeddedClientResourcesTest {
     @Test
     void binaryAssetsAndThirdPartyNoticesArePackagedAsSources() throws IOException {
         for (ManifestEntry entry : manifest()) {
-            if (entry.path().endsWith(".ogg") || entry.path().endsWith(".ttf")) {
+            if (entry.path().endsWith(".ogg")) {
                 assertTrue(entry.size() > 0, entry.path());
             }
         }
         assertTrue(Files.isRegularFile(Path.of(
                 "src/main/resources/META-INF/licenses/Curios-LGPL-3.0-or-later.txt"
         )));
-        assertTrue(Files.isRegularFile(Path.of(
+        assertFalse(Files.exists(Path.of(
                 "src/main/resources/META-INF/licenses/JetBrains-Mono-Apache-2.0.txt"
         )));
         String notices = Files.readString(Path.of(
                 "src/main/resources/THIRD_PARTY_NOTICES.txt"
         ));
-        assertTrue(notices.contains("JetBrains Mono Medium 1.0.3"));
-        assertTrue(notices.contains("Apache License, Version 2.0"));
+        assertFalse(notices.contains("JetBrains Mono"));
         assertTrue(notices.contains("Curios GUI reference assets"));
     }
 
