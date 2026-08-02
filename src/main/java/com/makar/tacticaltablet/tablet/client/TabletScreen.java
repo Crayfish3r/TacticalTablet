@@ -18,11 +18,13 @@ import com.makar.tacticaltablet.tablet.ClassDefinition;
 import com.makar.tacticaltablet.tablet.ClassDefinitions;
 import com.makar.tacticaltablet.progression.ClassTier;
 import com.makar.tacticaltablet.progression.PlayerProgressManager;
+import com.makar.tacticaltablet.tablet.client.ui.TacticalUi;
+import com.makar.tacticaltablet.tablet.client.ui.widget.TacticalButton;
+import com.makar.tacticaltablet.tablet.client.ui.widget.TacticalTextField;
 import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.resources.sounds.SimpleSoundInstance;
 import net.minecraft.client.sounds.SoundManager;
@@ -78,6 +80,10 @@ public class TabletScreen extends Screen {
     private static final int CONTENT_Y = 46;
     private static final int CONTENT_W = 274;
     private static final int CONTENT_H = 150;
+    private static final int SCREEN_X = 88;
+    private static final int SCREEN_Y = 8;
+    private static final int SCREEN_W = 286;
+    private static final int SCREEN_H = 204;
 
     private static final int CONFIRM_W = 240;
     private static final int CONFIRM_H = 132;
@@ -358,6 +364,7 @@ public class TabletScreen extends Screen {
 
     @Override
     public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
+        TacticalUi.beginFrame();
         this.renderBackground(g);
 
         int x = panelX();
@@ -366,17 +373,25 @@ public class TabletScreen extends Screen {
         ResourceLocation panel = getPanelTexture();
         GuiTextureRenderer.blitWithAlpha(g, panel, x, y, UI_WIDTH, UI_HEIGHT, UI_WIDTH, UI_HEIGHT);
 
-        renderShell(g, x, y);
-
-        renderPageContent(g, x, y);
-
-        if (PAGES[currentPage].type() == PageType.ACTIONS) {
-            actionGrid.render(g, mouseX, mouseY, partialTick);
+        g.enableScissor(x + SCREEN_X, y + SCREEN_Y, x + SCREEN_X + SCREEN_W, y + SCREEN_Y + SCREEN_H);
+        try {
+            TacticalUi.drawPanel(g, x + SCREEN_X, y + SCREEN_Y, SCREEN_W, SCREEN_H);
+        } finally {
+            g.disableScissor();
         }
         navigationRail.render(g, mouseX, mouseY);
-        renderFooter(g, x, y);
-
-        super.render(g, mouseX, mouseY, partialTick);
+        g.enableScissor(x + SCREEN_X, y + SCREEN_Y, x + SCREEN_X + SCREEN_W, y + SCREEN_Y + SCREEN_H);
+        try {
+            renderShell(g, x, y);
+            renderPageContent(g, x, y);
+            if (PAGES[currentPage].type() == PageType.ACTIONS) {
+                actionGrid.render(g, mouseX, mouseY, partialTick);
+            }
+            renderFooter(g, x, y);
+            super.render(g, mouseX, mouseY, partialTick);
+        } finally {
+            g.disableScissor();
+        }
 
         renderHoverFeedback(g, mouseX, mouseY);
     }
@@ -1167,11 +1182,11 @@ public class TabletScreen extends Screen {
     private record ActionPresentation(String status, String detail, boolean active, int statusColor, String marker) {
     }
 
-    private class TabletRtpButton extends Button {
-        private boolean wasHovered;
-
+    private class TabletRtpButton extends TacticalButton {
         private TabletRtpButton(int x, int y) {
-            super(Button.builder(Component.literal("RTP"), button -> {}).bounds(x, y, RTP_W, RTP_H));
+            super(x, y, RTP_W, RTP_H, Component.literal("RTP"), ignored -> { });
+            withAccentBar(true);
+            onHover(() -> playSound(HOVER));
         }
 
         @Override
@@ -1188,14 +1203,14 @@ public class TabletScreen extends Screen {
         @Override
         public void renderWidget(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
             this.active = isRtpActive();
-            boolean hover = isMouseOver(mouseX, mouseY);
-            if (hover && !wasHovered) playSound(HOVER);
-            wasHovered = hover;
-            ButtonTextureSpec texture = TabletButtonTextures.RTP.select(active, false, hover);
+            super.renderWidget(g, mouseX, mouseY, partialTick);
             int color = active ? 0xFF72D68A : 0xFF77867B;
-            GuiTextureRenderer.blitWithAlpha(g, texture, getX(), getY(), width, height);
             g.drawCenteredString(Minecraft.getInstance().font,
                     TabletClientState.isRtpUsed() ? "RTP ✓" : "RTP", getX() + width / 2, getY() + 6, color);
+        }
+
+        @Override
+        protected void renderContent(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
         }
     }
 
@@ -1617,8 +1632,8 @@ public class TabletScreen extends Screen {
 
     private class ClanCreateScreen extends Screen {
 
-        private EditBox nameBox;
-        private EditBox tagBox;
+        private TacticalTextField nameBox;
+        private TacticalTextField tagBox;
         private int selectedColor = ClanConstants.ALLOWED_COLORS[0];
         private ConfirmTextureButton createButton;
         private String errorMessage = "";
@@ -1633,11 +1648,15 @@ public class TabletScreen extends Screen {
             int y = (this.height - UI_HEIGHT) / 2;
             selectedColor = firstFreeClanColor("", ClanConstants.ALLOWED_COLORS[0]);
 
-            nameBox = new EditBox(Minecraft.getInstance().font, x + 82, y + 78, 190, 18, Component.literal("\u041d\u0430\u0437\u0432\u0430\u043d\u0438\u0435"));
+            nameBox = new TacticalTextField(Minecraft.getInstance().font, x + 82, y + 78, 190, 18,
+                    Component.literal("\u041d\u0430\u0437\u0432\u0430\u043d\u0438\u0435"))
+                    .withPlaceholder(Component.literal("\u041d\u0430\u0437\u0432\u0430\u043d\u0438\u0435"));
             nameBox.setMaxLength(ClanConstants.MAX_NAME_LENGTH);
             this.addRenderableWidget(nameBox);
 
-            tagBox = new EditBox(Minecraft.getInstance().font, x + 82, y + 112, 68, 18, Component.literal("\u0422\u0435\u0433"));
+            tagBox = new TacticalTextField(Minecraft.getInstance().font, x + 82, y + 112, 68, 18,
+                    Component.literal("\u0422\u0435\u0433"))
+                    .withPlaceholder(Component.literal("\u0422\u0435\u0433"));
             tagBox.setMaxLength(ClanConstants.MAX_TAG_LENGTH);
             this.addRenderableWidget(tagBox);
 

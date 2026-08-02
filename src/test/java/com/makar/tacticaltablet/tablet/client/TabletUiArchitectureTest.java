@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -46,11 +47,12 @@ class TabletUiArchitectureTest {
     }
 
     @Test
-    void buttonBackgroundsUseMandatoryBlitsWithoutRuntimeTextureFallbacks() throws IOException {
+    void legacyButtonsKeepMandatoryBlitsWhileTacticalButtonIsProgrammatic() throws IOException {
         String card = source("TabletActionCard.java");
         String navigation = source("TabletNavigationRail.java");
         String screen = source("TabletScreen.java");
         String textures = source("TabletButtonTextures.java");
+        String tacticalButton = Files.readString(CLIENT.resolve("ui/widget/TacticalButton.java"));
 
         String cardBackground = card.substring(card.indexOf("public static void render"),
                 card.indexOf("private static void renderFallbackIcon"));
@@ -62,7 +64,13 @@ class TabletUiArchitectureTest {
         assertTrue(navigation.contains("GuiTextureRenderer.blitWithAlpha"));
         assertFalse(navigation.contains("graphics.fill"));
 
-        assertBlitsWithoutFill(screen, "private class TabletRtpButton", "private void showPurchaseConfirmation");
+        String rtp = screen.substring(screen.indexOf("private class TabletRtpButton"),
+                screen.indexOf("private void showPurchaseConfirmation"));
+        assertTrue(rtp.contains("extends TacticalButton"));
+        assertFalse(rtp.contains("TabletButtonTextures.RTP"));
+        assertFalse(rtp.contains("GuiTextureRenderer.blitWithAlpha"));
+        assertTrue(tacticalButton.contains("TacticalUi.drawButton"));
+        assertFalse(tacticalButton.contains("graphics.blit"));
         assertBlitsWithoutFill(screen, "private class ClanTextureButton", "private class ClanColorButton");
         assertBlitsWithoutFill(screen, "private class ClanColorButton", "private class ConfirmTextureButton");
         assertBlitsWithoutFill(screen, "private class ConfirmTextureButton", "private enum ConfirmButtonKind");
@@ -141,6 +149,38 @@ class TabletUiArchitectureTest {
         assertTrue(grid.contains("public static final int CARD_HEIGHT = 34;"));
         assertTrue(navigation.contains("public static final int WIDTH = 72;"));
         assertTrue(navigation.contains("public static final int BUTTON_HEIGHT = 28;"));
+    }
+
+    @Test
+    void tacticalFoundationIsClientOnlyAccessibleAndIntegrated() throws IOException {
+        Path ui = CLIENT.resolve("ui");
+        String screen = source("TabletScreen.java");
+        String button = Files.readString(ui.resolve("widget/TacticalButton.java"));
+        String iconButton = Files.readString(ui.resolve("widget/TacticalIconButton.java"));
+        String textField = Files.readString(ui.resolve("widget/TacticalTextField.java"));
+        String card = Files.readString(ui.resolve("widget/TacticalCard.java"));
+        String dialog = Files.readString(ui.resolve("widget/TacticalDialog.java"));
+        String tacticalUi = Files.readString(ui.resolve("TacticalUi.java"));
+
+        assertTrue(button.contains("extends Button"));
+        assertTrue(iconButton.contains("extends TacticalButton"));
+        assertTrue(textField.contains("extends EditBox"));
+        assertTrue(card.contains("extends Button"));
+        assertTrue(dialog.contains("extends Screen"));
+        assertTrue(tacticalUi.contains("finally"));
+        assertTrue(tacticalUi.contains("graphics.disableScissor()"));
+
+        assertTrue(screen.contains("TacticalUi.beginFrame()"));
+        assertTrue(screen.contains("TacticalUi.drawPanel"));
+        assertTrue(screen.contains("new TacticalTextField"));
+        assertTrue(screen.contains("extends TacticalButton"));
+        assertFalse(screen.contains("net.minecraft.client.gui.components.EditBox"));
+
+        for (String source : List.of(button, iconButton, textField, card, dialog, tacticalUi)) {
+            assertFalse(source.contains("TODO"));
+            assertFalse(source.contains("System.nanoTime"));
+            assertFalse(source.contains("new Thread"));
+        }
     }
 
     private static void assertBlitsWithoutFill(String source, String startMarker, String endMarker) {

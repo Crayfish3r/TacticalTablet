@@ -128,6 +128,42 @@ public final class GuiTextureRenderer {
         });
     }
 
+    public static void blitRegionWithAlpha(
+            GuiGraphics graphics,
+            ResourceLocation texture,
+            int x,
+            int y,
+            int logicalWidth,
+            int logicalHeight,
+            float u,
+            float v,
+            int regionWidth,
+            int regionHeight,
+            int textureWidth,
+            int textureHeight,
+            float red,
+            float green,
+            float blue,
+            float alpha
+    ) {
+        Objects.requireNonNull(graphics, "graphics");
+        Objects.requireNonNull(texture, "texture");
+        if (logicalWidth <= 0 || logicalHeight <= 0 || regionWidth <= 0 || regionHeight <= 0
+                || textureWidth <= 0 || textureHeight <= 0) {
+            return;
+        }
+
+        withQueryFreeAlphaBlend(graphics, () -> {
+            graphics.setColor(red, green, blue, alpha);
+            try {
+                graphics.blit(texture, x, y, logicalWidth, logicalHeight, u, v,
+                        regionWidth, regionHeight, textureWidth, textureHeight);
+            } finally {
+                graphics.setColor(1.0F, 1.0F, 1.0F, 1.0F);
+            }
+        });
+    }
+
     private static void withQueryFreeAlphaBlend(GuiGraphics graphics, Runnable drawCall) {
         Deque<BlendState> states = BLEND_STATES.get();
         if (!states.isEmpty()) {
