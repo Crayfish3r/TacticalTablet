@@ -108,7 +108,7 @@ public final class GuiTextureRenderer {
         Objects.requireNonNull(graphics, "graphics");
         Objects.requireNonNull(texture, "texture");
 
-        withQueryFreeAlphaBlend(graphics, () -> {
+        withImplicitAlphaBlend(graphics, () -> {
             graphics.setColor(red, green, blue, alpha);
             try {
                 graphics.blit(
@@ -153,7 +153,7 @@ public final class GuiTextureRenderer {
             return;
         }
 
-        withQueryFreeAlphaBlend(graphics, () -> {
+        withImplicitAlphaBlend(graphics, () -> {
             graphics.setColor(red, green, blue, alpha);
             try {
                 graphics.blit(texture, x, y, logicalWidth, logicalHeight, u, v,
@@ -164,33 +164,27 @@ public final class GuiTextureRenderer {
         });
     }
 
-    private static void withQueryFreeAlphaBlend(GuiGraphics graphics, Runnable drawCall) {
+    private static void withImplicitAlphaBlend(GuiGraphics graphics, Runnable drawCall) {
         Deque<BlendState> states = BLEND_STATES.get();
         if (!states.isEmpty()) {
             drawCall.run();
             return;
         }
 
-        RenderSystem.assertOnRenderThread();
-        RenderSystem.enableBlend();
-        RenderSystem.defaultBlendFunc();
-        try {
+        try (AlphaBlendScope ignored = openAlphaBlend(graphics)) {
             drawCall.run();
-        } finally {
-            graphics.setColor(1.0F, 1.0F, 1.0F, 1.0F);
-            RenderSystem.disableBlend();
-            BLEND_STATES.remove();
         }
     }
 
     public static void withAlphaBlend(GuiGraphics graphics, Runnable drawCall) {
         Objects.requireNonNull(drawCall, "drawCall");
-        beginAlphaBlend(graphics);
-        try {
+        try (AlphaBlendScope ignored = openAlphaBlend(graphics)) {
             drawCall.run();
-        } finally {
-            endAlphaBlend(graphics);
         }
+    }
+
+    public static AlphaBlendScope openAlphaBlend(GuiGraphics graphics) {
+        return new AlphaBlendScope(graphics);
     }
 
     public static void beginAlphaBlend(GuiGraphics graphics) {
@@ -215,6 +209,23 @@ public final class GuiTextureRenderer {
         previous.restore();
         if (states.isEmpty()) {
             BLEND_STATES.remove();
+        }
+    }
+
+    public static final class AlphaBlendScope implements AutoCloseable {
+        private final GuiGraphics graphics;
+        private boolean closed;
+
+        private AlphaBlendScope(GuiGraphics graphics) {
+            this.graphics = Objects.requireNonNull(graphics, "graphics");
+            beginAlphaBlend(graphics);
+        }
+
+        @Override
+        public void close() {
+            if (closed) return;
+            closed = true;
+            endAlphaBlend(graphics);
         }
     }
 

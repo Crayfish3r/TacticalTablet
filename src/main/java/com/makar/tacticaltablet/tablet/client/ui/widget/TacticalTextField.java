@@ -3,19 +3,23 @@ package com.makar.tacticaltablet.tablet.client.ui.widget;
 import com.makar.tacticaltablet.tablet.client.GuiTextureRenderer;
 import com.makar.tacticaltablet.tablet.client.ui.TacticalTheme;
 import com.makar.tacticaltablet.tablet.client.ui.TacticalUi;
+import com.makar.tacticaltablet.tablet.client.ui.render.ScissorScope;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.network.chat.Component;
 
+import java.util.Objects;
+
 /** EditBox-backed field that retains vanilla editing, selection, clipboard, and narration behavior. */
-public final class TacticalTextField extends EditBox {
+public final class TacticalTextField extends EditBox implements FocusKeyProvider {
     private static final int ICON_GAP = 4;
     private static final int CLEAR_BUTTON_WIDTH = 16;
 
     private TacticalIconButton.IconRegion leadingIcon;
     private boolean clearButton;
     private boolean error;
+    private String focusKey = "";
 
     public TacticalTextField(Font font, int x, int y, int width, int height, Component narration) {
         super(font, x, y, width, Math.max(TacticalTheme.MIN_CLICK_TARGET, height), narration);
@@ -35,6 +39,16 @@ public final class TacticalTextField extends EditBox {
     public TacticalTextField withClearButton(boolean clearButton) {
         this.clearButton = clearButton;
         return this;
+    }
+
+    public TacticalTextField withFocusKey(String focusKey) {
+        this.focusKey = Objects.requireNonNull(focusKey, "focusKey");
+        return this;
+    }
+
+    @Override
+    public String focusKey() {
+        return focusKey;
     }
 
     public void setError(boolean error) {
@@ -77,11 +91,9 @@ public final class TacticalTextField extends EditBox {
         applyContentBounds(originalX, originalWidth);
         try {
             if (width > 0 && height > 2) {
-                graphics.enableScissor(getX(), getY() + 1, getX() + width, getY() + height - 1);
-                try {
+                try (ScissorScope ignored = ScissorScope.open(
+                        graphics, getX(), getY() + 1, width, height - 2)) {
                     super.renderWidget(graphics, mouseX, mouseY, partialTick);
-                } finally {
-                    graphics.disableScissor();
                 }
             }
         } finally {

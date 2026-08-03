@@ -19,12 +19,16 @@ import com.makar.tacticaltablet.tablet.ClassDefinitions;
 import com.makar.tacticaltablet.progression.ClassTier;
 import com.makar.tacticaltablet.progression.PlayerProgressManager;
 import com.makar.tacticaltablet.tablet.client.ui.TacticalUi;
+import com.makar.tacticaltablet.tablet.client.ui.UiFrameClock;
+import com.makar.tacticaltablet.tablet.client.ui.render.ScissorScope;
 import com.makar.tacticaltablet.tablet.client.ui.widget.TacticalButton;
+import com.makar.tacticaltablet.tablet.client.ui.widget.TacticalDialog;
 import com.makar.tacticaltablet.tablet.client.ui.widget.TacticalTextField;
-import com.mojang.blaze3d.systems.RenderSystem;
+import net.minecraft.Util;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.events.GuiEventListener;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.resources.sounds.SimpleSoundInstance;
 import net.minecraft.client.sounds.SoundManager;
@@ -32,6 +36,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.util.FormattedCharSequence;
+import org.lwjgl.glfw.GLFW;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -140,15 +145,11 @@ public class TabletScreen extends Screen {
     };
 
     private final Set<String> dismissedUpgradePrompts = new HashSet<>();
-    private int currentPage;
-    private int infoScroll;
-    private int clanScrollOffset;
-    private int pendingScrollOffset;
-    private int memberScrollOffset;
-    private int selectedClanIndex = -1;
+    private final TabletPageState pageState = new TabletPageState();
     private int lastHoveredActionId = -1;
     private final ScrollableActionGrid<TabletAction> actionGrid =
-            new ScrollableActionGrid<>(this::renderActionCard, this::pressAction);
+            new ScrollableActionGrid<>(this::renderActionCard, this::pressAction, this::actionNarration);
+    private final UiFrameClock frameClock = new UiFrameClock();
     private final TabletNavigationRail navigationRail = new TabletNavigationRail(
             Arrays.stream(PAGES)
                     .map(page -> new TabletNavigationRail.Item(
@@ -170,14 +171,16 @@ public class TabletScreen extends Screen {
         int x0 = panelX();
         int y0 = panelY();
 
-        navigationRail.setBounds(x0 + NAV_X, y0 + NAV_Y);
-        navigationRail.setSelectedIndex(currentPage);
+        navigationRail.initialize(x0 + NAV_X, y0 + NAV_Y, button -> this.addWidget(button));
+        navigationRail.setSelectedIndex(pageState.currentPage());
+        Button selectedNavigation = navigationRail.selectedButton();
+        if (selectedNavigation != null) setInitialFocus(selectedNavigation);
         this.addRenderableWidget(new TabletRtpButton(x0 + RTP_X, y0 + RTP_Y));
 
-        TabletPage page = PAGES[currentPage];
+        TabletPage page = PAGES[pageState.currentPage()];
         if (page.type() == PageType.ACTIONS) {
-            actionGrid.setBounds(x0 + CONTENT_X, y0 + CONTENT_Y);
-            actionGrid.setSection(page.key(), page.actions());
+            actionGrid.initialize(x0 + CONTENT_X, y0 + CONTENT_Y, page.key(), page.actions(),
+                    button -> this.addWidget(button));
         } else if (page.type() == PageType.CLAN) {
             addClanButtons(x0, y0);
         }
@@ -185,16 +188,15 @@ public class TabletScreen extends Screen {
 
     private void addClanButtons(int x0, int y0) {
         List<ClanListPacket.ClanEntry> clans = TabletClientState.getClans();
-        boolean selectedIndexInvalid = selectedClanIndex >= clans.size();
-        selectedClanIndex = clamp(selectedClanIndex, -1, clans.size() - 1);
+        boolean selectedIndexInvalid = pageState.clampSelectedClan(clans.size());
         if (selectedIndexInvalid) {
-            pendingScrollOffset = 0;
-            memberScrollOffset = 0;
+            pageState.reset(TabletPageState.CLAN_PENDING, TabletPageState.CLAN_MEMBERS);
         }
+        int selectedClanIndex = pageState.selectedClanIndex();
         if (selectedClanIndex < 0) {
-            memberScrollOffset = 0;
+            pageState.reset(TabletPageState.CLAN_MEMBERS);
         }
-        clanScrollOffset = clamp(clanScrollOffset, 0, Math.max(0, clans.size() - 4));
+        int clanScrollOffset = pageState.clampOffset(TabletPageState.CLAN_LIST, clans.size() - 4);
 
         if (selectedClanIndex < 0) {
             int rowCount = Math.min(4, clans.size() - clanScrollOffset);
@@ -211,9 +213,7 @@ public class TabletScreen extends Screen {
                         () -> clan.color(),
                         () -> selectedClanIndex == index,
                         () -> {
-                            selectedClanIndex = index;
-                            pendingScrollOffset = 0;
-                            memberScrollOffset = 0;
+                            pageState.selectClan(index);
                             TabletScreen.this.init();
                         }
                 ));
@@ -226,7 +226,7 @@ public class TabletScreen extends Screen {
                     CLAN_CREATE_H,
                     TabletButtonTextures.CLAN_CREATE,
                     Component.literal("\u0421\u043e\u0437\u0434\u0430\u0442\u044c"),
-                    () -> Minecraft.getInstance().setScreen(new ClanCreateConfirmScreen())
+                    this::openClanCreateConfirmation
             );
             createClanButton.active = clans.size() < ClanConstants.MAX_CLANS && hasFreeClanColor("");
             this.addRenderableWidget(createClanButton);
@@ -234,6 +234,8 @@ public class TabletScreen extends Screen {
         }
 
         ClanListPacket.ClanEntry clan = clans.get(selectedClanIndex);
+        ClanPagePolicy.Permissions permissions = ClanPagePolicy.permissions(
+                clan.owner(), clan.member(), clan.pending());
         this.addRenderableWidget(new ClanTextureButton(
                 x0 + CONTENT_X,
                 y0 + 46,
@@ -242,32 +244,30 @@ public class TabletScreen extends Screen {
                 TabletButtonTextures.CLAN_BACK,
                 Component.literal("\u041d\u0430\u0437\u0430\u0434"),
                 () -> {
-                    selectedClanIndex = -1;
-                    pendingScrollOffset = 0;
-                    memberScrollOffset = 0;
+                    pageState.selectClan(-1);
                     TabletScreen.this.init();
                 }
         ));
 
-        if (!clan.owner() && !clan.member() && !clan.pending()) {
+        if (permissions.canRequestJoin()) {
             this.addRenderableWidget(newClanActionButton(x0 + 130, y0 + CLAN_BOTTOM_BUTTON_Y, "\u0417\u0430\u044f\u0432\u043a\u0430",
-                    () -> Minecraft.getInstance().setScreen(new ClanJoinConfirmScreen(clan))));
-        } else if (clan.member() && !clan.owner()) {
+                    () -> openClanJoinConfirmation(clan)));
+        } else if (permissions.canLeave()) {
             this.addRenderableWidget(newClanDangerButton(x0 + 130, y0 + CLAN_BOTTOM_BUTTON_Y, "\u0412\u044b\u0439\u0442\u0438",
-                    () -> Minecraft.getInstance().setScreen(new ClanSimpleConfirmScreen(
+                    () -> openClanConfirmation(
                             "\u0412\u044b\u0439\u0442\u0438 \u0438\u0437 \u043a\u043b\u0430\u043d\u0430?",
                             clan.name(),
                             () -> PacketHandler.sendToServer(new ClanLeavePacket())
-                    ))));
-        } else if (clan.owner()) {
+                    )));
+        } else if (permissions.canChangeColor()) {
             this.addRenderableWidget(newClanActionButton(x0 + 130, y0 + CLAN_BOTTOM_BUTTON_Y, "\u0426\u0432\u0435\u0442 10\u041a\u041a",
                     () -> Minecraft.getInstance().setScreen(new ClanChangeColorScreen(clan))));
             this.addRenderableWidget(newClanDangerButton(x0 + 254, y0 + CLAN_BOTTOM_BUTTON_Y, "\u0420\u0430\u0441\u043f\u0443\u0441\u0442\u0438\u0442\u044c",
-                    () -> Minecraft.getInstance().setScreen(new ClanSimpleConfirmScreen(
+                    () -> openClanConfirmation(
                             "\u0420\u0430\u0441\u043f\u0443\u0441\u0442\u0438\u0442\u044c \u043a\u043b\u0430\u043d?",
                             clan.name(),
                             () -> PacketHandler.sendToServer(new ClanDisbandPacket(clan.id()))
-                    ))));
+                    )));
 
             addOwnerRequestButtons(x0, y0, clan);
             addOwnerKickButtons(x0, y0, clan);
@@ -308,7 +308,8 @@ public class TabletScreen extends Screen {
         if (!clan.owner()) return;
         if (clan.pendingEntries() == null || clan.pendingEntries().isEmpty()) return;
 
-        pendingScrollOffset = clamp(pendingScrollOffset, 0, Math.max(0, clan.pendingEntries().size() - CLAN_VISIBLE_PENDING));
+        int pendingScrollOffset = pageState.clampOffset(
+                TabletPageState.CLAN_PENDING, clan.pendingEntries().size() - CLAN_VISIBLE_PENDING);
         int count = Math.min(CLAN_VISIBLE_PENDING, clan.pendingEntries().size() - pendingScrollOffset);
         int listTop = y0 + CLAN_PENDING_TOP + 18;
         int okX = x0 + CLAN_PENDING_LEFT + 60;
@@ -332,7 +333,8 @@ public class TabletScreen extends Screen {
         List<ClanListPacket.MemberEntry> members = clan.memberEntries() == null ? List.of() : clan.memberEntries();
         if (members.isEmpty()) return;
 
-        memberScrollOffset = clamp(memberScrollOffset, 0, Math.max(0, members.size() - CLAN_VISIBLE_MEMBERS));
+        int memberScrollOffset = pageState.clampOffset(
+                TabletPageState.CLAN_MEMBERS, members.size() - CLAN_VISIBLE_MEMBERS);
         int count = Math.min(CLAN_VISIBLE_MEMBERS, members.size() - memberScrollOffset);
         int buttonX = x0 + CLAN_MEMBERS_LEFT + 112;
         int listTop = y0 + CLAN_MEMBERS_TOP + 14;
@@ -344,11 +346,11 @@ public class TabletScreen extends Screen {
             int buttonY = listTop + i * CLAN_MEMBER_ROW_H - 3;
             this.addRenderableWidget(newClanPlainButton(buttonX, buttonY, 42, 14,
                     TabletButtonTextures.CLAN_KICK, "\u041a\u0438\u043a",
-                    () -> Minecraft.getInstance().setScreen(new ClanSimpleConfirmScreen(
+                    () -> openClanConfirmation(
                             "\u0418\u0441\u043a\u043b\u044e\u0447\u0438\u0442\u044c \u0438\u0433\u0440\u043e\u043a\u0430?",
                             member.name(),
                             () -> PacketHandler.sendToServer(new ClanKickMemberPacket(clan.id(), member.uuid()))
-                    ))));
+                    )));
         }
     }
 
@@ -364,7 +366,14 @@ public class TabletScreen extends Screen {
 
     @Override
     public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
-        TacticalUi.beginFrame();
+        try (TacticalUi.FrameScope ignoredFrame = TacticalUi.openFrame(
+                frameClock.nextFrame(Util.getMillis(), false));
+             GuiTextureRenderer.AlphaBlendScope ignoredBlend = GuiTextureRenderer.openAlphaBlend(g)) {
+            renderFrame(g, mouseX, mouseY, partialTick);
+        }
+    }
+
+    private void renderFrame(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
         this.renderBackground(g);
 
         int x = panelX();
@@ -373,31 +382,27 @@ public class TabletScreen extends Screen {
         ResourceLocation panel = getPanelTexture();
         GuiTextureRenderer.blitWithAlpha(g, panel, x, y, UI_WIDTH, UI_HEIGHT, UI_WIDTH, UI_HEIGHT);
 
-        g.enableScissor(x + SCREEN_X, y + SCREEN_Y, x + SCREEN_X + SCREEN_W, y + SCREEN_Y + SCREEN_H);
-        try {
+        try (ScissorScope ignored = ScissorScope.open(
+                g, x + SCREEN_X, y + SCREEN_Y, SCREEN_W, SCREEN_H)) {
             TacticalUi.drawPanel(g, x + SCREEN_X, y + SCREEN_Y, SCREEN_W, SCREEN_H);
-        } finally {
-            g.disableScissor();
         }
-        navigationRail.render(g, mouseX, mouseY);
-        g.enableScissor(x + SCREEN_X, y + SCREEN_Y, x + SCREEN_X + SCREEN_W, y + SCREEN_Y + SCREEN_H);
-        try {
+        navigationRail.render(g, mouseX, mouseY, partialTick);
+        try (ScissorScope ignored = ScissorScope.open(
+                g, x + SCREEN_X, y + SCREEN_Y, SCREEN_W, SCREEN_H)) {
             renderShell(g, x, y);
             renderPageContent(g, x, y);
-            if (PAGES[currentPage].type() == PageType.ACTIONS) {
+            if (PAGES[pageState.currentPage()].type() == PageType.ACTIONS) {
                 actionGrid.render(g, mouseX, mouseY, partialTick);
             }
             renderFooter(g, x, y);
             super.render(g, mouseX, mouseY, partialTick);
-        } finally {
-            g.disableScissor();
         }
 
         renderHoverFeedback(g, mouseX, mouseY);
     }
 
     private void renderPageContent(GuiGraphics g, int x, int y) {
-        TabletPage page = PAGES[currentPage];
+        TabletPage page = PAGES[pageState.currentPage()];
 
         if (page.type() == PageType.CLAN) {
             drawClans(g, x, y);
@@ -410,28 +415,24 @@ public class TabletScreen extends Screen {
         }
 
         if (page.type() == PageType.PROFILE) {
-            drawInfoLine(g, x, y, 0, "\u041c\u043e\u043d\u0435\u0442\u044b", TabletClientState.getCoins() + " \u043c", 0xFFE7C76A);
-            drawInfoLine(g, x, y, 1, "\u041f\u043e\u0431\u0435\u0434\u044b", String.valueOf(TabletClientState.getWins()));
-            drawInfoLine(g, x, y, 2, "\u041c\u0430\u0442\u0447\u0438", String.valueOf(TabletClientState.getMatchesPlayed()));
-            drawInfoLine(g, x, y, 3, "\u0423\u0431\u0438\u0439\u0441\u0442\u0432\u0430", String.valueOf(TabletClientState.getKills()));
-            drawInfoLine(g, x, y, 4, "\u0421\u043c\u0435\u0440\u0442\u0438", String.valueOf(TabletClientState.getDeaths()));
-            drawInfoLine(g, x, y, 5, "KDA", TabletClientState.getKdaText());
-            drawInfoLine(g, x, y, 6, "\u041f\u0440\u043e\u0433\u0440\u0435\u0441\u0441", TabletClientState.getCareerProgressPercent() + "%");
+            TabletProfileView.render(g, font, x + CONTENT_X, y + CONTENT_Y, new TabletProfileView.Model(
+                    TabletClientState.getCoins() + " \u043c",
+                    String.valueOf(TabletClientState.getWins()),
+                    String.valueOf(TabletClientState.getMatchesPlayed()),
+                    String.valueOf(TabletClientState.getKills()),
+                    String.valueOf(TabletClientState.getDeaths()),
+                    TabletClientState.getKdaText(),
+                    TabletClientState.getCareerProgressPercent() + "%"
+            ));
         }
     }
 
-    @Override
-    public void removed() {
-        RenderSystem.disableScissor();
-        super.removed();
-    }
-
     private void renderShell(GuiGraphics g, int x, int y) {
-        drawHeader(g, x, y, PAGES[currentPage].title());
+        drawHeader(g, x, y, PAGES[pageState.currentPage()].title());
     }
 
     private void renderFooter(GuiGraphics g, int x, int y) {
-        TabletPage page = PAGES[currentPage];
+        TabletPage page = PAGES[pageState.currentPage()];
         String footer;
         if (page.type() == PageType.ACTIONS) {
             int rows = ScrollableGridLayout.rowCount(page.actions().size());
@@ -457,6 +458,7 @@ public class TabletScreen extends Screen {
 
     private void drawClans(GuiGraphics g, int x, int y) {
         List<ClanListPacket.ClanEntry> clans = TabletClientState.getClans();
+        int selectedClanIndex = pageState.selectedClanIndex();
         if (selectedClanIndex >= 0 && selectedClanIndex < clans.size()) {
             drawClanDetails(g, x, y, clans.get(selectedClanIndex));
             return;
@@ -471,8 +473,10 @@ public class TabletScreen extends Screen {
             return;
         }
 
-        clanScrollOffset = clamp(clanScrollOffset, 0, Math.max(0, clans.size() - 4));
-        int rowCount = Math.min(4, clans.size() - clanScrollOffset);
+        TabletDataViewport.VisibleRange visible = TabletDataViewport.visibleRange(
+                clans.size(), pageState.offset(TabletPageState.CLAN_LIST), 4);
+        int clanScrollOffset = pageState.clampOffset(TabletPageState.CLAN_LIST, visible.maximumOffset());
+        int rowCount = visible.size();
         for (int i = 0; i < rowCount; i++) {
             int index = clanScrollOffset + i;
             ClanListPacket.ClanEntry clan = clans.get(index);
@@ -525,12 +529,14 @@ public class TabletScreen extends Screen {
             return;
         }
 
-        memberScrollOffset = clamp(memberScrollOffset, 0, Math.max(0, members.size() - CLAN_VISIBLE_MEMBERS));
+        TabletDataViewport.VisibleRange visible = TabletDataViewport.visibleRange(
+                members.size(), pageState.offset(TabletPageState.CLAN_MEMBERS), CLAN_VISIBLE_MEMBERS);
+        int memberScrollOffset = pageState.clampOffset(TabletPageState.CLAN_MEMBERS, visible.maximumOffset());
         int listTop = y + 14;
-        int count = Math.min(CLAN_VISIBLE_MEMBERS, members.size() - memberScrollOffset);
+        int count = visible.size();
 
-        g.enableScissor(x, listTop, x + CLAN_MEMBERS_WIDTH, y + CLAN_MEMBERS_HEIGHT);
-        try {
+        try (ScissorScope ignored = ScissorScope.open(
+                g, x, listTop, CLAN_MEMBERS_WIDTH, y + CLAN_MEMBERS_HEIGHT - listTop)) {
             for (int i = 0; i < count; i++) {
                 ClanListPacket.MemberEntry member = members.get(memberScrollOffset + i);
                 boolean owner = member.uuid().equals(clan.ownerUuid());
@@ -540,8 +546,6 @@ public class TabletScreen extends Screen {
                 int color = owner ? 0xFFE7C76A : 0xFFE6F0E8;
                 g.drawString(Minecraft.getInstance().font, fitText(member.name() + suffix, nameWidth), x, rowY, color, false);
             }
-        } finally {
-            g.disableScissor();
         }
 
         if (members.size() > CLAN_VISIBLE_MEMBERS) {
@@ -566,19 +570,19 @@ public class TabletScreen extends Screen {
             return;
         }
 
-        pendingScrollOffset = clamp(pendingScrollOffset, 0, Math.max(0, pending - CLAN_VISIBLE_PENDING));
-        int count = Math.min(CLAN_VISIBLE_PENDING, pending - pendingScrollOffset);
+        TabletDataViewport.VisibleRange visible = TabletDataViewport.visibleRange(
+                pending, pageState.offset(TabletPageState.CLAN_PENDING), CLAN_VISIBLE_PENDING);
+        int pendingScrollOffset = pageState.clampOffset(TabletPageState.CLAN_PENDING, visible.maximumOffset());
+        int count = visible.size();
         int listTop = y + 18;
 
-        g.enableScissor(x, listTop, x + CLAN_PENDING_WIDTH, y + CLAN_PENDING_HEIGHT);
-        try {
+        try (ScissorScope ignored = ScissorScope.open(
+                g, x, listTop, CLAN_PENDING_WIDTH, y + CLAN_PENDING_HEIGHT - listTop)) {
             for (int i = 0; i < count; i++) {
                 ClanListPacket.PendingEntry entry = clan.pendingEntries().get(pendingScrollOffset + i);
                 g.drawString(Minecraft.getInstance().font, fitText(entry.name(), 48), x,
                         listTop + i * CLAN_PENDING_ROW_H, 0xFFE6F0E8, false);
             }
-        } finally {
-            g.disableScissor();
         }
 
         if (pending > CLAN_VISIBLE_PENDING) {
@@ -643,15 +647,14 @@ public class TabletScreen extends Screen {
     private void drawServerInfo(GuiGraphics g, int x, int y) {
         List<FormattedCharSequence> lines = getServerInfoLines(INFO_WIDTH);
         int maxScroll = getMaxInfoScroll(lines);
-        infoScroll = clamp(infoScroll, 0, maxScroll);
+        int infoScroll = pageState.clampOffset(TabletPageState.SERVER_INFO, maxScroll);
 
         int left = x + INFO_LEFT;
         int top = y + INFO_TOP;
         int right = left + INFO_WIDTH;
         int bottom = top + INFO_HEIGHT;
 
-        g.enableScissor(left, top, right, bottom);
-        try {
+        try (ScissorScope ignored = ScissorScope.open(g, left, top, right - left, bottom - top)) {
             int lineY = top - infoScroll;
             for (FormattedCharSequence line : lines) {
                 if (lineY > top - INFO_LINE_HEIGHT && lineY < bottom) {
@@ -666,8 +669,6 @@ public class TabletScreen extends Screen {
                 }
                 lineY += INFO_LINE_HEIGHT;
             }
-        } finally {
-            g.disableScissor();
         }
         drawInfoScrollbar(g, right + 5, top, INFO_HEIGHT, infoScroll, maxScroll);
     }
@@ -693,15 +694,9 @@ public class TabletScreen extends Screen {
 
     private void drawInfoScrollbar(GuiGraphics g, int x, int y, int height, int scroll, int maxScroll) {
         g.fill(x, y, x + 3, y + height, 0x66000000);
-
-        if (maxScroll <= 0) {
-            g.fill(x, y, x + 3, y + height, 0xFF72D68A);
-            return;
-        }
-
-        int thumbHeight = Math.max(16, height * height / (height + maxScroll));
-        int thumbY = y + (height - thumbHeight) * scroll / maxScroll;
-        g.fill(x, thumbY, x + 3, thumbY + thumbHeight, 0xFF72D68A);
+        TabletDataViewport.Scrollbar scrollbar = TabletDataViewport.scrollbar(height, scroll, maxScroll, 16);
+        int thumbY = y + scrollbar.yOffset();
+        g.fill(x, thumbY, x + 3, thumbY + scrollbar.height(), 0xFF72D68A);
     }
 
     private boolean isMouseOverInfoArea(double mouseX, double mouseY) {
@@ -775,14 +770,15 @@ public class TabletScreen extends Screen {
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
         if (navigationRail.mouseScrolled(mouseX, mouseY, delta)) return true;
 
-        if (PAGES[currentPage].type() == PageType.ACTIONS && actionGrid.mouseScrolled(mouseX, mouseY, delta)) {
+        if (PAGES[pageState.currentPage()].type() == PageType.ACTIONS && actionGrid.mouseScrolled(mouseX, mouseY, delta)) {
             return true;
         }
 
-        if (PAGES[currentPage].type() == PageType.CLAN) {
+        if (PAGES[pageState.currentPage()].type() == PageType.CLAN) {
             List<ClanListPacket.ClanEntry> clans = TabletClientState.getClans();
+            int selectedClanIndex = pageState.selectedClanIndex();
             if (selectedClanIndex < 0 && isMouseOverClanList(mouseX, mouseY)) {
-                clanScrollOffset = clamp(clanScrollOffset - (int) Math.signum(delta), 0, Math.max(0, clans.size() - 4));
+                pageState.scroll(TabletPageState.CLAN_LIST, -(int) Math.signum(delta), clans.size() - 4);
                 TabletScreen.this.init();
                 return true;
             }
@@ -790,11 +786,8 @@ public class TabletScreen extends Screen {
             if (selectedClanIndex >= 0 && selectedClanIndex < clans.size() && isMouseOverMemberList(mouseX, mouseY)) {
                 ClanListPacket.ClanEntry clan = clans.get(selectedClanIndex);
                 int members = clan.memberEntries() == null ? 0 : clan.memberEntries().size();
-                memberScrollOffset = clamp(
-                        memberScrollOffset - (int) Math.signum(delta),
-                        0,
-                        Math.max(0, members - CLAN_VISIBLE_MEMBERS)
-                );
+                pageState.scroll(TabletPageState.CLAN_MEMBERS,
+                        -(int) Math.signum(delta), members - CLAN_VISIBLE_MEMBERS);
                 TabletScreen.this.init();
                 return true;
             }
@@ -802,19 +795,17 @@ public class TabletScreen extends Screen {
             if (selectedClanIndex >= 0 && selectedClanIndex < clans.size() && isMouseOverPendingList(mouseX, mouseY)) {
                 ClanListPacket.ClanEntry clan = clans.get(selectedClanIndex);
                 int pending = clan.pendingEntries() == null ? 0 : clan.pendingEntries().size();
-                pendingScrollOffset = clamp(
-                        pendingScrollOffset - (int) Math.signum(delta),
-                        0,
-                        Math.max(0, pending - CLAN_VISIBLE_PENDING)
-                );
+                pageState.scroll(TabletPageState.CLAN_PENDING,
+                        -(int) Math.signum(delta), pending - CLAN_VISIBLE_PENDING);
                 TabletScreen.this.init();
                 return true;
             }
         }
 
-        if (PAGES[currentPage].type() == PageType.SERVER_INFO && isMouseOverInfoArea(mouseX, mouseY)) {
+        if (PAGES[pageState.currentPage()].type() == PageType.SERVER_INFO && isMouseOverInfoArea(mouseX, mouseY)) {
             int maxScroll = getMaxInfoScroll(getServerInfoLines(INFO_WIDTH));
-            infoScroll = clamp(infoScroll - (int) Math.round(delta * INFO_LINE_HEIGHT * 3.0D), 0, maxScroll);
+            pageState.scroll(TabletPageState.SERVER_INFO,
+                    -(int) Math.round(delta * INFO_LINE_HEIGHT * 3.0D), maxScroll);
             return true;
         }
 
@@ -823,11 +814,27 @@ public class TabletScreen extends Screen {
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        if (navigationRail.mouseClicked(mouseX, mouseY, button)) return true;
-        if (PAGES[currentPage].type() == PageType.ACTIONS && actionGrid.mouseClicked(mouseX, mouseY, button)) {
-            return true;
-        }
         return super.mouseClicked(mouseX, mouseY, button);
+    }
+
+    @Override
+    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (keyCode == GLFW.GLFW_KEY_UP || keyCode == GLFW.GLFW_KEY_DOWN
+                || keyCode == GLFW.GLFW_KEY_LEFT || keyCode == GLFW.GLFW_KEY_RIGHT) {
+            GuiEventListener nextNavigation = navigationRail.moveFocus(keyCode, getFocused());
+            if (nextNavigation != null) {
+                setFocused(nextNavigation);
+                return true;
+            }
+            if (PAGES[pageState.currentPage()].type() == PageType.ACTIONS) {
+                GuiEventListener nextAction = actionGrid.moveFocus(keyCode, getFocused());
+                if (nextAction != null) {
+                    setFocused(nextAction);
+                    return true;
+                }
+            }
+        }
+        return super.keyPressed(keyCode, scanCode, modifiers);
     }
 
     private int panelX() {
@@ -839,9 +846,8 @@ public class TabletScreen extends Screen {
     }
 
     private void selectPage(int pageIndex) {
-        if (pageIndex == currentPage || pageIndex < 0 || pageIndex >= PAGES.length) return;
+        if (!pageState.selectPage(pageIndex, PAGES.length)) return;
         playSound(CLICK);
-        currentPage = pageIndex;
         init();
     }
 
@@ -856,33 +862,6 @@ public class TabletScreen extends Screen {
                 x + HEADER_X + 8,
                 y + HEADER_Y + 9,
                 0xFFE6F0E8,
-                false
-        );
-    }
-
-    private void drawInfoLine(GuiGraphics g, int x, int y, int row, String label, String value) {
-        drawInfoLine(g, x, y, row, label, value, 0xFFFFFFFF);
-    }
-
-    private void drawInfoLine(GuiGraphics g, int x, int y, int row, String label, String value, int valueColor) {
-        int left = x + CONTENT_X + 10;
-        int top = y + CONTENT_Y + 10 + row * 18;
-
-        g.drawString(
-                Minecraft.getInstance().font,
-                label + ":",
-                left,
-                top,
-                0xFF9FB2A4,
-                false
-        );
-
-        g.drawString(
-                Minecraft.getInstance().font,
-                value,
-                left + 126,
-                top,
-                valueColor,
                 false
         );
     }
@@ -952,8 +931,8 @@ public class TabletScreen extends Screen {
     }
 
     private void renderActionCard(GuiGraphics g, TabletAction action, int x, int y, int width, int height,
-                                  int mouseX, int mouseY, float partialTick) {
-        boolean hover = mouseX >= x && mouseX < x + width && mouseY >= y && mouseY < y + height;
+                                  int mouseX, int mouseY, float partialTick, boolean focused) {
+        boolean hover = focused || mouseX >= x && mouseX < x + width && mouseY >= y && mouseY < y + height;
         ActionPresentation presentation = describeAction(action);
         ClassTier actualTier = ClassButtonStyle.actualTier(
                 action.fixedLevel(),
@@ -961,14 +940,19 @@ public class TabletScreen extends Screen {
         );
         ResourceLocation resolvedIcon = ClassDefinitions.byClassKey(action.classKey())
                 .map(definition -> ClassIconResolver.resolve(definition,
-                        icon -> Minecraft.getInstance().getResourceManager().getResource(icon).isPresent()))
+                        ClientResourcePresenceCache::exists))
                 .orElse(ClassDefinitions.FALLBACK_ICON);
         String title = fitText(action.label(), 88);
         String status = fitText(presentation.status(), 92);
         TabletActionCard.render(g, x, y, width, height, hover, resolvedIcon,
-                Minecraft.getInstance().getResourceManager().getResource(resolvedIcon).isPresent(), title,
+                ClientResourcePresenceCache.exists(resolvedIcon), title,
                 new TabletActionCard.Presentation(presentation.active(), actualTier, status,
                         presentation.statusColor(), presentation.marker()));
+    }
+
+    private Component actionNarration(TabletAction action) {
+        ActionPresentation presentation = describeAction(action);
+        return Component.literal(action.label() + ". " + presentation.detail());
     }
 
     private void pressAction(TabletAction action) {
@@ -1140,7 +1124,7 @@ public class TabletScreen extends Screen {
     }
 
     private void renderHoverFeedback(GuiGraphics g, int mouseX, int mouseY) {
-        if (PAGES[currentPage].type() == PageType.ACTIONS) {
+        if (PAGES[pageState.currentPage()].type() == PageType.ACTIONS) {
             Optional<TabletAction> hovered = actionGrid.itemAt(mouseX, mouseY);
             int hoveredId = hovered.map(TabletAction::actionId).orElse(-1);
             if (hoveredId >= 0 && hoveredId != lastHoveredActionId) playSound(HOVER);
@@ -1215,15 +1199,112 @@ public class TabletScreen extends Screen {
     }
 
     private void showPurchaseConfirmation(TabletAction action) {
-        Minecraft.getInstance().setScreen(new TabletConfirmScreen(action, ConfirmAction.SHOP_PURCHASE, 0));
+        showActionConfirmation(action, ConfirmAction.SHOP_PURCHASE, 0);
     }
 
     private void showBaseUnlockConfirmation(TabletAction action) {
-        Minecraft.getInstance().setScreen(new TabletConfirmScreen(action, ConfirmAction.BASE_UNLOCK, 0));
+        showActionConfirmation(action, ConfirmAction.BASE_UNLOCK, 0);
     }
 
     private void showTierUpgradeConfirmation(TabletAction action, int targetTier) {
-        Minecraft.getInstance().setScreen(new TabletConfirmScreen(action, ConfirmAction.TIER_UPGRADE, targetTier));
+        showActionConfirmation(action, ConfirmAction.TIER_UPGRADE, targetTier);
+    }
+
+    private void showActionConfirmation(TabletAction action, ConfirmAction confirmAction, int targetTier) {
+        int price = confirmationPrice(action, confirmAction, targetTier);
+        Component body = Component.literal(action.label() + "\n" + price + " \u043c\u043e\u043d\u0435\u0442\n"
+                + "\u0411\u0430\u043b\u0430\u043d\u0441: " + TabletClientState.getCoins());
+        Component confirmLabel = Component.literal(
+                confirmAction == ConfirmAction.SHOP_PURCHASE ? "\u041a\u0443\u043f\u0438\u0442\u044c" : "\u041e\u041a");
+        Minecraft.getInstance().setScreen(new TacticalDialog(
+                this,
+                Component.literal(confirmationTitle(confirmAction)),
+                body,
+                confirmLabel,
+                Component.literal("\u041e\u0442\u043c\u0435\u043d\u0430"),
+                () -> submitConfirmation(action, confirmAction, targetTier, price),
+                () -> {
+                    if (confirmAction == ConfirmAction.TIER_UPGRADE) {
+                        dismissedUpgradePrompts.add(action.classKey());
+                    }
+                },
+                true,
+                false,
+                () -> TabletClientState.getCoins() >= price
+        ));
+    }
+
+    private void openClanCreateConfirmation() {
+        Minecraft.getInstance().setScreen(new TacticalDialog(
+                this,
+                Component.literal("\u0421\u043e\u0437\u0434\u0430\u0442\u044c \u043a\u043b\u0430\u043d?"),
+                Component.literal("\u0421\u0442\u043e\u0438\u043c\u043e\u0441\u0442\u044c: " + ClanConstants.CREATE_COST
+                        + " \u043c\u043e\u043d\u0435\u0442\n\u0411\u0430\u043b\u0430\u043d\u0441: " + TabletClientState.getCoins()),
+                Component.literal("\u0414\u0430\u043b\u0435\u0435"),
+                Component.literal("\u041e\u0442\u043c\u0435\u043d\u0430"),
+                () -> Minecraft.getInstance().setScreen(new ClanCreateScreen()),
+                () -> { },
+                true,
+                false,
+                () -> TabletClientState.getCoins() >= ClanConstants.CREATE_COST
+                        && TabletClientState.getClans().size() < ClanConstants.MAX_CLANS
+                        && hasFreeClanColor("")
+        ));
+    }
+
+    private void openClanJoinConfirmation(ClanListPacket.ClanEntry clan) {
+        Minecraft.getInstance().setScreen(new TacticalDialog(
+                this,
+                Component.literal("\u0412\u0441\u0442\u0443\u043f\u0438\u0442\u044c \u0432 \u043a\u043b\u0430\u043d?"),
+                Component.literal("[" + clan.tag() + "] " + clan.name()
+                        + "\n\u0413\u043b\u0430\u0432\u0430 \u0440\u0430\u0441\u0441\u043c\u043e\u0442\u0440\u0438\u0442 \u0437\u0430\u044f\u0432\u043a\u0443"),
+                Component.literal("\u0417\u0430\u044f\u0432\u043a\u0430"),
+                Component.literal("\u041e\u0442\u043c\u0435\u043d\u0430"),
+                () -> PacketHandler.sendToServer(new ClanJoinRequestPacket(clan.id())),
+                () -> { },
+                true,
+                false
+        ));
+    }
+
+    private void openClanConfirmation(String title, String detail, Runnable confirmAction) {
+        Minecraft.getInstance().setScreen(new TacticalDialog(
+                this,
+                Component.literal(title),
+                Component.literal(detail == null ? "" : detail),
+                Component.literal("\u041e\u041a"),
+                Component.literal("\u041e\u0442\u043c\u0435\u043d\u0430"),
+                confirmAction,
+                () -> { },
+                true,
+                true
+        ));
+    }
+
+    private void submitConfirmation(TabletAction action, ConfirmAction confirmAction, int targetTier, int price) {
+        if (TabletClientState.getCoins() < price) return;
+        int actionId = switch (confirmAction) {
+            case SHOP_PURCHASE -> action.actionId();
+            case BASE_UNLOCK -> TabletPacket.unlockBaseActionId(action.actionId());
+            case TIER_UPGRADE -> TabletPacket.upgradeActionId(action.actionId(), targetTier);
+        };
+        if (actionId >= 0) PacketHandler.sendToServer(new TabletPacket(actionId));
+    }
+
+    private int confirmationPrice(TabletAction action, ConfirmAction confirmAction, int targetTier) {
+        return switch (confirmAction) {
+            case SHOP_PURCHASE -> action.price();
+            case BASE_UNLOCK -> PlayerProgressManager.BASE_UNLOCK_COST;
+            case TIER_UPGRADE -> PlayerProgressManager.getUpgradeCost(targetTier);
+        };
+    }
+
+    private static String confirmationTitle(ConfirmAction confirmAction) {
+        return switch (confirmAction) {
+            case SHOP_PURCHASE -> "\u041a\u0443\u043f\u0438\u0442\u044c \u043a\u043b\u0430\u0441\u0441?";
+            case BASE_UNLOCK -> "\u041e\u0442\u043a\u0440\u044b\u0442\u044c \u043a\u043b\u0430\u0441\u0441?";
+            case TIER_UPGRADE -> "\u0423\u043b\u0443\u0447\u0448\u0438\u0442\u044c \u043a\u043b\u0430\u0441\u0441?";
+        };
     }
 
     private enum ConfirmAction {
@@ -1561,6 +1642,7 @@ public class TabletScreen extends Screen {
             int x = (this.width - UI_WIDTH) / 2;
             int y = (this.height - UI_HEIGHT) / 2;
             selectedColor = firstFreeClanColor(clan.id(), selectedColor);
+            ClanColorButton initialColorButton = null;
 
             for (int i = 0; i < ClanConstants.ALLOWED_COLORS.length; i++) {
                 int color = ClanConstants.ALLOWED_COLORS[i];
@@ -1573,6 +1655,7 @@ public class TabletScreen extends Screen {
                 );
                 colorButton.active = color != clan.color() && !isClanColorTaken(color, clan.id());
                 this.addRenderableWidget(colorButton);
+                if (initialColorButton == null && colorButton.active) initialColorButton = colorButton;
             }
 
             this.addRenderableWidget(new ConfirmTextureButton(
@@ -1592,6 +1675,7 @@ public class TabletScreen extends Screen {
                     }
             );
             this.addRenderableWidget(changeButton);
+            if (initialColorButton != null) setInitialFocus(initialColorButton);
         }
 
         @Override
@@ -1689,6 +1773,7 @@ public class TabletScreen extends Screen {
             );
             createButton.active = false;
             this.addRenderableWidget(createButton);
+            setInitialFocus(nameBox);
         }
 
         @Override
@@ -1739,12 +1824,13 @@ public class TabletScreen extends Screen {
         private boolean isValidInput() {
             String name = nameBox == null ? "" : nameBox.getValue().trim();
             String tag = tagBox == null ? "" : tagBox.getValue().trim();
-            return name.length() >= 3
-                    && name.length() <= ClanConstants.MAX_NAME_LENGTH
-                    && !tag.isBlank()
-                    && tag.length() <= ClanConstants.MAX_TAG_LENGTH
-                    && TabletClientState.getClans().size() < ClanConstants.MAX_CLANS
-                    && !isClanColorTaken(selectedColor, "");
+            return ClanCreateInputPolicy.isValid(
+                    name,
+                    tag,
+                    TabletClientState.getClans().size(),
+                    !isClanColorTaken(selectedColor, ""),
+                    TabletClientState.getCoins()
+            );
         }
 
         private void returnToTablet() {

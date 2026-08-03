@@ -3,11 +3,14 @@ package com.makar.tacticaltablet.client;
 import com.makar.tacticaltablet.core.TacticalTabletMod;
 import com.makar.tacticaltablet.tablet.net.PacketHandler;
 import com.makar.tacticaltablet.tablet.net.SpectatorCameraSwitchPacket;
+import com.makar.tacticaltablet.tablet.client.ui.TacticalTheme;
+import com.makar.tacticaltablet.tablet.client.ui.TacticalUi;
 
 import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.network.chat.Component;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.InputEvent;
 import net.minecraftforge.client.event.RegisterKeyMappingsEvent;
@@ -22,8 +25,6 @@ import org.lwjgl.glfw.GLFW;
 public final class SpectatorCameraClientEvents {
 
     private static final String CATEGORY = "key.categories.tacticaltablet";
-    private static final String LOCK_HINT =
-            "Режим наблюдателя · переключение между игроками: PageUp / PageDown";
     private static final KeyMapping NEXT_TARGET = new KeyMapping(
             "key.tacticaltablet.spectator_next",
             KeyConflictContext.IN_GAME,
@@ -107,20 +108,18 @@ public final class SpectatorCameraClientEvents {
             GuiGraphics graphics = event.getGuiGraphics();
             int screenWidth = event.getWindow().getGuiScaledWidth();
             int screenHeight = event.getWindow().getGuiScaledHeight();
-            int textWidth = minecraft.font.width(LOCK_HINT);
-            int x = screenWidth / 2;
-            int y = screenHeight - 40;
+            Component lockHint = Component.translatable("hud.tacticaltablet.spectator_hint");
+            int textWidth = minecraft.font.width(lockHint);
             int paddingX = 6;
             int paddingY = 4;
+            HudAnchorManager.Rect anchor = HudAnchorManager.spectatorHint(
+                    screenWidth, screenHeight, textWidth + paddingX * 2,
+                    minecraft.font.lineHeight + paddingY * 2);
 
-            graphics.fill(
-                    x - textWidth / 2 - paddingX,
-                    y - paddingY,
-                    x + textWidth / 2 + paddingX,
-                    y + minecraft.font.lineHeight + paddingY,
-                    0x66000000
-            );
-            graphics.drawCenteredString(minecraft.font, LOCK_HINT, x, y, 0xFFE6E6E6);
+            TacticalUi.drawCutCornerBorder(graphics, anchor.x(), anchor.y(), anchor.width(), anchor.height(),
+                    2, 1, TacticalTheme.BORDER, 0xB812181D);
+            graphics.drawCenteredString(minecraft.font, lockHint,
+                    anchor.x() + anchor.width() / 2, anchor.y() + paddingY, TacticalTheme.TEXT_PRIMARY);
         }
     }
 

@@ -30,12 +30,38 @@ class ContractTrackerScreenTest {
     @Test
     void rendersArrowheadWithTrianglePrimitive() throws IOException {
         String source = Files.readString(Path.of(
-                "src/main/java/com/makar/tacticaltablet/tablet/client/ContractTrackerScreen.java"));
+                "src/main/java/com/makar/tacticaltablet/tablet/client/ContractTrackerScreen.java"))
+                .replace("\r\n", "\n");
 
         assertTrue(source.contains("vertices.begin(VertexFormat.Mode.TRIANGLES, DefaultVertexFormat.POSITION_COLOR)"));
         assertTrue(source.contains("addVertex(vertices, matrix, (float) tipX, (float) tipY"));
         assertTrue(source.contains("addVertex(vertices, matrix, (float) rightX, (float) rightY"));
         assertTrue(source.contains("addVertex(vertices, matrix, (float) leftX, (float) leftY"));
+        assertTrue(source.contains("finally {\n            RenderSystem.setShader(GameRenderer::getPositionTexShader);"));
+    }
+
+    @Test
+    void scopesRadarClippingAndSupportsScrollableTargetSelection() throws IOException {
+        String source = Files.readString(Path.of(
+                "src/main/java/com/makar/tacticaltablet/tablet/client/ContractTrackerScreen.java"))
+                .replace("\r\n", "\n");
+
+        assertTrue(source.contains("try (ScissorScope ignored = ScissorScope.open("));
+        assertTrue(!source.contains("enableScissor("));
+        assertTrue(!source.contains("disableScissor("));
+        assertTrue(source.contains("TabletDataViewport.visibleRange(targets.size(), selectionScroll, 10)"));
+        assertTrue(source.contains("public boolean mouseScrolled("));
+    }
+
+    @Test
+    void scalesTheCompletePanelTextureIntoTheExistingUiLayout() throws IOException {
+        String source = Files.readString(Path.of(
+                "src/main/java/com/makar/tacticaltablet/tablet/client/ContractTrackerScreen.java"))
+                .replace("\r\n", "\n");
+
+        assertTrue(source.contains("GuiTextureRenderer.blitRegionWithAlpha("));
+        assertTrue(source.contains("PANEL_TEXTURE_WIDTH,\n                PANEL_TEXTURE_HEIGHT,\n"
+                + "                PANEL_TEXTURE_WIDTH,\n                PANEL_TEXTURE_HEIGHT,"));
     }
 
     private static void assertDirection(float yaw, double expectedX, double expectedY) {

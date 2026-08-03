@@ -2,6 +2,10 @@ package com.makar.tacticaltablet.tablet.client;
 
 /** Pure row-based geometry for the tablet action grid. */
 public final class ScrollableGridLayout {
+    public static final int LEFT = 0;
+    public static final int RIGHT = 1;
+    public static final int UP = 2;
+    public static final int DOWN = 3;
     public static final int COLUMNS = 2;
     public static final int VISIBLE_ROWS = 4;
     public static final int CARD_WIDTH = 130;
@@ -48,6 +52,29 @@ public final class ScrollableGridLayout {
         int clamped = clampScrollRows(scrollRows, itemCount);
         int row = rowForIndex(index);
         return row >= clamped && row < clamped + VISIBLE_ROWS;
+    }
+
+    public static int moveIndex(int current, int itemCount, int direction) {
+        if (itemCount <= 0) return -1;
+        int clamped = Math.max(0, Math.min(itemCount - 1, current));
+        int row = rowForIndex(clamped);
+        int column = columnForIndex(clamped);
+        return switch (direction) {
+            case LEFT -> column > 0 ? clamped - 1 : clamped;
+            case RIGHT -> column + 1 < COLUMNS && clamped + 1 < itemCount ? clamped + 1 : clamped;
+            case UP -> row > 0 ? clamped - COLUMNS : clamped;
+            case DOWN -> clamped + COLUMNS < itemCount ? clamped + COLUMNS : clamped;
+            default -> clamped;
+        };
+    }
+
+    public static int scrollRowsToReveal(int index, int scrollRows, int itemCount) {
+        if (index < 0 || index >= itemCount) return clampScrollRows(scrollRows, itemCount);
+        int next = clampScrollRows(scrollRows, itemCount);
+        int row = rowForIndex(index);
+        if (row < next) next = row;
+        if (row >= next + VISIBLE_ROWS) next = row - VISIBLE_ROWS + 1;
+        return clampScrollRows(next, itemCount);
     }
 
     public record Position(int x, int y) {

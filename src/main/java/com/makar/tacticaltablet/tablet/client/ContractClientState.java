@@ -3,7 +3,6 @@ package com.makar.tacticaltablet.tablet.client;
 import com.makar.tacticaltablet.tablet.net.ContractSelectionStatePacket;
 import com.makar.tacticaltablet.tablet.net.ContractTrackerStatePacket;
 
-import java.util.ArrayList;
 import java.util.List;
 
 public final class ContractClientState {
@@ -14,7 +13,7 @@ public final class ContractClientState {
     private static long cooldownEndsAtMs;
     private static boolean hasActiveContract;
     private static boolean contractsEnabled = true;
-    private static List<ContractSelectionStatePacket.TargetEntry> targets = new ArrayList<>();
+    private static List<ContractSelectionStatePacket.TargetEntry> targets = List.of();
 
     private static boolean trackerActive;
     private static int zoneCenterX;
@@ -23,7 +22,8 @@ public final class ContractClientState {
     private static int playerX;
     private static int playerZ;
     private static long signalEndsAtMs;
-    private static List<ContractTrackerStatePacket.TargetEntry> trackerTargets = new ArrayList<>();
+    private static List<ContractTrackerStatePacket.TargetEntry> trackerTargets = List.of();
+    private static long revision;
 
     private ContractClientState() {
     }
@@ -43,7 +43,8 @@ public final class ContractClientState {
         cooldownEndsAtMs = now + Math.max(0L, cooldownMs);
         hasActiveContract = hasContract;
         contractsEnabled = enabled;
-        targets = entries == null ? new ArrayList<>() : new ArrayList<>(entries);
+        targets = entries == null ? List.of() : List.copyOf(entries);
+        revision++;
     }
 
     public static void updateTracker(
@@ -64,7 +65,8 @@ public final class ContractClientState {
         playerX = selfX;
         playerZ = selfZ;
         signalEndsAtMs = now + Math.max(0, signalLeft) * 1000L;
-        trackerTargets = entries == null ? new ArrayList<>() : new ArrayList<>(entries);
+        trackerTargets = entries == null ? List.of() : List.copyOf(entries);
+        revision++;
     }
 
     public static boolean isSelectionActive() {
@@ -89,7 +91,7 @@ public final class ContractClientState {
     }
 
     public static List<ContractSelectionStatePacket.TargetEntry> getTargets() {
-        return List.copyOf(targets);
+        return targets;
     }
 
     public static boolean isTrackerActive() {
@@ -97,7 +99,11 @@ public final class ContractClientState {
     }
 
     public static List<ContractTrackerStatePacket.TargetEntry> getTrackerTargets() {
-        return List.copyOf(trackerTargets);
+        return trackerTargets;
+    }
+
+    public static long revision() {
+        return revision;
     }
 
     public static int getZoneCenterX() {

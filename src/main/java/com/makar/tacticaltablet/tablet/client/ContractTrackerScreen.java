@@ -5,6 +5,7 @@ import com.makar.tacticaltablet.tablet.net.ContractSelectionStatePacket;
 import com.makar.tacticaltablet.tablet.net.ContractTrackerStatePacket;
 import com.makar.tacticaltablet.tablet.net.PacketHandler;
 import com.makar.tacticaltablet.tablet.net.TrackerWatchPacket;
+import com.makar.tacticaltablet.tablet.client.ui.render.ScissorScope;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.BufferBuilder;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
@@ -34,9 +35,10 @@ public class ContractTrackerScreen extends Screen {
     private static final int PANEL_TEXTURE_HEIGHT = 350;
     private static final int MAP_SIZE = 148;
 
-    private int lastTargetCount = -1;
+    private long lastStateRevision = -1L;
     private boolean lastSelectionMode;
     private boolean watching;
+    private int selectionScroll;
 
     public ContractTrackerScreen() {
         super(Component.literal("Контрактный трекер"));
@@ -62,8 +64,7 @@ public class ContractTrackerScreen extends Screen {
     @Override
     public void tick() {
         boolean selectionMode = isSelectionMode();
-        int targetCount = ContractClientState.getTargets().size();
-        if (selectionMode != lastSelectionMode || targetCount != lastTargetCount) {
+        if (selectionMode != lastSelectionMode || ContractClientState.revision() != lastStateRevision) {
             rebuildSelectionButtons();
         }
     }
@@ -75,19 +76,28 @@ public class ContractTrackerScreen extends Screen {
         int x = (this.width - UI_WIDTH) / 2;
         int y = (this.height - UI_HEIGHT) / 2;
 
-        GuiTextureRenderer.blitWithAlpha(
+        GuiTextureRenderer.blitRegionWithAlpha(
                 g,
                 PANEL,
                 x,
                 y,
                 UI_WIDTH,
                 UI_HEIGHT,
+                0.0F,
+                0.0F,
                 PANEL_TEXTURE_WIDTH,
-                PANEL_TEXTURE_HEIGHT
+                PANEL_TEXTURE_HEIGHT,
+                PANEL_TEXTURE_WIDTH,
+                PANEL_TEXTURE_HEIGHT,
+                1.0F,
+                1.0F,
+                1.0F,
+                1.0F
         );
 
         if (!ContractClientState.isTrackerActive()) {
             drawSelection(g, x, y);
+            drawSelectionScrollbar(g, x, y);
             super.render(g, mouseX, mouseY, partialTick);
             return;
         }
@@ -128,17 +138,18 @@ public class ContractTrackerScreen extends Screen {
     private void rebuildSelectionButtons() {
         this.clearWidgets();
         lastSelectionMode = isSelectionMode();
-        lastTargetCount = ContractClientState.getTargets().size();
+        lastStateRevision = ContractClientState.revision();
 
         if (!lastSelectionMode) return;
 
         int x = (this.width - UI_WIDTH) / 2;
         int y = (this.height - UI_HEIGHT) / 2;
         List<ContractSelectionStatePacket.TargetEntry> targets = ContractClientState.getTargets();
-        int count = Math.min(8, targets.size());
+        TabletDataViewport.VisibleRange visible = TabletDataViewport.visibleRange(targets.size(), selectionScroll, 10);
+        selectionScroll = visible.startInclusive();
 
-        for (int i = 0; i < count; i++) {
-            ContractSelectionStatePacket.TargetEntry target = targets.get(i);
+        for (int i = 0; i < visible.size(); i++) {
+            ContractSelectionStatePacket.TargetEntry target = targets.get(visible.startInclusive() + i);
             this.addRenderableWidget(new TrackerTargetButton(x + 28, y + 78 + i * 19, 164, 16, target));
         }
     }
@@ -177,6 +188,37 @@ public class ContractTrackerScreen extends Screen {
         } else {
             g.drawCenteredString(font, "Выбери одну цель", x + UI_WIDTH / 2, cooldown > 0L ? y + 68 : y + 60, 0xFFCCCCCC);
         }
+    }
+
+    private void drawSelectionScrollbar(GuiGraphics graphics, int x, int y) {
+        if (!isSelectionMode()) return;
+        int maximum = Math.max(0, ContractClientState.getTargets().size() - 10);
+        if (maximum <= 0) return;
+        int height = 188;
+        graphics.fill(x + 196, y + 78, x + 199, y + 78 + height, 0x6618231C);
+        TabletDataViewport.Scrollbar scrollbar = TabletDataViewport.scrollbar(
+                height, selectionScroll, maximum, 18);
+        int thumbY = y + 78 + scrollbar.yOffset();
+        graphics.fill(x + 196, thumbY, x + 199, thumbY + scrollbar.height(), 0xFF72D68A);
+    }
+
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
+        if (isSelectionMode() && delta != 0.0D) {
+            int x = (this.width - UI_WIDTH) / 2;
+            int y = (this.height - UI_HEIGHT) / 2;
+            if (mouseX >= x + 24 && mouseX < x + 202 && mouseY >= y + 72 && mouseY < y + 272) {
+                int maximum = Math.max(0, ContractClientState.getTargets().size() - 10);
+                int next = Math.max(0, Math.min(maximum,
+                        selectionScroll - (int) Math.signum(delta)));
+                if (next != selectionScroll) {
+                    selectionScroll = next;
+                    rebuildSelectionButtons();
+                    return true;
+                }
+            }
+        }
+        return super.mouseScrolled(mouseX, mouseY, delta);
     }
 
     private void drawInfo(GuiGraphics g, int x, int y) {
@@ -228,8 +270,8 @@ public class ContractTrackerScreen extends Screen {
         for (ContractTrackerStatePacket.TargetEntry target : ContractClientState.getTrackerTargets()) {
             int targetX = toMapX(mapX, size, target.areaX());
             int targetY = toMapY(mapY, size, target.areaZ());
-            int targetRadius = Math.max(5, Math.min(18,
-                    Math.round(target.areaRadius() / (ContractClientState.getZoneRadius() * 2.0F) * size)));
+            int targetRadius = ContractRadarMapper.targetRadius(
+                    size, target.areaRadius(), ContractClientState.getZoneRadius());
             int fillColor = targetIndex % 2 == 0 ? 0x66FF2222 : 0x66FFD21F;
             int outlineColor = targetIndex % 2 == 0 ? 0xAAFF5555 : 0xAAFFFF55;
             drawFilledCircle(g, targetX, targetY, targetRadius, fillColor);
@@ -259,13 +301,10 @@ public class ContractTrackerScreen extends Screen {
         double directionY = directionY(yaw);
 
         g.flush();
-        g.enableScissor(mapX + 3, mapY + 3, mapX + size - 3, mapY + size - 3);
-        try {
+        try (ScissorScope ignored = ScissorScope.open(g, mapX + 3, mapY + 3, size - 6, size - 6)) {
             renderDirectionRay(g, playerX, playerY, directionX, directionY);
             renderPlayerTriangle(g, playerX, playerY, directionX, directionY);
             g.flush();
-        } finally {
-            g.disableScissor();
         }
     }
 
@@ -328,19 +367,23 @@ public class ContractTrackerScreen extends Screen {
 
         g.flush();
         RenderSystem.setShader(GameRenderer::getPositionColorShader);
-        Matrix4f matrix = g.pose().last().pose();
-        Tesselator tesselator = Tesselator.getInstance();
-        BufferBuilder vertices = tesselator.getBuilder();
-        vertices.begin(VertexFormat.Mode.TRIANGLES, DefaultVertexFormat.POSITION_COLOR);
+        try {
+            Matrix4f matrix = g.pose().last().pose();
+            Tesselator tesselator = Tesselator.getInstance();
+            BufferBuilder vertices = tesselator.getBuilder();
+            vertices.begin(VertexFormat.Mode.TRIANGLES, DefaultVertexFormat.POSITION_COLOR);
 
-        int alpha = color >>> 24;
-        int red = color >> 16 & 0xFF;
-        int green = color >> 8 & 0xFF;
-        int blue = color & 0xFF;
-        addVertex(vertices, matrix, (float) tipX, (float) tipY, red, green, blue, alpha);
-        addVertex(vertices, matrix, (float) rightX, (float) rightY, red, green, blue, alpha);
-        addVertex(vertices, matrix, (float) leftX, (float) leftY, red, green, blue, alpha);
-        tesselator.end();
+            int alpha = color >>> 24;
+            int red = color >> 16 & 0xFF;
+            int green = color >> 8 & 0xFF;
+            int blue = color & 0xFF;
+            addVertex(vertices, matrix, (float) tipX, (float) tipY, red, green, blue, alpha);
+            addVertex(vertices, matrix, (float) rightX, (float) rightY, red, green, blue, alpha);
+            addVertex(vertices, matrix, (float) leftX, (float) leftY, red, green, blue, alpha);
+            tesselator.end();
+        } finally {
+            RenderSystem.setShader(GameRenderer::getPositionTexShader);
+        }
     }
 
     private void drawQuad(
@@ -386,23 +429,21 @@ public class ContractTrackerScreen extends Screen {
     }
 
     static double directionX(float yaw) {
-        return -Math.sin(Math.toRadians(yaw));
+        return ContractRadarMapper.directionX(yaw);
     }
 
     static double directionY(float yaw) {
-        return Math.cos(Math.toRadians(yaw));
+        return ContractRadarMapper.directionY(yaw);
     }
 
     private int toMapX(int mapX, int size, int worldX) {
-        int minX = ContractClientState.getZoneCenterX() - ContractClientState.getZoneRadius();
-        int maxX = ContractClientState.getZoneCenterX() + ContractClientState.getZoneRadius();
-        return mapX + Math.round((worldX - minX) / (float) Math.max(1, maxX - minX) * size);
+        return ContractRadarMapper.coordinate(mapX, size, worldX,
+                ContractClientState.getZoneCenterX(), ContractClientState.getZoneRadius());
     }
 
     private int toMapY(int mapY, int size, int worldZ) {
-        int minZ = ContractClientState.getZoneCenterZ() - ContractClientState.getZoneRadius();
-        int maxZ = ContractClientState.getZoneCenterZ() + ContractClientState.getZoneRadius();
-        return mapY + Math.round((worldZ - minZ) / (float) Math.max(1, maxZ - minZ) * size);
+        return ContractRadarMapper.coordinate(mapY, size, worldZ,
+                ContractClientState.getZoneCenterZ(), ContractClientState.getZoneRadius());
     }
 
     private void drawRectOutline(GuiGraphics g, int x, int y, int w, int h, int color) {

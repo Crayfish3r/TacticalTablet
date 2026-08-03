@@ -55,7 +55,7 @@ public class ClientEvents {
         boolean mapVoting = TabletClientState.getMatchPhase() == MatchPhase.MAP_VOTING
                 && MapVoteClientState.isActive();
 
-        if (mapVoting && !(current instanceof MapVotingScreen)) {
+        if (mapVoting && (current instanceof VotingScreen || current instanceof TeamSelectScreen)) {
             mc.setScreen(new MapVotingScreen());
             return;
         }

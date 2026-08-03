@@ -2,53 +2,63 @@ package com.makar.tacticaltablet.tablet.client;
 
 import com.makar.tacticaltablet.game.MatchPhase;
 import com.makar.tacticaltablet.game.team.TeamId;
+import com.makar.tacticaltablet.tablet.client.ui.TacticalLayout;
+import com.makar.tacticaltablet.tablet.client.ui.TacticalTheme;
+import com.makar.tacticaltablet.tablet.client.ui.TacticalUi;
+import com.makar.tacticaltablet.tablet.client.ui.widget.TacticalButton;
 import com.makar.tacticaltablet.tablet.net.JoinTeamPacket;
 import com.makar.tacticaltablet.tablet.net.PacketHandler;
-
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.client.resources.sounds.SimpleSoundInstance;
-import net.minecraft.client.sounds.SoundManager;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceLocation;
-import net.minecraft.sounds.SoundEvent;
+import org.lwjgl.glfw.GLFW;
 
-public class TeamSelectScreen extends Screen {
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
 
-    private static final ResourceLocation CLICK =
-            new ResourceLocation("tacticaltablet", "click");
-    private static final ResourceLocation HOVER =
-            new ResourceLocation("tacticaltablet", "hover");
-    private static final float GUI_SOUND_VOLUME = 0.0625F;
-
+public class TeamSelectScreen extends TacticalPhaseScreen {
     private static final int PANEL_W = 320;
     private static final int PANEL_H = 196;
-    private static final int TEAM_CARD_W = 138;
-    private static final int TEAM_CARD_H = 62;
-    private static final int TEAM_CARD_GAP_X = 8;
-    private static final int TEAM_CARD_GAP_Y = 8;
+    private static final int GAP = 8;
+    private static final int PENDING_TIMEOUT_TICKS = 60;
+
+    private final List<TeamButton> teamButtons = new ArrayList<>();
+    private TeamId pendingTeam;
+    private int pendingTicks;
+    private int timeoutMessageTicks;
 
     public TeamSelectScreen() {
-        super(Component.literal("Выбор команды"));
+        super(Component.translatable("screen.tacticaltablet.team_select.title"));
     }
 
     @Override
     protected void init() {
-        this.clearWidgets();
-
-        int x0 = (this.width - PANEL_W) / 2;
-        int y0 = (this.height - PANEL_H) / 2;
-        int startX = x0 + 18;
-        int startY = y0 + 48;
+        clearWidgets();
+        teamButtons.clear();
+        TacticalLayout.Rect panel = panelBounds(PANEL_W, PANEL_H);
+        int contentX = panel.x() + 18;
+        int contentWidth = Math.max(1, panel.width() - 36);
+        int cardWidth = Math.max(1, (contentWidth - GAP) / 2);
+        int gridTop = panel.y() + 43;
+        int gridBottom = Math.max(gridTop + 2, panel.bottom() - 25);
+        int cardHeight = Math.max(1, (gridBottom - gridTop - GAP) / 2);
 
         TeamId[] teams = TeamId.standardValues();
-        for (int i = 0; i < teams.length; i++) {
-            int x = startX + (i % 2) * (TEAM_CARD_W + TEAM_CARD_GAP_X);
-            int y = startY + (i / 2) * (TEAM_CARD_H + TEAM_CARD_GAP_Y);
-            this.addRenderableWidget(new TeamButton(x, y, teams[i]));
+        for (int index = 0; index < teams.length; index++) {
+            TeamButton button = new TeamButton(
+                    contentX + index % 2 * (cardWidth + GAP),
+                    gridTop + index / 2 * (cardHeight + GAP),
+                    cardWidth, cardHeight, teams[index]);
+            teamButtons.add(addRenderableWidget(button));
         }
+
+        TeamButton initial = teamButtons.stream()
+                .filter(button -> button.team.ordinal() == TabletClientState.getSelectedTeam())
+                .findFirst()
+                .orElseGet(() -> teamButtons.stream().filter(button -> button.active)
+                        .findFirst().orElse(teamButtons.get(0)));
+        setInitialFocus(initial);
     }
 
     @Override
@@ -60,143 +70,136 @@ public class TeamSelectScreen extends Screen {
         }
         if (phase != MatchPhase.TEAM_SELECT) {
             Minecraft.getInstance().setScreen(null);
+            return;
         }
-    }
-
-    @Override
-    public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
-        this.renderBackground(g);
-        g.fill(0, 0, this.width, this.height, 0x99000000);
-
-        int x = (this.width - PANEL_W) / 2;
-        int y = (this.height - PANEL_H) / 2;
-
-        drawPanel(g, x, y);
-
-        Minecraft minecraft = Minecraft.getInstance();
-        g.drawCenteredString(minecraft.font, "ВЫБОР КОМАНДЫ", x + PANEL_W / 2, y + 14, 0xFF66FF66);
-        g.drawCenteredString(
-                minecraft.font,
-                "Осталось: " + TabletClientState.getTeamSelectTimeLeft() + " сек.",
-                x + PANEL_W / 2,
-                y + 30,
-                0xFFFFFFFF
-        );
-        g.drawCenteredString(
-                minecraft.font,
-                "Выбери слот. Пустые места заполнит автобаланс.",
-                x + PANEL_W / 2,
-                y + PANEL_H - 16,
-                0xFFAAAAAA
-        );
-
-        super.render(g, mouseX, mouseY, partialTick);
-    }
-
-    @Override
-    public boolean shouldCloseOnEsc() {
-        return false;
-    }
-
-    @Override
-    public boolean isPauseScreen() {
-        return false;
-    }
-
-    private static void drawPanel(GuiGraphics g, int x, int y) {
-        g.fill(x + 4, y + 4, x + PANEL_W + 4, y + PANEL_H + 4, 0x66000000);
-        g.fill(x, y, x + PANEL_W, y + PANEL_H, 0xEB080E0A);
-        g.fill(x + 1, y + 1, x + PANEL_W - 1, y + 3, 0xFF5CFF70);
-        g.fill(x + 1, y + PANEL_H - 3, x + PANEL_W - 1, y + PANEL_H - 1, 0xFF5CFF70);
-        g.fill(x + 1, y + 1, x + 3, y + PANEL_H - 1, 0xFF5CFF70);
-        g.fill(x + PANEL_W - 3, y + 1, x + PANEL_W - 1, y + PANEL_H - 1, 0xFF5CFF70);
-        g.fill(x + 6, y + 6, x + PANEL_W - 6, y + PANEL_H - 6, 0x33122014);
-    }
-
-    private static void playSound(ResourceLocation sound) {
-        Minecraft.getInstance().getSoundManager().play(
-                SimpleSoundInstance.forUI(
-                        SoundEvent.createVariableRangeEvent(sound),
-                        1.0F,
-                        GUI_SOUND_VOLUME
-                )
-        );
-    }
-
-    private static String fitName(Minecraft minecraft, String name, int maxWidth) {
-        if (minecraft.font.width(name) <= maxWidth) return name;
-
-        String suffix = "...";
-        int suffixWidth = minecraft.font.width(suffix);
-        String result = name;
-        while (!result.isEmpty() && minecraft.font.width(result) + suffixWidth > maxWidth) {
-            result = result.substring(0, result.length() - 1);
-        }
-        return result.isEmpty() ? suffix : result + suffix;
-    }
-
-    private static class TeamButton extends Button {
-
-        private final TeamId team;
-        private boolean wasHovered;
-
-        private TeamButton(int x, int y, TeamId team) {
-            super(Button.builder(Component.literal(team.displayName()), button -> {}).bounds(x, y, TEAM_CARD_W, TEAM_CARD_H));
-            this.team = team;
-        }
-
-        @Override
-        public void onPress() {
-            playSound(CLICK);
-            PacketHandler.sendToServer(new JoinTeamPacket(team));
-        }
-
-        @Override
-        public void playDownSound(SoundManager soundManager) {
-        }
-
-        @Override
-        public void renderWidget(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
-            boolean hover = this.isMouseOver(mouseX, mouseY);
-            boolean selected = TabletClientState.getSelectedTeam() == team.ordinal();
-
-            if (hover && !wasHovered) {
-                playSound(HOVER);
+        if (pendingTeam != null) {
+            pendingTicks++;
+            if (TabletClientState.getSelectedTeam() == pendingTeam.ordinal()) clearPending();
+            else if (pendingTicks >= PENDING_TIMEOUT_TICKS) {
+                clearPending();
+                timeoutMessageTicks = PENDING_TIMEOUT_TICKS;
             }
-            wasHovered = hover;
+        }
+        if (timeoutMessageTicks > 0) timeoutMessageTicks--;
+    }
 
-            int border = selected ? 0xFFFFFFFF : team.textColor();
-            int bg = selected ? 0xCC1A2E1A : hover ? 0xCC162316 : 0xCC101810;
+    @Override
+    protected void renderPhase(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+        TacticalLayout.Rect panel = panelBounds(PANEL_W, PANEL_H);
+        TacticalUi.drawPanel(graphics, panel.x(), panel.y(), panel.width(), panel.height());
+        TacticalUi.drawAccentBar(graphics, panel.x() + TacticalTheme.SPACING_LARGE,
+                panel.y() + 11, 18, TacticalTheme.ACCENT);
+        graphics.drawString(font, Component.translatable("screen.tacticaltablet.team_select.heading"),
+                panel.x() + 21, panel.y() + 12, TacticalTheme.TEXT_PRIMARY, false);
+        graphics.drawString(font, Component.translatable("screen.tacticaltablet.team_select.time",
+                        TabletClientState.getTeamSelectTimeLeft()),
+                panel.x() + 21, panel.y() + 27, TacticalTheme.TEXT_SECONDARY, false);
 
-            g.fill(getX(), getY(), getX() + width, getY() + height, bg);
-            g.fill(getX(), getY(), getX() + width, getY() + 1, border);
-            g.fill(getX(), getY() + height - 1, getX() + width, getY() + height, border);
-            g.fill(getX(), getY(), getX() + 1, getY() + height, border);
-            g.fill(getX() + width - 1, getY(), getX() + width, getY() + height, border);
+        Component footer = pendingTeam != null
+                ? Component.translatable("screen.tacticaltablet.common.awaiting_server")
+                : timeoutMessageTicks > 0
+                ? Component.translatable("screen.tacticaltablet.common.server_timeout")
+                : Component.translatable("screen.tacticaltablet.team_select.hint");
+        int color = pendingTeam != null ? TacticalTheme.WARNING
+                : timeoutMessageTicks > 0 ? TacticalTheme.DANGER : TacticalTheme.TEXT_SECONDARY;
+        graphics.drawCenteredString(font, footer, panel.x() + panel.width() / 2, panel.bottom() - 17, color);
+        renderDefaultWidgets(graphics, mouseX, mouseY, partialTick);
+    }
 
-            Minecraft minecraft = Minecraft.getInstance();
-            g.drawCenteredString(
-                    minecraft.font,
-                    team.displayName(),
-                    getX() + width / 2,
-                    getY() + 5,
-                    team.textColor()
-            );
+    @Override
+    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (super.keyPressed(keyCode, scanCode, modifiers)) return true;
+        int direction = switch (keyCode) {
+            case GLFW.GLFW_KEY_LEFT -> VotingGridLayout.LEFT;
+            case GLFW.GLFW_KEY_RIGHT -> VotingGridLayout.RIGHT;
+            case GLFW.GLFW_KEY_UP -> VotingGridLayout.UP;
+            case GLFW.GLFW_KEY_DOWN -> VotingGridLayout.DOWN;
+            default -> -1;
+        };
+        if (direction < 0 || teamButtons.isEmpty()) return false;
+        int current = teamButtons.indexOf(getFocused());
+        int next = VotingGridLayout.moveIndex(current, teamButtons.size(), 2, direction);
+        setFocused(teamButtons.get(next));
+        return true;
+    }
 
+    private void submit(TeamId team) {
+        if (pendingTeam != null || isFull(team) && TabletClientState.getSelectedTeam() != team.ordinal()) return;
+        playClick();
+        pendingTeam = team;
+        pendingTicks = 0;
+        timeoutMessageTicks = 0;
+        PacketHandler.sendToServer(new JoinTeamPacket(team));
+    }
+
+    private void clearPending() {
+        pendingTeam = null;
+        pendingTicks = 0;
+    }
+
+    private static int occupiedSlots(TeamId team) {
+        int occupied = 0;
+        for (int slot = 0; slot < Math.max(1, TabletClientState.getTeamSlotSize()); slot++) {
+            if (!TabletClientState.getTeamSlotName(team.ordinal(), slot).isBlank()) occupied++;
+        }
+        return occupied;
+    }
+
+    private static boolean isFull(TeamId team) {
+        return occupiedSlots(team) >= Math.max(1, TabletClientState.getTeamSlotSize());
+    }
+
+    private static Component teamName(TeamId team) {
+        return Component.translatable("screen.tacticaltablet.team_select.team."
+                + team.name().toLowerCase(Locale.ROOT));
+    }
+
+    private final class TeamButton extends TacticalButton {
+        private final TeamId team;
+
+        private TeamButton(int x, int y, int width, int height, TeamId team) {
+            super(x, y, width, height, teamName(team), ignored -> submit(team));
+            this.team = team;
+            selectedWhen(() -> TabletClientState.getSelectedTeam() == team.ordinal());
+            withAccentColor(team.textColor());
+            withFocusKey("team_select." + team.name().toLowerCase(Locale.ROOT));
+            onHover(TacticalPhaseScreen::playHover);
+            active = !isFull(team) || TabletClientState.getSelectedTeam() == team.ordinal();
+        }
+
+        @Override
+        protected void renderContent(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
             int slots = Math.max(1, TabletClientState.getTeamSlotSize());
-            for (int i = 0; i < slots; i++) {
-                String name = TabletClientState.getTeamSlotName(team.ordinal(), i);
-                boolean empty = name == null || name.isBlank();
-                String label = empty ? "[ пусто ]" : fitName(minecraft, name, width - 20);
-                int color = empty ? 0xFF777777 : 0xFFE6E6E6;
-                g.drawString(
-                        minecraft.font,
-                        label,
-                        getX() + 10,
-                        getY() + 18 + i * 8,
-                        color,
-                        false
-                );
+            int occupied = occupiedSlots(team);
+            boolean selected = TabletClientState.getSelectedTeam() == team.ordinal();
+            active = pendingTeam == null && (!isFull(team) || selected);
+            setMessage(Component.translatable("screen.tacticaltablet.team_select.option_narration",
+                    teamName(team), occupied, slots));
+
+            int titleColor = active ? team.textColor() : TacticalTheme.TEXT_DISABLED;
+            graphics.drawString(font, teamName(team), getX() + 8, getY() + 6, titleColor, false);
+            Component occupancy = isFull(team) && !selected
+                    ? Component.translatable("screen.tacticaltablet.team_select.full")
+                    : Component.translatable("screen.tacticaltablet.team_select.occupancy", occupied, slots);
+            graphics.drawString(font, occupancy, getX() + 8, getY() + 18,
+                    active ? TacticalTheme.TEXT_SECONDARY : TacticalTheme.TEXT_DISABLED, false);
+
+            int availableLines = Math.max(0, (height - 31) / 9);
+            int rendered = 0;
+            for (int slot = 0; slot < slots && rendered < availableLines; slot++) {
+                String name = TabletClientState.getTeamSlotName(team.ordinal(), slot);
+                if (name.isBlank()) continue;
+                int remainingOccupied = occupied - rendered;
+                if (rendered == availableLines - 1 && remainingOccupied > 1) {
+                    graphics.drawString(font, Component.translatable("screen.tacticaltablet.team_select.more",
+                                    remainingOccupied),
+                            getX() + 8, getY() + 30 + rendered * 9, TacticalTheme.TEXT_DISABLED, false);
+                    break;
+                }
+                String fitted = font.plainSubstrByWidth(name, Math.max(1, width - 16));
+                graphics.drawString(font, fitted, getX() + 8, getY() + 30 + rendered * 9,
+                        TacticalTheme.TEXT_SECONDARY, false);
+                rendered++;
             }
         }
     }

@@ -14,7 +14,7 @@ import java.util.Objects;
 import java.util.function.BooleanSupplier;
 
 /** A vanilla-compatible button with a fully programmatic tactical appearance. */
-public class TacticalButton extends Button {
+public class TacticalButton extends Button implements FocusKeyProvider {
     private static final Component ELLIPSIS = Component.literal("\u2026");
 
     private final OnPress action;
@@ -31,6 +31,7 @@ public class TacticalButton extends Button {
     private Component cachedMessage = Component.empty();
     private Component cachedDisplayMessage = Component.empty();
     private int cachedTextWidth = -1;
+    private String focusKey = "";
 
     public TacticalButton(int x, int y, int width, int height, Component message, OnPress action) {
         super(Button.builder(message, ignored -> { }).bounds(x, y, width,
@@ -71,6 +72,16 @@ public class TacticalButton extends Button {
         return this;
     }
 
+    public TacticalButton withFocusKey(String focusKey) {
+        this.focusKey = Objects.requireNonNull(focusKey, "focusKey");
+        return this;
+    }
+
+    @Override
+    public String focusKey() {
+        return focusKey;
+    }
+
     @Override
     public void onPress() {
         if (active) action.onPress(this);
@@ -90,6 +101,20 @@ public class TacticalButton extends Button {
     }
 
     @Override
+    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        boolean handled = super.keyPressed(keyCode, scanCode, modifiers);
+        if (handled && active) pressed = true;
+        return handled;
+    }
+
+    @Override
+    public boolean keyReleased(int keyCode, int scanCode, int modifiers) {
+        boolean handled = super.keyReleased(keyCode, scanCode, modifiers);
+        pressed = false;
+        return handled;
+    }
+
+    @Override
     public void renderWidget(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         boolean hovered = isMouseOver(mouseX, mouseY);
         boolean isSelected = selected.getAsBoolean();
@@ -98,11 +123,16 @@ public class TacticalButton extends Button {
 
         hoverAnimation.setTarget(hovered && active ? 1.0F : 0.0F);
         selectedAnimation.setTarget(isSelected && active ? 1.0F : 0.0F);
-        float delta = TacticalUi.frameDeltaSeconds();
-        hoverAnimation.update(delta);
-        selectedAnimation.update(delta);
+        if (TacticalUi.currentFrame().reducedMotion()) {
+            hoverAnimation.snapTo(hovered && active ? 1.0F : 0.0F);
+            selectedAnimation.snapTo(isSelected && active ? 1.0F : 0.0F);
+        } else {
+            float delta = TacticalUi.currentFrame().deltaSeconds();
+            hoverAnimation.update(delta);
+            selectedAnimation.update(delta);
+        }
 
-        TacticalUi.ControlState state = resolveState(hovered, isSelected);
+        TacticalUi.ControlVisualState state = resolveState(hovered, isSelected);
         TacticalUi.drawButton(graphics, getX(), getY(), width, height, state,
                 hoverAnimation.value(), selectedAnimation.value(), accentColor);
         if (accentBar && active) {
@@ -124,13 +154,18 @@ public class TacticalButton extends Button {
         return accentColor;
     }
 
-    private TacticalUi.ControlState resolveState(boolean hovered, boolean isSelected) {
-        if (!active) return TacticalUi.ControlState.DISABLED;
-        if (pressed && hovered) return TacticalUi.ControlState.PRESSED;
-        if (isSelected) return TacticalUi.ControlState.SELECTED;
-        if (isFocused()) return TacticalUi.ControlState.FOCUSED;
-        if (hovered) return TacticalUi.ControlState.HOVERED;
-        return TacticalUi.ControlState.NORMAL;
+    protected final boolean isSelectedState() {
+        return selected.getAsBoolean();
+    }
+
+    private TacticalUi.ControlVisualState resolveState(boolean hovered, boolean isSelected) {
+        return new TacticalUi.ControlVisualState(
+                active,
+                hovered,
+                isFocused(),
+                pressed && (hovered || isFocused()),
+                isSelected
+        );
     }
 
     private Component displayMessage(Font font, int availableWidth) {

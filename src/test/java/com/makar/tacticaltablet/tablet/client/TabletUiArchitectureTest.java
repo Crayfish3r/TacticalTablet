@@ -27,14 +27,15 @@ class TabletUiArchitectureTest {
     }
 
     @Test
-    void scrollGridIsWidgetFreeAndAlwaysReleasesScissor() throws IOException {
+    void scrollGridUsesFocusableWidgetsAndScopedClipping() throws IOException {
         String grid = source("ScrollableActionGrid.java");
 
-        assertFalse(grid.contains("extends Button"));
-        assertFalse(grid.contains("addRenderableWidget"));
-        assertTrue(grid.contains("try {"));
-        assertTrue(grid.contains("finally {"));
-        assertTrue(grid.contains("graphics.disableScissor()"));
+        assertTrue(grid.contains("extends Button implements FocusKeyProvider"));
+        assertTrue(grid.contains("Consumer<Button> widgetRegistrar"));
+        assertTrue(grid.contains("ScissorScope.open"));
+        assertTrue(grid.contains("ScrollableGridLayout.scrollRowsToReveal"));
+        assertFalse(grid.contains("graphics.disableScissor()"));
+        assertFalse(grid.contains("public boolean mouseClicked"));
     }
 
     @Test
@@ -60,7 +61,8 @@ class TabletUiArchitectureTest {
         assertTrue(cardBackground.contains("GuiTextureRenderer.blitWithAlpha"));
         assertFalse(cardBackground.contains("graphics.fill"));
 
-        assertTrue(navigation.contains("textures().select(true, selected, hovered)"));
+        assertTrue(navigation.contains("extends Button implements FocusKeyProvider"));
+        assertTrue(navigation.contains("item.textures().select(active, selected, hovered || isFocused())"));
         assertTrue(navigation.contains("GuiTextureRenderer.blitWithAlpha"));
         assertFalse(navigation.contains("graphics.fill"));
 
@@ -89,7 +91,8 @@ class TabletUiArchitectureTest {
         int finallyBlock = renderer.indexOf("} finally {");
         int resetColor = renderer.indexOf("graphics.setColor(1.0F, 1.0F, 1.0F, 1.0F);");
 
-        assertTrue(renderer.contains("withQueryFreeAlphaBlend(graphics, () ->"));
+        assertTrue(renderer.contains("withImplicitAlphaBlend(graphics, () ->"));
+        assertTrue(renderer.contains("try (AlphaBlendScope ignored = openAlphaBlend(graphics))"));
         assertTrue(renderer.contains("BLEND_STATES.get().push(BlendState.capture())"));
         assertTrue(renderer.contains("RenderSystem.defaultBlendFunc();"));
         assertTrue(renderer.contains("RenderSystem.blendFuncSeparate("));
@@ -101,12 +104,12 @@ class TabletUiArchitectureTest {
         assertTrue(finallyBlock < resetColor);
         assertFalse(renderer.contains("GameRenderer::getPositionTexShader"));
 
-        String perBlitPath = renderer.substring(
-                renderer.indexOf("private static void withQueryFreeAlphaBlend"),
+        String implicitPath = renderer.substring(
+                renderer.indexOf("private static void withImplicitAlphaBlend"),
                 renderer.indexOf("public static void withAlphaBlend")
         );
-        assertFalse(perBlitPath.contains("glIsEnabled"));
-        assertFalse(perBlitPath.contains("glGetInteger"));
+        assertFalse(implicitPath.contains("RenderSystem.disableBlend()"));
+        assertTrue(renderer.contains("public static final class AlphaBlendScope implements AutoCloseable"));
     }
 
     @Test
@@ -165,12 +168,16 @@ class TabletUiArchitectureTest {
         assertTrue(button.contains("extends Button"));
         assertTrue(iconButton.contains("extends TacticalButton"));
         assertTrue(textField.contains("extends EditBox"));
+        assertTrue(textField.contains("ScissorScope.open("));
+        assertFalse(textField.contains("enableScissor("));
         assertTrue(card.contains("extends Button"));
         assertTrue(dialog.contains("extends Screen"));
-        assertTrue(tacticalUi.contains("finally"));
-        assertTrue(tacticalUi.contains("graphics.disableScissor()"));
+        assertTrue(tacticalUi.contains("ScissorScope.open"));
+        assertTrue(tacticalUi.contains("ThreadLocal<Deque<UiFrameContext>>"));
 
-        assertTrue(screen.contains("TacticalUi.beginFrame()"));
+        assertTrue(screen.contains("TacticalUi.openFrame("));
+        assertTrue(screen.contains("GuiTextureRenderer.openAlphaBlend(g)"));
+        assertFalse(screen.contains("RenderSystem.disableScissor()"));
         assertTrue(screen.contains("TacticalUi.drawPanel"));
         assertTrue(screen.contains("new TacticalTextField"));
         assertTrue(screen.contains("extends TacticalButton"));
@@ -179,8 +186,99 @@ class TabletUiArchitectureTest {
         for (String source : List.of(button, iconButton, textField, card, dialog, tacticalUi)) {
             assertFalse(source.contains("TODO"));
             assertFalse(source.contains("System.nanoTime"));
-            assertFalse(source.contains("new Thread"));
+            assertFalse(source.contains("new Thread("));
         }
+    }
+
+    @Test
+    void navigationRailParticipatesInVanillaFocusAndNarration() throws IOException {
+        String screen = source("TabletScreen.java");
+        String navigation = source("TabletNavigationRail.java");
+
+        assertTrue(screen.contains("navigationRail.initialize("));
+        assertTrue(screen.contains("this.addWidget(button)"));
+        assertTrue(screen.contains("navigationRail.moveFocus(keyCode, getFocused())"));
+        assertFalse(screen.contains("navigationRail.mouseClicked("));
+        assertTrue(navigation.contains("implements FocusKeyProvider"));
+        assertTrue(navigation.contains("TacticalUi.drawFocusRing"));
+    }
+
+    @Test
+    void actionGridParticipatesInVanillaFocusNarrationAndKeyboardNavigation() throws IOException {
+        String screen = source("TabletScreen.java");
+        String grid = source("ScrollableActionGrid.java");
+
+        assertTrue(screen.contains("actionGrid.initialize("));
+        assertTrue(screen.contains("actionGrid.moveFocus(keyCode, getFocused())"));
+        assertTrue(screen.contains("this::actionNarration"));
+        assertFalse(screen.contains("actionGrid.mouseClicked("));
+        assertTrue(grid.contains("setMessage(narration.apply(item))"));
+        assertTrue(grid.contains("TacticalUi.drawFocusRing"));
+    }
+
+    @Test
+    void profileAndClanViewportStateAreSeparatedFromTheMonolithicScreen() throws IOException {
+        String screen = source("TabletScreen.java");
+        String state = source("TabletPageState.java");
+        String viewport = source("TabletDataViewport.java");
+        String profile = source("TabletProfileView.java");
+
+        assertTrue(screen.contains("TabletPageState pageState"));
+        assertTrue(screen.contains("TabletProfileView.render"));
+        assertTrue(screen.contains("TabletDataViewport.visibleRange"));
+        assertFalse(screen.contains("private int infoScroll"));
+        assertFalse(screen.contains("private int clanScrollOffset"));
+        assertFalse(screen.contains("private int selectedClanIndex"));
+        assertTrue(state.contains("Map<String, Integer> offsets"));
+        assertTrue(viewport.contains("record VisibleRange"));
+        assertTrue(profile.contains("record Model"));
+        assertFalse(screen.contains("enableScissor"));
+        assertFalse(screen.contains("disableScissor"));
+    }
+
+    @Test
+    void tabletSteadyStateUsesReloadAwareResourcePresenceCache() throws IOException {
+        String screen = source("TabletScreen.java");
+        String maps = source("MapVotingScreen.java");
+        String cache = source("ClientResourcePresenceCache.java");
+
+        assertTrue(screen.contains("ClientResourcePresenceCache::exists"));
+        assertTrue(maps.contains("ClientResourcePresenceCache.exists(candidate)"));
+        assertFalse(screen.contains("getResource("));
+        assertFalse(maps.contains("getResource("));
+        assertTrue(cache.contains("ConcurrentHashMap"));
+        assertTrue(cache.contains("RegisterClientReloadListenersEvent"));
+        assertTrue(cache.contains("ignored -> clear()"));
+    }
+
+    @Test
+    void purchaseUnlockAndUpgradeUseTheSafeSharedDialog() throws IOException {
+        String screen = source("TabletScreen.java");
+        String dialog = Files.readString(CLIENT.resolve("ui/widget/TacticalDialog.java"));
+
+        assertTrue(screen.contains("showActionConfirmation"));
+        assertTrue(screen.contains("new TacticalDialog("));
+        assertFalse(screen.contains("new TabletConfirmScreen("));
+        assertTrue(dialog.contains("BooleanSupplier confirmEnabled"));
+        assertTrue(dialog.contains("confirmButton.active = confirmEnabled.getAsBoolean()"));
+    }
+
+    @Test
+    void clanActionsUsePermissionPolicyAndSafeSharedDialogs() throws IOException {
+        String screen = source("TabletScreen.java");
+        String policy = source("ClanPagePolicy.java");
+        String input = source("ClanCreateInputPolicy.java");
+
+        assertTrue(screen.contains("ClanPagePolicy.permissions("));
+        assertTrue(screen.contains("openClanCreateConfirmation"));
+        assertTrue(screen.contains("openClanJoinConfirmation"));
+        assertTrue(screen.contains("openClanConfirmation("));
+        assertFalse(screen.contains("new ClanCreateConfirmScreen("));
+        assertFalse(screen.contains("new ClanJoinConfirmScreen("));
+        assertFalse(screen.contains("new ClanSimpleConfirmScreen("));
+        assertTrue(screen.contains("setInitialFocus(nameBox)"));
+        assertTrue(policy.contains("record Permissions"));
+        assertTrue(input.contains("coins >= ClanConstants.CREATE_COST"));
     }
 
     private static void assertBlitsWithoutFill(String source, String startMarker, String endMarker) {

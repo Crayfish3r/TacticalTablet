@@ -2,58 +2,71 @@ package com.makar.tacticaltablet.tablet.client;
 
 import com.makar.tacticaltablet.game.MatchMode;
 import com.makar.tacticaltablet.game.MatchPhase;
+import com.makar.tacticaltablet.tablet.client.ui.TacticalLayout;
+import com.makar.tacticaltablet.tablet.client.ui.TacticalTheme;
+import com.makar.tacticaltablet.tablet.client.ui.TacticalUi;
+import com.makar.tacticaltablet.tablet.client.ui.widget.TacticalButton;
 import com.makar.tacticaltablet.tablet.net.PacketHandler;
 import com.makar.tacticaltablet.tablet.net.VoteModePacket;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.client.resources.sounds.SimpleSoundInstance;
-import net.minecraft.client.sounds.SoundManager;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.sounds.SoundEvent;
+import org.lwjgl.glfw.GLFW;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
-public class VotingScreen extends Screen {
-
-    public static final int PANEL_W = 220;
-    public static final int PANEL_H = 118;
+public class VotingScreen extends TacticalPhaseScreen {
+    public static final int PANEL_W = 284;
+    public static final int PANEL_H = 160;
     public static final String PANEL_TEXTURE_PATH = "assets/tacticaltablet/textures/gui/vote_panel.png";
 
     private static final ResourceLocation PANEL =
             new ResourceLocation("tacticaltablet", "textures/gui/vote_panel.png");
-    private static final ResourceLocation CLICK =
-            new ResourceLocation("tacticaltablet", "click");
-    private static final ResourceLocation HOVER =
-            new ResourceLocation("tacticaltablet", "hover");
-    private static final float GUI_SOUND_VOLUME = 0.0625F;
+    private static final int PANEL_TEXTURE_W = 220;
+    private static final int PANEL_TEXTURE_H = 118;
+    private static final int GAP = 6;
+    private static final int CARD_H = 38;
+    private static final int PENDING_TIMEOUT_TICKS = 60;
 
-    private static final int BUTTON_H = 26;
+    private final List<VoteButton> voteButtons = new ArrayList<>();
+    private MatchMode pendingMode;
+    private int pendingTicks;
+    private int timeoutMessageTicks;
 
     public VotingScreen() {
-        super(Component.literal("Голосование"));
+        super(Component.translatable("screen.tacticaltablet.voting.title"));
     }
 
     @Override
     protected void init() {
-        this.clearWidgets();
+        clearWidgets();
+        voteButtons.clear();
+        TacticalLayout.Rect panel = panelBounds(PANEL_W, PANEL_H);
+        int contentX = panel.x() + TacticalTheme.SPACING_LARGE;
+        int contentWidth = Math.max(1, panel.width() - TacticalTheme.SPACING_LARGE * 2);
+        int columns = VotingGridLayout.columnsFor(contentWidth, 112, GAP, MatchMode.values().length, 2);
+        int cardWidth = Math.max(1, (contentWidth - GAP * (columns - 1)) / columns);
+        int startY = panel.y() + 47;
 
-        List<MatchMode> modes = availableModes();
-        if (modes.isEmpty()) return;
-
-        int buttonW = buttonWidth(modes.size());
-        int gap = modes.size() >= 4 ? 5 : 8;
-        int totalW = buttonW * modes.size() + gap * (modes.size() - 1);
-        int x = (this.width - totalW) / 2;
-        int y = (this.height - PANEL_H) / 2 + 58;
-
-        for (int i = 0; i < modes.size(); i++) {
-            MatchMode mode = modes.get(i);
-            this.addRenderableWidget(new VoteButton(x + i * (buttonW + gap), y, buttonW, mode));
+        for (int index = 0; index < MatchMode.values().length; index++) {
+            MatchMode mode = MatchMode.values()[index];
+            VoteButton button = new VoteButton(
+                    contentX + index % columns * (cardWidth + GAP),
+                    startY + index / columns * (CARD_H + GAP),
+                    cardWidth,
+                    mode);
+            voteButtons.add(addRenderableWidget(button));
         }
+
+        VoteButton initial = voteButtons.stream()
+                .filter(button -> button.mode == TabletClientState.getSelectedVote())
+                .findFirst()
+                .orElseGet(() -> voteButtons.stream().filter(button -> button.active)
+                        .findFirst().orElse(voteButtons.get(0)));
+        setInitialFocus(initial);
     }
 
     @Override
@@ -65,138 +78,109 @@ public class VotingScreen extends Screen {
         }
         if (phase != MatchPhase.VOTING) {
             Minecraft.getInstance().setScreen(null);
+            return;
         }
-    }
-
-    @Override
-    public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
-        this.renderBackground(g);
-
-        int x = (this.width - PANEL_W) / 2;
-        int y = (this.height - PANEL_H) / 2;
-
-        GuiTextureRenderer.blitWithAlpha(g, PANEL, x, y, PANEL_W, PANEL_H, PANEL_W, PANEL_H);
-
-        Minecraft minecraft = Minecraft.getInstance();
-        g.drawCenteredString(minecraft.font, "ГОЛОСОВАНИЕ", x + PANEL_W / 2, y + 14, 0xFF66FF66);
-        g.drawCenteredString(
-                minecraft.font,
-                "Осталось: " + TabletClientState.getVoteTimeLeft() + " сек.",
-                x + PANEL_W / 2,
-                y + 30,
-                0xFFFFFFFF
-        );
-        g.drawCenteredString(
-                minecraft.font,
-                "Голос засчитывается после нажатия",
-                x + PANEL_W / 2,
-                y + 93,
-                0xFFAAAAAA
-        );
-
-        super.render(g, mouseX, mouseY, partialTick);
-    }
-
-    @Override
-    public boolean shouldCloseOnEsc() {
-        return false;
-    }
-
-    @Override
-    public boolean isPauseScreen() {
-        return false;
-    }
-
-    private static List<MatchMode> availableModes() {
-        List<MatchMode> modes = new ArrayList<>();
-        for (MatchMode mode : MatchMode.values()) {
-            if (TabletClientState.isVoteModeAvailable(mode)) {
-                modes.add(mode);
+        if (pendingMode != null) {
+            pendingTicks++;
+            if (TabletClientState.getSelectedVote() == pendingMode) clearPending();
+            else if (pendingTicks >= PENDING_TIMEOUT_TICKS) {
+                clearPending();
+                timeoutMessageTicks = PENDING_TIMEOUT_TICKS;
             }
         }
-        return modes;
+        if (timeoutMessageTicks > 0) timeoutMessageTicks--;
     }
 
-    private static int buttonWidth(int count) {
-        if (count <= 2) return 78;
-        if (count == 3) return 58;
-        return 48;
+    @Override
+    protected void renderPhase(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+        TacticalLayout.Rect panel = panelBounds(PANEL_W, PANEL_H);
+        GuiTextureRenderer.blitRegionWithAlpha(graphics, PANEL, panel.x(), panel.y(), panel.width(), panel.height(),
+                0.0F, 0.0F, PANEL_TEXTURE_W, PANEL_TEXTURE_H, PANEL_TEXTURE_W, PANEL_TEXTURE_H,
+                1.0F, 1.0F, 1.0F, 1.0F);
+        TacticalUi.drawCutCornerBorder(graphics, panel.x(), panel.y(), panel.width(), panel.height(),
+                TacticalTheme.CORNER_CUT, TacticalTheme.BORDER_WIDTH, TacticalTheme.ACCENT_MUTED, 0x7A12181D);
+
+        graphics.drawString(font, Component.translatable("screen.tacticaltablet.voting.heading"),
+                panel.x() + TacticalTheme.SPACING_LARGE, panel.y() + 12, TacticalTheme.TEXT_PRIMARY, false);
+        graphics.drawString(font, Component.translatable("screen.tacticaltablet.voting.time",
+                        TabletClientState.getVoteTimeLeft()),
+                panel.x() + TacticalTheme.SPACING_LARGE, panel.y() + 27, TacticalTheme.TEXT_SECONDARY, false);
+
+        Component footer = pendingMode != null
+                ? Component.translatable("screen.tacticaltablet.common.awaiting_server")
+                : timeoutMessageTicks > 0
+                ? Component.translatable("screen.tacticaltablet.common.server_timeout")
+                : Component.translatable("screen.tacticaltablet.voting.hint");
+        int footerColor = pendingMode != null ? TacticalTheme.WARNING
+                : timeoutMessageTicks > 0 ? TacticalTheme.DANGER : TacticalTheme.TEXT_SECONDARY;
+        graphics.drawCenteredString(font, footer, panel.x() + panel.width() / 2,
+                panel.bottom() - 16, footerColor);
+        renderDefaultWidgets(graphics, mouseX, mouseY, partialTick);
     }
 
-    private static String shortLabel(MatchMode mode) {
-        return switch (mode) {
-            case SOLO -> "СОЛО";
-            case DUO -> "ДУО";
-            case TRIO -> "ТРИО";
-            case SQUADS -> "ОТРЯДЫ";
+    @Override
+    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (super.keyPressed(keyCode, scanCode, modifiers)) return true;
+        int direction = switch (keyCode) {
+            case GLFW.GLFW_KEY_LEFT -> VotingGridLayout.LEFT;
+            case GLFW.GLFW_KEY_RIGHT -> VotingGridLayout.RIGHT;
+            case GLFW.GLFW_KEY_UP -> VotingGridLayout.UP;
+            case GLFW.GLFW_KEY_DOWN -> VotingGridLayout.DOWN;
+            default -> -1;
         };
+        if (direction < 0 || voteButtons.isEmpty()) return false;
+        int current = voteButtons.indexOf(getFocused());
+        int next = VotingGridLayout.moveIndex(current, voteButtons.size(), 2, direction);
+        setFocused(voteButtons.get(next));
+        return true;
     }
 
-    private static void playSound(ResourceLocation sound) {
-        Minecraft.getInstance().getSoundManager().play(
-                SimpleSoundInstance.forUI(
-                        SoundEvent.createVariableRangeEvent(sound),
-                        1.0F,
-                        GUI_SOUND_VOLUME
-                )
-        );
+    private void submit(MatchMode mode) {
+        if (pendingMode != null || !TabletClientState.isVoteModeAvailable(mode)) return;
+        playClick();
+        pendingMode = mode;
+        pendingTicks = 0;
+        timeoutMessageTicks = 0;
+        PacketHandler.sendToServer(new VoteModePacket(mode));
     }
 
-    private static class VoteButton extends Button {
+    private void clearPending() {
+        pendingMode = null;
+        pendingTicks = 0;
+    }
 
+    private static Component modeName(MatchMode mode) {
+        return Component.translatable("screen.tacticaltablet.voting.mode."
+                + mode.name().toLowerCase(Locale.ROOT));
+    }
+
+    private final class VoteButton extends TacticalButton {
         private final MatchMode mode;
-        private boolean wasHovered;
 
-        private VoteButton(int x, int y, int w, MatchMode mode) {
-            super(Button.builder(Component.literal(shortLabel(mode)), button -> {}).bounds(x, y, w, BUTTON_H));
+        private VoteButton(int x, int y, int width, MatchMode mode) {
+            super(x, y, width, CARD_H, modeName(mode), ignored -> submit(mode));
             this.mode = mode;
+            selectedWhen(() -> TabletClientState.getSelectedVote() == mode);
+            withFocusKey("voting.mode." + mode.name().toLowerCase(Locale.ROOT));
+            onHover(TacticalPhaseScreen::playHover);
+            active = TabletClientState.isVoteModeAvailable(mode);
         }
 
         @Override
-        public void onPress() {
-            playSound(CLICK);
-            PacketHandler.sendToServer(new VoteModePacket(mode));
-        }
-
-        @Override
-        public void playDownSound(SoundManager soundManager) {
-        }
-
-        @Override
-        public void renderWidget(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
-            boolean hover = this.isMouseOver(mouseX, mouseY);
-            boolean selected = TabletClientState.getSelectedVote() == mode;
-
-            if (hover && !wasHovered) {
-                playSound(HOVER);
+        protected void renderContent(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+            active = pendingMode == null && TabletClientState.isVoteModeAvailable(mode);
+            setMessage(Component.translatable("screen.tacticaltablet.voting.option_narration",
+                    modeName(mode), TabletClientState.getVoteCount(mode)));
+            int textColor = active ? TacticalTheme.TEXT_PRIMARY : TacticalTheme.TEXT_DISABLED;
+            graphics.drawString(font, modeName(mode), getX() + 8, getY() + 7, textColor, false);
+            Component count = Component.translatable("screen.tacticaltablet.voting.votes",
+                    TabletClientState.getVoteCount(mode));
+            graphics.drawString(font, count, getX() + 8, getY() + 21,
+                    active ? TacticalTheme.TEXT_SECONDARY : TacticalTheme.TEXT_DISABLED, false);
+            if (TabletClientState.getSelectedVote() == mode) {
+                graphics.drawString(font, Component.literal("✓"), getX() + width - 15, getY() + 14,
+                        TacticalTheme.ACCENT, false);
             }
-            wasHovered = hover;
-
-            int fill = selected ? 0xCC2E7D32 : hover ? 0xCC243824 : 0xCC101810;
-            int border = selected ? 0xFFFFFFFF : hover ? 0xFFE6FFE6 : 0xFF66FF66;
-            int titleColor = selected ? 0xFFFFFFFF : hover ? 0xFFFFFFFF : 0xFF66FF66;
-
-            g.fill(getX(), getY(), getX() + width, getY() + height, fill);
-            g.fill(getX(), getY(), getX() + width, getY() + 1, border);
-            g.fill(getX(), getY() + height - 1, getX() + width, getY() + height, border);
-            g.fill(getX(), getY(), getX() + 1, getY() + height, border);
-            g.fill(getX() + width - 1, getY(), getX() + width, getY() + height, border);
-
-            Minecraft minecraft = Minecraft.getInstance();
-            g.drawCenteredString(
-                    minecraft.font,
-                    shortLabel(mode),
-                    getX() + width / 2,
-                    getY() + 4,
-                    titleColor
-            );
-            g.drawCenteredString(
-                    minecraft.font,
-                    String.valueOf(TabletClientState.getVoteCount(mode)),
-                    getX() + width / 2,
-                    getY() + 15,
-                    selected ? 0xFFFFFFFF : 0xFFAAAAAA
-            );
         }
     }
 }

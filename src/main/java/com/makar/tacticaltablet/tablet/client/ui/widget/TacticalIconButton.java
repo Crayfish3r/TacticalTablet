@@ -29,8 +29,15 @@ public final class TacticalIconButton extends TacticalButton {
     }
 
     @Override
+    public TacticalIconButton withFocusKey(String focusKey) {
+        super.withFocusKey(focusKey);
+        return this;
+    }
+
+    @Override
     protected void renderContent(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
-        int tint = !active ? disabledTint : isMouseOver(mouseX, mouseY) || isFocused() ? hoverTint : normalTint;
+        int tint = !active ? disabledTint
+                : isMouseOver(mouseX, mouseY) || isFocused() || isSelectedState() ? hoverTint : normalTint;
         float red = (tint >> 16 & 0xFF) / 255.0F;
         float green = (tint >> 8 & 0xFF) / 255.0F;
         float blue = (tint & 0xFF) / 255.0F;

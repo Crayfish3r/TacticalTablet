@@ -4,6 +4,7 @@ import com.makar.tacticaltablet.tablet.client.GuiTextureRenderer;
 import com.makar.tacticaltablet.tablet.client.ui.TacticalTheme;
 import com.makar.tacticaltablet.tablet.client.ui.TacticalUi;
 import com.makar.tacticaltablet.tablet.client.ui.animation.AnimatedFloat;
+import com.makar.tacticaltablet.tablet.client.ui.render.ScissorScope;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
@@ -14,7 +15,7 @@ import java.util.Objects;
 import java.util.function.BooleanSupplier;
 
 /** Accessible, clickable card whose visual animation never changes its hitbox. */
-public final class TacticalCard extends Button {
+public final class TacticalCard extends Button implements FocusKeyProvider {
     private final Component title;
     private final Component subtitle;
     private final OnPress action;
@@ -23,6 +24,8 @@ public final class TacticalCard extends Button {
     private BooleanSupplier selected = () -> false;
     private TacticalIconButton.IconRegion icon;
     private int accentColor = TacticalTheme.ACCENT;
+    private boolean pressed;
+    private String focusKey = "";
 
     public TacticalCard(int x, int y, int width, int height, Component title, Component subtitle, OnPress action) {
         super(Button.builder(Objects.requireNonNull(title, "title"), ignored -> { }).bounds(x, y, width, height));
@@ -46,9 +49,46 @@ public final class TacticalCard extends Button {
         return this;
     }
 
+    public TacticalCard withFocusKey(String focusKey) {
+        this.focusKey = Objects.requireNonNull(focusKey, "focusKey");
+        return this;
+    }
+
+    @Override
+    public String focusKey() {
+        return focusKey;
+    }
+
     @Override
     public void onPress() {
         if (active) action.onPress(this);
+    }
+
+    @Override
+    public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        boolean handled = super.mouseClicked(mouseX, mouseY, button);
+        pressed = handled && button == 0;
+        return handled;
+    }
+
+    @Override
+    public boolean mouseReleased(double mouseX, double mouseY, int button) {
+        pressed = false;
+        return super.mouseReleased(mouseX, mouseY, button);
+    }
+
+    @Override
+    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        boolean handled = super.keyPressed(keyCode, scanCode, modifiers);
+        if (handled && active) pressed = true;
+        return handled;
+    }
+
+    @Override
+    public boolean keyReleased(int keyCode, int scanCode, int modifiers) {
+        boolean handled = super.keyReleased(keyCode, scanCode, modifiers);
+        pressed = false;
+        return handled;
     }
 
     @Override
@@ -56,12 +96,14 @@ public final class TacticalCard extends Button {
         boolean hovered = isMouseOver(mouseX, mouseY);
         boolean isSelected = selected.getAsBoolean();
         emphasis.setTarget(active && (hovered || isSelected || isFocused()) ? 1.0F : 0.0F);
-        emphasis.update(TacticalUi.frameDeltaSeconds());
+        if (TacticalUi.currentFrame().reducedMotion()) {
+            emphasis.snapTo(active && (hovered || isSelected || isFocused()) ? 1.0F : 0.0F);
+        } else {
+            emphasis.update(TacticalUi.currentFrame().deltaSeconds());
+        }
 
-        TacticalUi.ControlState state = !active ? TacticalUi.ControlState.DISABLED
-                : isSelected ? TacticalUi.ControlState.SELECTED
-                : isFocused() ? TacticalUi.ControlState.FOCUSED
-                : hovered ? TacticalUi.ControlState.HOVERED : TacticalUi.ControlState.NORMAL;
+        TacticalUi.ControlVisualState state = new TacticalUi.ControlVisualState(
+                active, hovered, isFocused(), pressed && (hovered || isFocused()), isSelected);
         int visualY = getY() - (hovered && active ? Math.round(emphasis.value()) : 0);
         TacticalUi.drawCard(graphics, getX(), visualY, width, height, state, accentColor, emphasis.value());
         TacticalUi.drawAccentBar(graphics, getX() + 2, visualY + 4, Math.max(0, height - 8), accentColor);
@@ -80,14 +122,12 @@ public final class TacticalCard extends Button {
         int textX = contentX;
         int titleY = visualY + Math.max(4, (height - font.lineHeight * 2 - 2) / 2);
         if (textWidth <= 0 || height <= 2) return;
-        graphics.enableScissor(contentX, visualY + 1, contentX + textWidth, visualY + height - 1);
-        try {
+        try (ScissorScope ignored = ScissorScope.open(
+                graphics, contentX, visualY + 1, textWidth, Math.max(1, height - 2))) {
             graphics.drawString(font, title, textX, titleY,
                     active ? TacticalTheme.TEXT_PRIMARY : TacticalTheme.TEXT_DISABLED, false);
             graphics.drawString(font, subtitle, textX, titleY + font.lineHeight + 2,
                     active ? TacticalTheme.TEXT_SECONDARY : TacticalTheme.TEXT_DISABLED, false);
-        } finally {
-            graphics.disableScissor();
         }
     }
 }

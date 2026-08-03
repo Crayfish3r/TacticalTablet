@@ -35,4 +35,20 @@ class ScrollableGridLayoutTest {
         assertTrue(ScrollableGridLayout.isVisible(8, 1, 40));
         assertTrue(ScrollableGridLayout.isVisible(39, 16, 40));
     }
+
+    @Test
+    void keyboardMovementPreservesGridGeometryAndStopsAtEdges() {
+        assertEquals(1, ScrollableGridLayout.moveIndex(0, 9, ScrollableGridLayout.RIGHT));
+        assertEquals(0, ScrollableGridLayout.moveIndex(0, 9, ScrollableGridLayout.LEFT));
+        assertEquals(6, ScrollableGridLayout.moveIndex(4, 9, ScrollableGridLayout.DOWN));
+        assertEquals(8, ScrollableGridLayout.moveIndex(8, 9, ScrollableGridLayout.DOWN));
+        assertEquals(6, ScrollableGridLayout.moveIndex(7, 9, ScrollableGridLayout.LEFT));
+    }
+
+    @Test
+    void focusedCardIsRevealedWithoutLosingScrollBounds() {
+        assertEquals(1, ScrollableGridLayout.scrollRowsToReveal(8, 0, 12));
+        assertEquals(2, ScrollableGridLayout.scrollRowsToReveal(10, 0, 12));
+        assertEquals(0, ScrollableGridLayout.scrollRowsToReveal(0, 2, 12));
+    }
 }
