@@ -23,68 +23,21 @@ import java.util.Map;
 
 public class ClassXPManager {
 
-    private static final String[] STANDARD_CLASSES = new String[]{
-            "stormtrooper",
-            "sniper",
-            "scout",
-            "droneoperator",
-            "machinegunner",
-            "mortarman",
-            "rpgtrooper"
-    };
-
-    private static final String[] SHOP_CLASSES = new String[]{
-            "boomguy",
-            "dream",
-            "tagilla",
-            "blackops",
-            "cowboy",
-            "solider",
-            "rebel",
-            "saboteur"
-    };
-
-    private static final String[] ALL_CLASSES = new String[]{
-            "stormtrooper",
-            "sniper",
-            "scout",
-            "droneoperator",
-            "machinegunner",
-            "mortarman",
-            "rpgtrooper",
-            "boomguy",
-            "dream",
-            "tagilla",
-            "blackops",
-            "cowboy",
-            "solider",
-            "rebel",
-            "saboteur"
-    };
-
     public static String[] getClasses() {
-        return ALL_CLASSES.clone();
+        return PlayerProgressManager.getAllClasses();
     }
 
     public static String[] getStandardClasses() {
-        return STANDARD_CLASSES.clone();
+        return PlayerProgressManager.getStandardClasses();
     }
 
     public static String[] getShopClasses() {
-        return SHOP_CLASSES.clone();
+        return PlayerProgressManager.getShopClasses();
     }
 
 
     public static boolean isStandardClass(String clazz) {
-        if (clazz == null || clazz.isBlank()) return false;
-
-        for (String standardClass : STANDARD_CLASSES) {
-            if (standardClass.equalsIgnoreCase(clazz.trim())) {
-                return true;
-            }
-        }
-
-        return false;
+        return PlayerProgressManager.isBaseProgressionClass(clazz);
     }
 
     public static int getXP(ServerPlayer player, String clazz) {
@@ -107,7 +60,7 @@ public class ClassXPManager {
     public static void addXPToAllClasses(ServerPlayer player, int amount) {
         if (player == null || amount <= 0) return;
 
-        for (String clazz : STANDARD_CLASSES) {
+        for (String clazz : PlayerProgressManager.getStandardClasses()) {
             PlayerProgressManager.addXP(player, clazz, applyBoost(player, amount));
         }
 
@@ -206,7 +159,7 @@ public class ClassXPManager {
     public static void reset(ServerPlayer player) {
         if (player == null) return;
 
-        for (String clazz : STANDARD_CLASSES) {
+        for (String clazz : PlayerProgressManager.getStandardClasses()) {
             PlayerProgressManager.setXP(player, clazz, 0);
         }
 

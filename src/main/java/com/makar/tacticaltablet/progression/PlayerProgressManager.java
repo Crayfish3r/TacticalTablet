@@ -61,66 +61,31 @@ public class PlayerProgressManager {
             "rpgtrooper"
     };
 
-    private static final String[] SHOP_CLASSES = new String[]{
-            "boomguy",
-            "dream",
-            "tagilla",
-            "blackops",
-            "cowboy",
-            "solider",
-            "rebel",
-            "saboteur"
-    };
+    private static final String[] SHOP_CLASSES = ShopClassCatalog.entries().stream()
+            .map(ShopClassCatalog.Entry::classKey)
+            .toArray(String[]::new);
 
     private static final String[] EXCLUSIVE_CLASSES = new String[]{
-            "killer",
-            "miniboss",
-            "shahed",
             "krot",
             "medic",
             "microwave",
             "railgunner"
     };
 
-    private static final String[] ALL_CLASSES = new String[]{
-            "stormtrooper",
-            "sniper",
-            "scout",
-            "droneoperator",
-            "machinegunner",
-            "mortarman",
-            "rpgtrooper",
-            "boomguy",
-            "dream",
-            "tagilla",
-            "blackops",
-            "cowboy",
-            "solider",
-            "rebel",
-            "saboteur"
-    };
+    private static final String[] ALL_CLASSES = java.util.stream.Stream.concat(
+                    java.util.Arrays.stream(BASE_CLASSES),
+                    java.util.Arrays.stream(SHOP_CLASSES))
+            .toArray(String[]::new);
 
-    private static final Map<String, Integer> SHOP_CLASS_PRICES = Map.of(
-            "boomguy", 500,
-            "dream", 500,
-            "tagilla", 750,
-            "blackops", 1000,
-            "cowboy", 100,
-            "solider", 50,
-            "rebel", 1000,
-            "saboteur", 1000
-    );
+    private static final Map<String, Integer> SHOP_CLASS_PRICES = ShopClassCatalog.entries().stream()
+            .collect(java.util.stream.Collectors.toUnmodifiableMap(
+                    ShopClassCatalog.Entry::classKey,
+                    ShopClassCatalog.Entry::price));
 
-    private static final Map<String, Integer> SHOP_CLASS_LEVELS = Map.of(
-            "boomguy", LEGEND_TIER,
-            "dream", LEGEND_TIER,
-            "tagilla", LEGEND_TIER,
-            "blackops", LEGEND_TIER,
-            "cowboy", EPIC_TIER,
-            "solider", BASIC_TIER,
-            "rebel", LEGEND_TIER,
-            "saboteur", LEGEND_TIER
-    );
+    private static final Map<String, Integer> SHOP_CLASS_LEVELS = ShopClassCatalog.entries().stream()
+            .collect(java.util.stream.Collectors.toUnmodifiableMap(
+                    ShopClassCatalog.Entry::classKey,
+                    entry -> entry.tier().id()));
 
     private static final int AUTOSAVE_INTERVAL_TICKS = 20 * 60;
     private static final int BACKUP_INTERVAL_TICKS = 20 * 60 * 30;
@@ -479,7 +444,7 @@ public class PlayerProgressManager {
         }
 
         if (isShopClass(normalizedClass)) {
-            return isClassPurchased(player, normalizedClass) ? getShopFixedLevel(normalizedClass) : BASIC_TIER;
+            return getShopFixedLevel(normalizedClass);
         }
 
         if (!isBaseClassUnlocked(player, normalizedClass)) {
@@ -1280,7 +1245,7 @@ public class PlayerProgressManager {
             String normalizedClass = normalizeClass(clazz);
             result.put(normalizedClass, MapSetManager.isCompetitiveSet()
                     ? BASIC_TIER
-                    : isClassPurchased(player, normalizedClass) ? getShopFixedLevel(normalizedClass) : BASIC_TIER);
+                    : getShopFixedLevel(normalizedClass));
         }
         return result;
     }
@@ -1393,7 +1358,7 @@ public class PlayerProgressManager {
             int level = isCompetitiveClassTierLadderActive()
                     ? isBaseProgressionClass(normalizedClass) ? getCurrentCompetitiveClassTier() : BASIC_TIER
                     : isShopClass(normalizedClass)
-                            ? progress.purchasedClasses.getOrDefault(normalizedClass, 0) > 0 ? getShopFixedLevel(normalizedClass) : BASIC_TIER
+                            ? getShopFixedLevel(normalizedClass)
                             : getStoredTier(progress, normalizedClass);
             result.put(normalizedClass, level);
         }

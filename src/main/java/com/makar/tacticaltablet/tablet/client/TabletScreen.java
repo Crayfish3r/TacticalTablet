@@ -1434,15 +1434,10 @@ public class TabletScreen extends Screen {
         }
 
         private int getShopTitleColor(TabletAction action) {
-            if (action.fixedLevel() >= 2) {
-                return 0xFFE7C76A;
-            }
-
-            if (action.fixedLevel() == 1) {
-                return 0xFFB266FF;
-            }
-
-            return 0xFF72D68A;
+            ClassTier tier = ClassButtonStyle.actualTier(
+                    action.fixedLevel(),
+                    TabletClientState.getClassTier(action.classKey()));
+            return ClassButtonStyle.color(tier);
         }
     }
 

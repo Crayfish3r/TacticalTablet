@@ -88,6 +88,39 @@ class ProgressRepositoryLoadSaveTest {
     }
 
     @Test
+    void transferredExclusivePurchaseSurvivesProfileLoadAsShopOwnership() throws Exception {
+        ProgressRepository.Configuration configuration = new ProgressRepository.Configuration(
+                11, 2000, Set.of("scout"), Set.of("scout"),
+                Set.of("killer", "miniboss", "shahed"), Set.of("krot"),
+                Set.of("scout", "killer", "miniboss", "shahed"));
+        try (ProgressRepository repository = new ProgressRepository(
+                temporaryRoot,
+                configuration,
+                ProgressRepositoryTestSupport.CLOCK,
+                new AtomicFileStore(),
+                ProgressRepository.RepositoryLog.noop(),
+                64)) {
+            repository.initialize();
+            Files.writeString(repository.playerFile("legacy-owner"), """
+                    {
+                      "dataVersion": 11,
+                      "name": "legacy-owner",
+                      "uuid": "123456781234123412341234567890ab",
+                      "classes": {},
+                      "classTiers": {},
+                      "purchasedClasses": {"killer": 1, "miniboss": 1, "shahed": 1}
+                    }
+                    """, StandardCharsets.UTF_8);
+
+            ProgressSnapshot.Data loaded = repository.loadByKey("legacy-owner").orElseThrow().data();
+
+            assertEquals(1, loaded.purchasedClasses().get("killer"));
+            assertEquals(1, loaded.purchasedClasses().get("miniboss"));
+            assertEquals(1, loaded.purchasedClasses().get("shahed"));
+        }
+    }
+
+    @Test
     void initializationMigratesUuidFilenameToExistingNameKey() throws Exception {
         String compactUuid = "123456781234123412341234567890ab";
         Path players = temporaryRoot.resolve("tacticaltablet_data/players");

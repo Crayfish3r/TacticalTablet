@@ -1,5 +1,7 @@
 package com.makar.tacticaltablet.tablet;
 
+import com.makar.tacticaltablet.progression.ClassTier;
+import com.makar.tacticaltablet.progression.ShopClassCatalog;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 
@@ -26,23 +28,23 @@ public final class ClassDefinitions {
             base("mortarman", "Миномётчик", 5, 5),
             base("rpgtrooper", "РПГ-боец", 9, 6),
 
-            shop("boomguy", "Подрывник", 4, 500, 2, 0),
-            shop("dream", "Дрим", 6, 500, 2, 1),
-            shop("tagilla", "Тагилла", 10, 750, 2, 2),
-            shop("blackops", "Спецназ", 11, 1000, 2, 3),
-            shop("cowboy", "Ковбой", 12, 100, 1, 4),
-            shop("solider", "Солдат", 13, 50, 0, 5),
-            shop("rebel", "Повстанец", 14, 1000, 2, 6),
-            shop("saboteur", "Диверсант", 15, 1000, 2, 7),
+            shop("solider", "Солдат", 13, 0),
+            shop("blackops", "Спецназ", 11, 1),
+            shop("rebel", "Повстанец", 14, 2),
+            shop("saboteur", "Диверсант", 15, 3),
+            shop("dream", "Дрим", 6, 4),
+            shop("shahed", "Шахед оп.", 18, 5),
+            shop("miniboss", "Мини-Босс", 17, 6),
+            shop("cowboy", "Ковбой", 12, 7),
+            shop("boomguy", "Подрывник", 4, 8),
+            shop("tagilla", "Тагилла", 10, 9),
+            shop("killer", "Киллер", 16, 10),
 
-            exclusive("killer", "Киллер", 16, 2, 0),
-            exclusive("miniboss", "Мини-Босс", 17, 2, 1),
-            exclusive("shahed", "Шахед оп.", 18, 2, 2),
-            exclusive("krot", "Крот", 19, 1, 3),
-            exclusive("marine", "Морпех", 20, 2, 4),
-            exclusive("medic", "Медик", 21, 2, 5),
-            exclusive("microwave", "Микровэйв", 22, 2, 6),
-            exclusive("railgunner", "Рэйл-ганнер", 23, 2, 7)
+            exclusive("krot", "Крот", 19, ClassTier.LEGEND.id(), 0),
+            exclusive("medic", "Медик", 21, ClassTier.LEGEND.id(), 1),
+            exclusive("microwave", "Микровэйв", 22, ClassTier.LEGEND.id(), 2),
+            exclusive("railgunner", "Рэйл-ганнер", 23, ClassTier.MONSTER.id(), 3),
+            exclusive("marine", "Морпех", 20, ClassTier.LEGEND.id(), 4)
     );
 
     private static final Map<Integer, ClassDefinition> BY_ACTION_ID;
@@ -99,8 +101,9 @@ public final class ClassDefinitions {
         return definition(classKey, name, ClassCategory.BASE, actionId, 0, -1, order);
     }
 
-    private static ClassDefinition shop(String classKey, String name, int actionId, int price, int tier, int order) {
-        return definition(classKey, name, ClassCategory.SHOP, actionId, price, tier, order);
+    private static ClassDefinition shop(String classKey, String name, int actionId, int order) {
+        ShopClassCatalog.Entry entry = ShopClassCatalog.byClassKey(classKey).orElseThrow();
+        return definition(classKey, name, ClassCategory.SHOP, actionId, entry.price(), entry.tier().id(), order);
     }
 
     private static ClassDefinition exclusive(String classKey, String name, int actionId, int tier, int order) {

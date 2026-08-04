@@ -72,14 +72,14 @@ class ExclusiveClassGrantPersistenceTest {
     @Test
     void failedPersistenceRestoresPreexistingXpValue() {
         Map<String, Integer> purchased = new HashMap<>();
-        Map<String, Integer> classes = new HashMap<>(Map.of("killer", 42));
+        Map<String, Integer> classes = new HashMap<>(Map.of("krot", 42));
 
         PlayerProgressManager.ExclusiveClassGrantResult result = PlayerProgressManager.grantExclusiveClassForPersistence(
-                purchased, classes, "killer", () -> false
+                purchased, classes, "krot", () -> false
         );
 
         assertEquals(PlayerProgressManager.ExclusiveClassGrantResult.SAVE_FAILED, result);
-        assertFalse(purchased.containsKey("killer"));
-        assertEquals(42, classes.get("killer"));
+        assertFalse(purchased.containsKey("krot"));
+        assertEquals(42, classes.get("krot"));
     }
 }

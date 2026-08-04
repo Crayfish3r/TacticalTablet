@@ -11,8 +11,8 @@ public enum ClassTier {
     BASIC(0, "basic", "BASIC", 0, 300, 0, ""),
     RARE(1, "rare", "RARE", 300, 800, 50, "_rare"),
     EPIC(2, "epic", "EPIC", 800, 1300, 100, "_epic"),
-    LEGEND(3, "legend", "LEGEND", 1300, 2000, 500, "_legend"),
-    MONSTER(4, "monster", "MONSTER", 2000, 2000, 1000, "_monster");
+    LEGEND(3, "legend", "LEGEND", 1300, 2000, 250, "_legend"),
+    MONSTER(4, "monster", "MONSTER", 2000, 2000, 500, "_monster");
 
     public static final int MAX_XP = MONSTER.xpCap;
 

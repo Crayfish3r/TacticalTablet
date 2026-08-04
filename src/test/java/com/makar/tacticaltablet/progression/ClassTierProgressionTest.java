@@ -31,7 +31,7 @@ class ClassTierProgressionTest {
         assertEquals(PlayerProgressManager.ProgressionResult.NOT_ENOUGH_XP,
                 PlayerProgressManager.evaluateTierUpgrade(2, 1299, 1000, 3));
         assertEquals(PlayerProgressManager.ProgressionResult.SUCCESS,
-                PlayerProgressManager.evaluateTierUpgrade(2, 1300, 500, 3));
+                PlayerProgressManager.evaluateTierUpgrade(2, 1300, 250, 3));
     }
 
     @Test
@@ -42,9 +42,11 @@ class ClassTierProgressionTest {
         assertResult(1, 799, 1000, 2, PlayerProgressManager.ProgressionResult.NOT_ENOUGH_XP);
         assertResult(1, 800, 100, 2, PlayerProgressManager.ProgressionResult.SUCCESS);
         assertResult(2, 1299, 1000, 3, PlayerProgressManager.ProgressionResult.NOT_ENOUGH_XP);
-        assertResult(2, 1300, 500, 3, PlayerProgressManager.ProgressionResult.SUCCESS);
+        assertResult(2, 1300, 249, 3, PlayerProgressManager.ProgressionResult.NOT_ENOUGH_COINS);
+        assertResult(2, 1300, 250, 3, PlayerProgressManager.ProgressionResult.SUCCESS);
         assertResult(3, 1999, 2000, 4, PlayerProgressManager.ProgressionResult.NOT_ENOUGH_XP);
-        assertResult(3, 2000, 1000, 4, PlayerProgressManager.ProgressionResult.SUCCESS);
+        assertResult(3, 2000, 499, 4, PlayerProgressManager.ProgressionResult.NOT_ENOUGH_COINS);
+        assertResult(3, 2000, 500, 4, PlayerProgressManager.ProgressionResult.SUCCESS);
         assertResult(4, 2000, 0, 4, PlayerProgressManager.ProgressionResult.MAX_TIER);
         assertResult(0, 2000, 2000, 2, PlayerProgressManager.ProgressionResult.WRONG_TIER);
         assertResult(0, 2000, 2000, 3, PlayerProgressManager.ProgressionResult.WRONG_TIER);

@@ -56,6 +56,16 @@ class ProgressionCharacterizationTest {
     }
 
     @Test
+    void tierUpgradeCostsChangeWithoutChangingXpThresholdsOrCaps() {
+        assertEquals(List.of(0, 50, 100, 250, 500),
+                Arrays.stream(ClassTier.values()).map(ClassTier::upgradeCost).toList());
+        assertEquals(List.of(0, 300, 800, 1300, 2000),
+                Arrays.stream(ClassTier.values()).map(ClassTier::requiredXp).toList());
+        assertEquals(List.of(300, 800, 1300, 2000, 2000),
+                Arrays.stream(ClassTier.values()).map(ClassTier::xpCap).toList());
+    }
+
+    @Test
     void sameCreditReceiptIsAppliedOnceAndDifferentReceiptsBothApply() {
         TestState state = new TestState(10);
 

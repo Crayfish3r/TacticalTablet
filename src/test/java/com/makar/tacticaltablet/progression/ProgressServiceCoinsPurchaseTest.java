@@ -115,6 +115,28 @@ class ProgressServiceCoinsPurchaseTest {
     }
 
     @Test
+    void transferredExclusivePurchaseRemainsOwnedInShopCatalog() {
+        Map<String, Integer> prices = ShopClassCatalog.entries().stream().collect(
+                java.util.stream.Collectors.toUnmodifiableMap(
+                        ShopClassCatalog.Entry::classKey, ShopClassCatalog.Entry::price));
+        Map<String, Integer> tiers = ShopClassCatalog.entries().stream().collect(
+                java.util.stream.Collectors.toUnmodifiableMap(
+                        ShopClassCatalog.Entry::classKey, entry -> entry.tier().id()));
+        ProgressService currentService = new ProgressService(new ProgressCatalog(
+                Set.of("scout"), Set.of("scout"), prices, tiers,
+                Set.of("krot", "medic", "microwave", "railgunner"), 25));
+        TestMutableProgressState state = new TestMutableProgressState(2000);
+        state.purchase("killer", 1);
+
+        ProgressPurchaseResult result = currentService.purchaseClass(
+                state, "killer", ProgressContext.standard());
+
+        assertEquals(ProgressPurchaseResult.Failure.ALREADY_OWNED, result.failure());
+        assertEquals(2000, state.coins());
+        assertEquals(new ProgressEntry(true, 1), state.purchase("killer"));
+    }
+
+    @Test
     void externalSynchronizedBoundaryAllowsOnlyOneConcurrentPurchase() throws Exception {
         TestMutableProgressState state = new TestMutableProgressState(100);
         Object facadeLock = new Object();

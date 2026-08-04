@@ -13,7 +13,7 @@ import net.minecraft.server.level.ServerPlayer;
 public class RespawnControlManager {
 
     private static final int XP_PER_UNUSED_LIFE = 10;
-    private static final int COINS_PER_UNUSED_LIFE = 2;
+    private static final int COINS_PER_UNUSED_LIFE = 10;
 
     private static boolean respawnsDisabled;
 
@@ -46,11 +46,11 @@ public class RespawnControlManager {
     public static void compensateUnusedLives(ServerPlayer player, int unusedLives) {
         if (player == null || unusedLives <= 0) return;
 
-        int cappedLives = Math.min(unusedLives, LivesManager.MAX_LIVES - 1);
-        if (cappedLives <= 0) return;
+        UnusedLifeReward reward = calculateUnusedLifeReward(unusedLives, LivesManager.MAX_LIVES);
+        if (reward.compensatedLives() <= 0) return;
 
-        int xpReward = cappedLives * XP_PER_UNUSED_LIFE;
-        int coinReward = cappedLives * COINS_PER_UNUSED_LIFE;
+        int xpReward = reward.xp();
+        int coinReward = reward.coins();
 
         PlayerProgressManager.addCoins(player, coinReward);
 
@@ -67,6 +67,17 @@ public class RespawnControlManager {
                 + "."));
         PlayerProgressManager.savePlayer(player);
         ClassXPManager.sync(player);
+    }
+
+    static UnusedLifeReward calculateUnusedLifeReward(int unusedLives, int maximumLives) {
+        int cappedLives = Math.max(0, Math.min(unusedLives, maximumLives - 1));
+        return new UnusedLifeReward(
+                cappedLives,
+                cappedLives * COINS_PER_UNUSED_LIFE,
+                cappedLives * XP_PER_UNUSED_LIFE);
+    }
+
+    record UnusedLifeReward(int compensatedLives, int coins, int xp) {
     }
 
     private static void eliminateWaitingPlayers(MinecraftServer server) {
