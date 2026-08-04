@@ -548,7 +548,7 @@ public final class TeamMatchManager {
 
     private static void configureTeam(TeamId teamId, PlayerTeam team) {
         team.setNameTagVisibility(Team.Visibility.HIDE_FOR_OTHER_TEAMS);
-        team.setDeathMessageVisibility(Team.Visibility.ALWAYS);
+        team.setDeathMessageVisibility(Team.Visibility.NEVER);
         team.setCollisionRule(Team.CollisionRule.ALWAYS);
         team.setAllowFriendlyFire(true);
         team.setSeeFriendlyInvisibles(false);

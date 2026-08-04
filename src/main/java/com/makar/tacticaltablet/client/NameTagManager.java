@@ -124,7 +124,7 @@ public final class NameTagManager {
 
     private static void configurePrivateTeam(PlayerTeam team) {
         team.setNameTagVisibility(Team.Visibility.NEVER);
-        team.setDeathMessageVisibility(Team.Visibility.ALWAYS);
+        team.setDeathMessageVisibility(Team.Visibility.NEVER);
         team.setCollisionRule(Team.CollisionRule.ALWAYS);
         team.setAllowFriendlyFire(true);
         team.setSeeFriendlyInvisibles(false);

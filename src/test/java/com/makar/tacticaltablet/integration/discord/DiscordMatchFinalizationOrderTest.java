@@ -30,10 +30,10 @@ class DiscordMatchFinalizationOrderTest {
                 < onDeath.indexOf("GameStateManager.checkForMatchEnd(victim.server)"));
         assertTrue(processDeath.contains("DiscordLeaderboardService.recordMatchDeath(victim)"));
         assertTrue(processDeath.contains("LivesManager.handleDeath(victim)"));
-        assertTrue(processDeath.contains("processKillerConsequences(victim, source, killer)"));
+        assertTrue(processDeath.contains("processKillerConsequences(victim, source, killer,"));
         assertTrue(processDeath.contains("ContractManager.onPlayerKilled(victim, killer)"));
         assertTrue(processDeath.indexOf("if (!victimWasPlaying)")
-                < processDeath.indexOf("processKillerConsequences(victim, source, killer)"));
+                < processDeath.indexOf("processKillerConsequences(victim, source, killer,"));
         assertTrue(!processDeath.contains("checkForMatchEnd"));
         assertTrue(!killerConsequences.contains("checkForMatchEnd"));
         assertTrue(killerConsequences.indexOf("DiscordLeaderboardService.recordMatchKill(killer)")

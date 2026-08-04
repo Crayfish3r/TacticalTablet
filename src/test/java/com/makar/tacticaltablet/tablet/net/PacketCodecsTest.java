@@ -40,4 +40,13 @@ class PacketCodecsTest {
         rejected.writeUtf("abcde", 5);
         assertThrows(RuntimeException.class, () -> rejected.readUtf(4));
     }
+
+    @Test
+    void killFeedPacketRoundTripsBoundedServerData() {
+        KillFeedPacket original = new KillFeedPacket("Killer", "Victim",
+                KillFeedPacket.Cause.BLEEDING, "tacz:ak47");
+        FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.buffer());
+        original.encode(buf);
+        assertEquals(original, new KillFeedPacket(buf));
+    }
 }

@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -46,5 +47,44 @@ class CombatAssistTrackerTest {
         assertTrue(tracker.claimDeath(victim, 100));
         assertFalse(tracker.claimDeath(victim, 100));
         assertTrue(tracker.claimDeath(victim, 101));
+    }
+
+    @Test
+    void twoDifferentVictimsCanBothDieInSameServerTick() {
+        CombatAssistTracker tracker = new CombatAssistTracker();
+        assertTrue(tracker.claimDeath(UUID.randomUUID(), 100));
+        assertTrue(tracker.claimDeath(UUID.randomUUID(), 100));
+    }
+
+    @Test
+    void duplicateDeathEventCannotRepeatAnyMatchSideEffect() {
+        CombatAssistTracker tracker = new CombatAssistTracker();
+        UUID victim = UUID.randomUUID();
+        AtomicInteger coins = new AtomicInteger();
+        AtomicInteger kills = new AtomicInteger();
+        AtomicInteger deaths = new AtomicInteger();
+        AtomicInteger assists = new AtomicInteger();
+        AtomicInteger corpses = new AtomicInteger();
+        AtomicInteger lives = new AtomicInteger();
+        AtomicInteger matchEnds = new AtomicInteger();
+
+        for (int duplicate = 0; duplicate < 2; duplicate++) {
+            if (!tracker.claimDeath(victim, 200)) continue;
+            coins.incrementAndGet();
+            kills.incrementAndGet();
+            deaths.incrementAndGet();
+            assists.incrementAndGet();
+            corpses.incrementAndGet();
+            lives.incrementAndGet();
+            matchEnds.incrementAndGet();
+        }
+
+        assertEquals(1, coins.get());
+        assertEquals(1, kills.get());
+        assertEquals(1, deaths.get());
+        assertEquals(1, assists.get());
+        assertEquals(1, corpses.get());
+        assertEquals(1, lives.get());
+        assertEquals(1, matchEnds.get());
     }
 }

@@ -282,6 +282,13 @@ public class ServerEvents {
         event.setCanceled(true);
     }
 
+    @SubscribeEvent(priority = EventPriority.LOWEST, receiveCanceled = true)
+    public static void onLivingAttackAttribution(LivingAttackEvent event) {
+        if (!(event.getEntity() instanceof ServerPlayer victim)) return;
+        CombatAttributionLedger.observeIncomingAttack(
+                victim, event.getSource(), event.getAmount(), event.isCanceled());
+    }
+
     @SubscribeEvent
     public static void onLivingHurt(LivingHurtEvent event) {
         if (!(event.getEntity() instanceof ServerPlayer player)) return;
@@ -338,10 +345,18 @@ public class ServerEvents {
         }
     }
 
+    @SubscribeEvent(priority = EventPriority.LOWEST, receiveCanceled = true)
+    public static void onLivingHurtAttribution(LivingHurtEvent event) {
+        if (!(event.getEntity() instanceof ServerPlayer victim)) return;
+        CombatAttributionLedger.observeOriginalDamage(
+                victim, event.getSource(), event.getAmount(), event.isCanceled());
+    }
+
     @SubscribeEvent
     public static void onLivingDamage(LivingDamageEvent event) {
         if (!(event.getEntity() instanceof ServerPlayer victim)) return;
         if (event.isCanceled()) {
+            CombatAttributionLedger.rejectAppliedDamage(victim, event.getSource());
             CombatAttributionDiagnostics.record(
                     MatchDamageDecision.Reason.ZERO_HEALTH_DAMAGE
             );
@@ -373,9 +388,12 @@ public class ServerEvents {
         CombatAttributionDiagnostics.record(decision);
 
         if (decision == MatchDamageDecision.Reason.ACCEPTED) {
+            CombatAttributionLedger.recordAppliedDamage(victim, event.getSource(), (float) actualHealthLost);
             DiscordLeaderboardService.recordMatchDamage(attacker, actualHealthLost);
             SetMatchRuntime.recordEffectivePvpDamage(attacker.getUUID(), attacker.getGameProfile().getName(),
                     victim.getUUID(), attacker.server.getTickCount());
+        } else {
+            CombatAttributionLedger.rejectAppliedDamage(victim, event.getSource());
         }
     }
 
@@ -462,13 +480,14 @@ public class ServerEvents {
 
         try {
             boolean participating = isActiveMatchParticipant(victim);
-            if (participating && !SetMatchRuntime.claimDeath(victim.getUUID(), victim.server.getTickCount())) return;
+            if (!SetMatchRuntime.claimDeath(victim.getUUID(), victim.server.getTickCount())) return;
             PlayerDeathFinalization.process(
                     participating,
                     () -> processPlayerDeath(victim, event.getSource()),
                     () -> GameStateManager.checkForMatchEnd(victim.server)
             );
         } finally {
+            CombatAttributionLedger.clear(victim.getUUID());
             long elapsedMs = (System.nanoTime() - started) / 1_000_000L;
             if (elapsedMs >= 10L) {
                 TacticalTabletMod.LOGGER.warn("[PERF] onDeath took {} ms victim={}", elapsedMs, victim.getGameProfile().getName());
@@ -501,6 +520,12 @@ public class ServerEvents {
         }
 
         ServerPlayer killer = ResponsiblePlayerResolver.resolve(source);
+        CombatAttributionLedger.Entry fallbackAttribution = null;
+        if (killer == null) {
+            fallbackAttribution = CombatAttributionLedger.findFresh(victim).orElse(null);
+            killer = CombatAttributionLedger.resolveFreshAttacker(victim);
+            if (killer == null) fallbackAttribution = null;
+        }
 
         DeathTransitionManager.recordDeath(victim, source);
         CorpseLootManager.createCorpse(victim);
@@ -516,10 +541,12 @@ public class ServerEvents {
         }
 
         try {
-            processKillerConsequences(victim, source, killer);
+            processKillerConsequences(victim, source, killer, fallbackAttribution != null);
         } finally {
             SetMatchRuntime.clearVictimAttribution(victim.getUUID());
         }
+
+        TacticalKillFeed.publish(victim, killer, source, fallbackAttribution);
 
         ContractManager.onPlayerKilled(victim, killer);
         ExtractionPointManager.onPlayerDeathOrLogout(victim);
@@ -529,7 +556,8 @@ public class ServerEvents {
         }
     }
 
-    private static void processKillerConsequences(ServerPlayer victim, DamageSource source, ServerPlayer killer) {
+    private static void processKillerConsequences(ServerPlayer victim, DamageSource source, ServerPlayer killer,
+                                                  boolean validFallbackAttribution) {
         Entity direct = source.getDirectEntity();
         boolean victimOwnedProjectile = direct instanceof Projectile projectile
                 && projectile.getOwner() != null
@@ -538,7 +566,7 @@ public class ServerEvents {
                 && TeamMatchManager.areTeammates(killer, victim);
         KillCreditPolicy.Outcome outcome = KillCreditPolicy.classify(
                 killer != null,
-                killer != null && isActiveMatchParticipant(killer),
+                killer != null && (validFallbackAttribution || isActiveMatchParticipant(killer)),
                 killer != null && killer.getUUID().equals(victim.getUUID()),
                 victimOwnedProjectile,
                 teammates
@@ -646,6 +674,7 @@ public class ServerEvents {
         InventoryLockEvents.resetTracking();
         PlayerProgressManager.resetStorage();
         PrefixManager.clearRuntime();
+        CombatAttributionLedger.reset();
     }
 
     @SubscribeEvent

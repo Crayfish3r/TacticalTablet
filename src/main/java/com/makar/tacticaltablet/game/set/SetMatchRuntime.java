@@ -1,5 +1,6 @@
 package com.makar.tacticaltablet.game.set;
 
+import com.makar.tacticaltablet.game.CombatAttributionLedger;
 import com.makar.tacticaltablet.game.MatchMode;
 import com.makar.tacticaltablet.game.team.TeamId;
 
@@ -16,6 +17,7 @@ public final class SetMatchRuntime {
     }
 
     public static void startMatch(MatchMode mode) {
+        CombatAttributionLedger.reset();
         ASSISTS.reset();
         PLACEMENTS.start(mode);
     }
@@ -58,6 +60,7 @@ public final class SetMatchRuntime {
     }
 
     public static void reset() {
+        CombatAttributionLedger.reset();
         ASSISTS.reset();
         PLACEMENTS.reset();
     }
