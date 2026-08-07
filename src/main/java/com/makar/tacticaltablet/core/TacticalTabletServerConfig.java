@@ -11,6 +11,7 @@ public final class TacticalTabletServerConfig {
     private static final ForgeConfigSpec.DoubleValue PY132_DAMAGE_MULTIPLIER;
     private static final ForgeConfigSpec.IntValue COMBAT_ATTRIBUTION_WINDOW_SECONDS;
     private static final ForgeConfigSpec.BooleanValue KILL_FEED_ENABLED;
+    private static final ForgeConfigSpec.IntValue KILL_FEED_CONFIG_VERSION;
 
     static {
         ForgeConfigSpec.Builder builder = new ForgeConfigSpec.Builder();
@@ -32,8 +33,11 @@ public final class TacticalTabletServerConfig {
 
         builder.push("killFeed");
         KILL_FEED_ENABLED = builder
-                .comment("Enable TacticalTablet's client kill feed. Keep false while the SBW/TaCZ killbar is enabled.")
-                .define("enabled", false);
+                .comment("Enable TacticalTablet's primary match kill feed. Disable the SBW/TaCZ killbar separately.")
+                .define("enabled", true);
+        KILL_FEED_CONFIG_VERSION = builder
+                .comment("Internal migration marker. Do not edit manually.")
+                .defineInRange("configVersion", 0, 0, 1);
         builder.pop();
 
         SPEC = builder.build();
@@ -56,5 +60,16 @@ public final class TacticalTabletServerConfig {
 
     public static boolean isKillFeedEnabled() {
         return KILL_FEED_ENABLED.get();
+    }
+
+    /**
+     * Version 0 was generated while the kill feed defaulted to false. Upgrade it once so existing
+     * worlds receive the new primary UI; explicit administrator changes are respected afterwards.
+     */
+    public static boolean migrateKillFeedDefault() {
+        if (KILL_FEED_CONFIG_VERSION.get() >= 1) return false;
+        KILL_FEED_ENABLED.set(true);
+        KILL_FEED_CONFIG_VERSION.set(1);
+        return true;
     }
 }

@@ -16,7 +16,7 @@ class CombatAttributionArchitectureTest {
         String damage = section(events, "public static void onLivingDamage", "@SubscribeEvent",
                 events.indexOf("public static void onLivingDamage") + 1);
         String death = section(events, "private static void processPlayerDeath",
-                "private static void processKillerConsequences", 0);
+                "private static TacticalKillFeed.KillReward processKillerConsequences", 0);
 
         assertTrue(damage.contains("ResponsiblePlayerResolver.resolve(event.getSource())"));
         assertTrue(death.contains("ResponsiblePlayerResolver.resolve(source)"));

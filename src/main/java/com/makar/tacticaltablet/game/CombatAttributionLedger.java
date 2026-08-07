@@ -11,7 +11,6 @@ import net.minecraft.world.entity.OwnableEntity;
 import net.minecraft.world.entity.projectile.Projectile;
 
 import java.lang.reflect.Method;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -23,16 +22,16 @@ public final class CombatAttributionLedger {
     public static final int DEFAULT_ATTRIBUTION_WINDOW_TICKS =
             TacticalTabletServerConfig.DEFAULT_COMBAT_ATTRIBUTION_WINDOW_SECONDS * 20;
 
-    private static final Map<UUID, Entry> ENTRIES = new HashMap<>();
-    private static final Map<UUID, PendingHit> PENDING_HITS = new HashMap<>();
+    private static final CombatAttributionState STATE = new CombatAttributionState();
+    private static final Map<UUID, PendingHit> PENDING_HITS = new java.util.HashMap<>();
 
     private CombatAttributionLedger() {
     }
 
     public static void observeIncomingAttack(ServerPlayer victim, DamageSource source, float reportedDamage,
                                              boolean canceled) {
-        if (victim == null || canceled || reportedDamage <= 0.0F) return;
-        Entry previous = ENTRIES.get(victim.getUUID());
+        if (!canRecordVictim(victim) || canceled || reportedDamage <= 0.0F) return;
+        Entry previous = STATE.get(victim.getUUID());
         if (recordValidated(victim, source, reportedDamage)) {
             PENDING_HITS.put(victim.getUUID(), new PendingHit(source, previous));
         }
@@ -40,7 +39,7 @@ public final class CombatAttributionLedger {
 
     public static void observeOriginalDamage(ServerPlayer victim, DamageSource source, float reportedDamage,
                                              boolean canceled) {
-        if (victim == null || !canceled) return;
+        if (!canRecordVictim(victim) || !canceled) return;
         if (reportedDamage > 0.0F && isSupportedCanceledOriginalSource(source)) {
             recordValidated(victim, source, reportedDamage);
             PENDING_HITS.remove(victim.getUUID());
@@ -51,7 +50,7 @@ public final class CombatAttributionLedger {
 
     /** Exact integration point for MDC once it can call TacticalTablet after applying damage. */
     public static void recordAppliedDamage(ServerPlayer victim, DamageSource source, float effectiveDamage) {
-        if (effectiveDamage <= 0.0F) return;
+        if (!canRecordVictim(victim) || effectiveDamage <= 0.0F) return;
         if (recordValidated(victim, source, effectiveDamage) && victim != null) {
             PENDING_HITS.remove(victim.getUUID());
         }
@@ -63,14 +62,8 @@ public final class CombatAttributionLedger {
 
     public static Optional<Entry> findFresh(ServerPlayer victim) {
         if (victim == null) return Optional.empty();
-        Entry entry = ENTRIES.get(victim.getUUID());
-        if (entry == null) return Optional.empty();
-        int age = victim.server.getTickCount() - entry.serverTick();
-        if (age < 0 || age > TacticalTabletServerConfig.getCombatAttributionWindowTicks()) {
-            ENTRIES.remove(victim.getUUID());
-            return Optional.empty();
-        }
-        return Optional.of(entry);
+        return STATE.findFresh(victim.getUUID(), victim.server.getTickCount(),
+                TacticalTabletServerConfig.getCombatAttributionWindowTicks());
     }
 
     public static ServerPlayer resolveFreshAttacker(ServerPlayer victim) {
@@ -81,13 +74,13 @@ public final class CombatAttributionLedger {
 
     public static void clear(UUID victimId) {
         if (victimId != null) {
-            ENTRIES.remove(victimId);
+            STATE.clear(victimId);
             PENDING_HITS.remove(victimId);
         }
     }
 
     public static void reset() {
-        ENTRIES.clear();
+        STATE.reset();
         PENDING_HITS.clear();
     }
 
@@ -101,8 +94,12 @@ public final class CombatAttributionLedger {
                 && victimEligible && attackerEligible && !teammates && effectiveDamage > 0.0F;
     }
 
+    static boolean isVictimRecordable(boolean alive, boolean deadOrDying) {
+        return alive && !deadOrDying;
+    }
+
     private static boolean recordValidated(ServerPlayer victim, DamageSource source, float damage) {
-        if (victim == null || source == null) return false;
+        if (!canRecordVictim(victim) || source == null) return false;
         ServerPlayer attacker = ResponsiblePlayerResolver.resolve(source);
         boolean teammates = attacker != null && GameStateManager.getCurrentMode().isTeamMode()
                 && TeamMatchManager.areTeammates(attacker, victim);
@@ -113,11 +110,20 @@ public final class CombatAttributionLedger {
         Entity direct = source.getDirectEntity();
         Entity ownerOrController = ownerOrController(direct);
         if (ownerOrController == null) ownerOrController = ownerOrController(source.getEntity());
-        ENTRIES.put(victim.getUUID(), new Entry(
+        STATE.put(victim.getUUID(), new Entry(
                 attacker.getUUID(), attacker.getGameProfile().getName(), victim.server.getTickCount(),
                 safe(source.getMsgId()), entityTypeId(direct), entityUuid(direct), entityUuid(ownerOrController),
                 extractWeaponId(direct).orElse("")
         ));
+        return true;
+    }
+
+    private static boolean canRecordVictim(ServerPlayer victim) {
+        if (victim == null) return false;
+        if (!isVictimRecordable(victim.isAlive(), victim.isDeadOrDying())) {
+            clear(victim.getUUID());
+            return false;
+        }
         return true;
     }
 
@@ -126,8 +132,8 @@ public final class CombatAttributionLedger {
         PendingHit pending = PENDING_HITS.get(victim.getUUID());
         if (pending == null || pending.source() != source) return;
         PENDING_HITS.remove(victim.getUUID());
-        if (pending.previous() == null) ENTRIES.remove(victim.getUUID());
-        else ENTRIES.put(victim.getUUID(), pending.previous());
+        if (pending.previous() == null) STATE.clear(victim.getUUID());
+        else STATE.put(victim.getUUID(), pending.previous());
     }
 
     private static boolean isSupportedCanceledOriginalSource(DamageSource source) {

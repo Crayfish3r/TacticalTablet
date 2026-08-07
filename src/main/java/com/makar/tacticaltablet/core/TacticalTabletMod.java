@@ -33,6 +33,7 @@ import net.minecraftforge.fml.ModLoadingContext;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.config.ModConfig;
 import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
+import net.minecraftforge.fml.event.config.ModConfigEvent;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import org.slf4j.Logger;
 
@@ -58,6 +59,7 @@ public class TacticalTabletMod {
 
         modEventBus.addListener(this::setup);
         modEventBus.addListener(this::addCreative);
+        modEventBus.addListener(this::onConfigLoading);
 
         MinecraftForge.EVENT_BUS.register(ServerEvents.class);
         MinecraftForge.EVENT_BUS.register(AirdropEvents.class);
@@ -72,6 +74,15 @@ public class TacticalTabletMod {
         if (event.getTabKey() == CreativeModeTabs.TOOLS_AND_UTILITIES) {
             event.accept(ModItems.TACTICAL_TABLET);
             event.accept(ModItems.CONTRACT_TRACKER);
+        }
+    }
+
+    private void onConfigLoading(ModConfigEvent.Loading event) {
+        ModConfig config = event.getConfig();
+        if (config.getSpec() != TacticalTabletServerConfig.SPEC) return;
+        if (TacticalTabletServerConfig.migrateKillFeedDefault()) {
+            config.save();
+            LOGGER.info("Enabled the primary Tactical kill feed while migrating the legacy server config.");
         }
     }
 

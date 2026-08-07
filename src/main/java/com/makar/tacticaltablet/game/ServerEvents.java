@@ -37,7 +37,6 @@ import com.makar.tacticaltablet.progression.ClassCooldownManager;
 import com.makar.tacticaltablet.progression.ClassXPManager;
 import com.makar.tacticaltablet.progression.PassiveClassXPManager;
 import com.makar.tacticaltablet.progression.PlayerProgressManager;
-import com.makar.tacticaltablet.progression.XpNotifier;
 import com.makar.tacticaltablet.progression.kit.KitRotationManager;
 import com.makar.tacticaltablet.tablet.PlayerTabletState;
 import com.makar.tacticaltablet.tablet.net.PacketHandler;
@@ -249,6 +248,9 @@ public class ServerEvents {
     public static void onPlayerClone(PlayerEvent.Clone event) {
         if (!(event.getEntity() instanceof ServerPlayer newPlayer)) return;
         if (!(event.getOriginal() instanceof ServerPlayer oldPlayer)) return;
+
+        CombatAttributionLedger.clear(oldPlayer.getUUID());
+        CombatAttributionLedger.clear(newPlayer.getUUID());
 
         PlayerProgressManager.loadPlayer(newPlayer);
 
@@ -527,7 +529,7 @@ public class ServerEvents {
             if (killer == null) fallbackAttribution = null;
         }
 
-        DeathTransitionManager.recordDeath(victim, source);
+        DeathTransitionManager.recordDeath(victim, source, killer);
         CorpseLootManager.createCorpse(victim);
         PlayerProgressManager.addDeath(victim);
         DiscordLeaderboardService.recordMatchDeath(victim);
@@ -540,13 +542,14 @@ public class ServerEvents {
             SetMatchRuntime.recordTeamEliminated(victimTeam, victim.server.getTickCount());
         }
 
+        TacticalKillFeed.KillReward killReward;
         try {
-            processKillerConsequences(victim, source, killer, fallbackAttribution != null);
+            killReward = processKillerConsequences(victim, source, killer, fallbackAttribution != null);
         } finally {
             SetMatchRuntime.clearVictimAttribution(victim.getUUID());
         }
 
-        TacticalKillFeed.publish(victim, killer, source, fallbackAttribution);
+        TacticalKillFeed.publish(victim, killer, source, fallbackAttribution, killReward);
 
         ContractManager.onPlayerKilled(victim, killer);
         ExtractionPointManager.onPlayerDeathOrLogout(victim);
@@ -556,8 +559,8 @@ public class ServerEvents {
         }
     }
 
-    private static void processKillerConsequences(ServerPlayer victim, DamageSource source, ServerPlayer killer,
-                                                  boolean validFallbackAttribution) {
+    private static TacticalKillFeed.KillReward processKillerConsequences(
+            ServerPlayer victim, DamageSource source, ServerPlayer killer, boolean validFallbackAttribution) {
         Entity direct = source.getDirectEntity();
         boolean victimOwnedProjectile = direct instanceof Projectile projectile
                 && projectile.getOwner() != null
@@ -571,36 +574,34 @@ public class ServerEvents {
                 victimOwnedProjectile,
                 teammates
         );
-        if (outcome == KillCreditPolicy.Outcome.IGNORE) return;
+        if (outcome == KillCreditPolicy.Outcome.IGNORE) return TacticalKillFeed.KillReward.NONE;
 
         if (outcome == KillCreditPolicy.Outcome.TEAM_KILL) {
             int teamKills = DiscordLeaderboardService.recordTeamKill(killer.server, killer);
-            killer.sendSystemMessage(Component.literal(
-                    "[WAR] Тимкилл не засчитан. Тимкиллы за сет: "
-                            + teamKills + "/" + TEAM_KILL_BAN_THRESHOLD + "."
-            ));
             if (teamKills >= TEAM_KILL_BAN_THRESHOLD) {
                 banTeamKiller(killer, teamKills);
             }
-            return;
+            return TacticalKillFeed.KillReward.NONE;
         }
 
         PlayerProgressManager.addKill(killer);
         DiscordLeaderboardService.recordMatchKill(killer);
+        int coinsBefore = PlayerProgressManager.getCoins(killer);
         PlayerProgressManager.addCoins(killer, PlayerProgressManager.KILL_COIN_REWARD);
+        int awardedCoins = Math.max(0, PlayerProgressManager.getCoins(killer) - coinsBefore);
         for (CombatAssistTracker.AssistCredit assist : SetMatchRuntime.resolveAssists(
                 victim.getUUID(), killer.getUUID(), victim.server.getTickCount())) {
             DiscordLeaderboardService.recordMatchAssist(assist.playerId(), assist.playerName());
         }
 
         String clazz = PlayerTabletState.getSelectedClass(killer);
-        if (clazz == null || clazz.isBlank()) return;
+        if (clazz == null || clazz.isBlank()) return new TacticalKillFeed.KillReward(awardedCoins, 0);
 
         XPResult result = calculateXP(killer, victim, source, direct);
-        if (result.xp <= 0) return;
+        if (result.xp <= 0) return new TacticalKillFeed.KillReward(awardedCoins, 0);
 
         int awardedXp = ClassXPManager.addXP(killer, clazz, result.xp);
-        XpNotifier.send(killer, awardedXp, result.reason);
+        return new TacticalKillFeed.KillReward(awardedCoins, awardedXp);
     }
 
 
@@ -679,6 +680,7 @@ public class ServerEvents {
 
     @SubscribeEvent
     public static void onServerStopping(ServerStoppingEvent event) {
+        CombatAttributionLedger.reset();
         PlayerProgressManager.flushForShutdown();
         PrefixManager.save();
         PunishmentManager.saveAtomic();

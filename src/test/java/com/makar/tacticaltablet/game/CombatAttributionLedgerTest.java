@@ -19,6 +19,13 @@ class CombatAttributionLedgerTest {
     }
 
     @Test
+    void deadVictimCannotBeRecordedAfterNestedMdcDeathCallback() {
+        assertFalse(CombatAttributionLedger.isVictimRecordable(false, true));
+        assertFalse(CombatAttributionLedger.isVictimRecordable(false, false));
+        assertTrue(CombatAttributionLedger.isVictimRecordable(true, false));
+    }
+
+    @Test
     void mdcBleedAndLaterFireCanReuseOnlyAnAcceptedPvpHit() {
         assertTrue(CombatAttributionLedger.shouldRecord(victim, attacker, true, true, false, 1.0F));
         assertFalse(CombatAttributionLedger.shouldRecord(victim, attacker, true, true, false, 0.0F));

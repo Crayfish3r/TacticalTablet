@@ -20,6 +20,22 @@ class CombatAttributionIntegrationArchitectureTest {
         assertTrue(events.contains("receiveCanceled = true"));
         assertTrue(events.contains("observeIncomingAttack"));
         assertTrue(ledger.contains("recordAppliedDamage(ServerPlayer victim, DamageSource source, float effectiveDamage)"));
+        assertTrue(ledger.contains("isVictimRecordable(victim.isAlive(), victim.isDeadOrDying())"));
+        assertTrue(ledger.contains("clear(victim.getUUID())"));
+    }
+
+    @Test
+    void deathRespawnAndMatchLifecycleClearAllPreviousLifeAttribution() throws IOException {
+        String events = Files.readString(MAIN.resolve("game/ServerEvents.java"));
+        String gameState = Files.readString(MAIN.resolve("game/GameStateManager.java"));
+        String runtime = Files.readString(MAIN.resolve("game/set/SetMatchRuntime.java"));
+
+        assertTrue(events.contains("onPlayerClone(PlayerEvent.Clone event)"));
+        assertTrue(events.contains("CombatAttributionLedger.clear(oldPlayer.getUUID())"));
+        assertTrue(events.contains("CombatAttributionLedger.clear(newPlayer.getUUID())"));
+        assertTrue(events.contains("onServerStopping(ServerStoppingEvent event)"));
+        assertTrue(gameState.contains("matchPhase = MatchPhase.POST_GAME;\n        CombatAttributionLedger.reset();"));
+        assertTrue(runtime.contains("CombatAttributionLedger.reset()"));
     }
 
     @Test

@@ -21,4 +21,16 @@ class TacticalKillFeedTest {
         assertEquals(KillFeedPacket.Cause.FIRE, TacticalKillFeed.classifyCause("onFire", true));
         assertEquals(KillFeedPacket.Cause.FALL, TacticalKillFeed.classifyCause("fall", false));
     }
+
+    @Test
+    void lavaAndWorldBorderHaveHonestEnvironmentalLabels() {
+        assertEquals(KillFeedPacket.Cause.LAVA, TacticalKillFeed.classifyCause("lava", false));
+        assertEquals(KillFeedPacket.Cause.ZONE, TacticalKillFeed.classifyCause("outsideBorder", false));
+    }
+
+    @Test
+    void reliableWeaponIdGetsCompactDisplayName() {
+        assertEquals("AK-74", TacticalKillFeed.weaponDisplayName("tacz:ak_74"));
+        assertEquals("", TacticalKillFeed.weaponDisplayName(""));
+    }
 }

@@ -37,12 +37,29 @@ public final class DeathTransitionManager {
     }
 
     public static void recordDeath(ServerPlayer victim, DamageSource source) {
+        recordDeath(victim, source, null);
+    }
+
+    public static void recordDeath(ServerPlayer victim, DamageSource source, ServerPlayer responsibleKiller) {
         if (victim == null) return;
 
         Entity attacker = source == null ? null : source.getEntity();
         Entity direct = source == null ? null : source.getDirectEntity();
+        ServerPlayer killer = responsibleKiller != null
+                ? responsibleKiller
+                : attacker instanceof ServerPlayer player ? player : null;
+        boolean killedByOtherPlayer = killer != null && !killer.getUUID().equals(victim.getUUID());
 
-        if (attacker instanceof ServerPlayer killer && !killer.getUUID().equals(victim.getUUID())) {
+        if (victim.getTags().contains("war.playing")) {
+            pendingMessages.put(victim.getUUID(), new DeathMessage(
+                    "\u041e\u0436\u0438\u0434\u0430\u043d\u0438\u0435 \u0432\u043e\u0437\u0440\u043e\u0436\u0434\u0435\u043d\u0438\u044f",
+                    "",
+                    killedByOtherPlayer && PlayerProgressManager.isSadTromboneKillsEnabled(killer)
+            ));
+            return;
+        }
+
+        if (killedByOtherPlayer) {
             pendingMessages.put(victim.getUUID(), new DeathMessage(
                     "Тебя убили :(",
                     "Причина этому — " + killer.getGameProfile().getName(),

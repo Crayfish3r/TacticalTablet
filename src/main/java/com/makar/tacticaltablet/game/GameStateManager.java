@@ -382,6 +382,7 @@ public class GameStateManager {
         startCountdown = -1;
         postGameDelay = POST_GAME_DELAY_SECONDS;
         matchPhase = MatchPhase.POST_GAME;
+        CombatAttributionLedger.reset();
         setGameState(server, WAITING);
         SpectatorCameraManager.onMatchEnd(server);
         VoiceChatTeamManager.endMatch(server);

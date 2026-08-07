@@ -4,6 +4,8 @@ import io.netty.buffer.Unpooled;
 import net.minecraft.network.FriendlyByteBuf;
 import org.junit.jupiter.api.Test;
 
+import java.util.UUID;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -43,10 +45,21 @@ class PacketCodecsTest {
 
     @Test
     void killFeedPacketRoundTripsBoundedServerData() {
-        KillFeedPacket original = new KillFeedPacket("Killer", "Victim",
-                KillFeedPacket.Cause.BLEEDING, "tacz:ak47");
+        KillFeedPacket original = new KillFeedPacket(UUID.randomUUID(), "Killer", 0xFFFF5555,
+                UUID.randomUUID(), "Victim", KillFeedPacket.NO_TEAM_COLOR,
+                KillFeedPacket.Cause.BLEEDING, "AK-47", 1234L, 5, 12);
         FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.buffer());
         original.encode(buf);
         assertEquals(original, new KillFeedPacket(buf));
+    }
+
+    @Test
+    void killFeedBoundsLongNamesAndWeaponLabels() {
+        KillFeedPacket packet = new KillFeedPacket(null, "K".repeat(80), KillFeedPacket.NO_TEAM_COLOR,
+                UUID.randomUUID(), "V".repeat(80), KillFeedPacket.NO_TEAM_COLOR,
+                KillFeedPacket.Cause.NONE, "W".repeat(100), 1L, 0, 0);
+        assertEquals(32, packet.killerName().length());
+        assertEquals(32, packet.victimName().length());
+        assertEquals(48, packet.weaponDisplayName().length());
     }
 }

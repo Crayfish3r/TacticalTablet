@@ -23,8 +23,8 @@ class DiscordMatchFinalizationOrderTest {
     void deathProcessingCompletesBeforeMatchEndCheck() throws IOException {
         String source = Files.readString(SERVER_EVENTS);
         String onDeath = block(source, "public static void onDeath", "private static boolean isActiveMatchParticipant");
-        String processDeath = block(source, "private static void processPlayerDeath", "private static void processKillerConsequences");
-        String killerConsequences = block(source, "private static void processKillerConsequences", "private static void banTeamKiller");
+        String processDeath = block(source, "private static void processPlayerDeath", "private static TacticalKillFeed.KillReward processKillerConsequences");
+        String killerConsequences = block(source, "private static TacticalKillFeed.KillReward processKillerConsequences", "private static void banTeamKiller");
 
         assertTrue(onDeath.indexOf("processPlayerDeath(victim, event.getSource())")
                 < onDeath.indexOf("GameStateManager.checkForMatchEnd(victim.server)"));
