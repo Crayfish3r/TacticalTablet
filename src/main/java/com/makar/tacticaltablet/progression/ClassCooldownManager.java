@@ -38,12 +38,13 @@ public class ClassCooldownManager {
             minutes(10),
             minutes(10),
             minutes(10),
-            minutes(10)
+            minutes(10),
+            minutes(7)
     };
 
     private static final Map<UUID, Map<Integer, Long>> data = new HashMap<>();
 
-    private static long getCooldownTime(int classId) {
+    static long getCooldownTime(int classId) {
         if (classId < 0 || classId >= COOLDOWNS.length) {
             return 0L;
         }
@@ -82,7 +83,7 @@ public class ClassCooldownManager {
         setCooldown(player, classId);
     }
 
-    private static int classIdForClass(String clazz) {
+    static int classIdForClass(String clazz) {
         if (clazz == null || clazz.isBlank()) return -1;
 
         return switch (clazz) {
@@ -109,6 +110,7 @@ public class ClassCooldownManager {
             case "medic" -> 21;
             case "microwave" -> 22;
             case "railgunner" -> 23;
+            case "crossbowman" -> 24;
             default -> -1;
         };
     }

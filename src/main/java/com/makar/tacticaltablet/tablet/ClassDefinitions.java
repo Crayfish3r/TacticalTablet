@@ -39,6 +39,7 @@ public final class ClassDefinitions {
             shop("boomguy", "Подрывник", 4, 8),
             shop("tagilla", "Тагилла", 10, 9),
             shop("killer", "Киллер", 16, 10),
+            shop("crossbowman", "Арбалетчик", 24, 11),
 
             exclusive("krot", "Крот", 19, ClassTier.LEGEND.id(), 0),
             exclusive("medic", "Медик", 21, ClassTier.LEGEND.id(), 1),

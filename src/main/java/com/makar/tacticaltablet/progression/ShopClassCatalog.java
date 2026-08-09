@@ -19,7 +19,8 @@ public final class ShopClassCatalog {
             new Entry("cowboy", 50, ClassTier.RARE),
             new Entry("boomguy", 500, ClassTier.LEGEND),
             new Entry("tagilla", 250, ClassTier.EPIC),
-            new Entry("killer", 1000, ClassTier.MONSTER)
+            new Entry("killer", 1000, ClassTier.MONSTER),
+            new Entry("crossbowman", 500, ClassTier.LEGEND)
     );
     private static final Map<String, Entry> BY_CLASS_KEY = indexEntries();
 

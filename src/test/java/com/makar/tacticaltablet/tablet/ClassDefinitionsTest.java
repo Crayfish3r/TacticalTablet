@@ -41,6 +41,7 @@ class ClassDefinitionsTest {
         expected.put(21, "medic");
         expected.put(22, "microwave");
         expected.put(23, "railgunner");
+        expected.put(24, "crossbowman");
 
         assertEquals(expected, ClassDefinitions.actionIdToClassKey());
     }
@@ -51,7 +52,7 @@ class ClassDefinitionsTest {
                 .map(ClassDefinition::displayOrder)
                 .toList();
 
-        assertEquals(List.of(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10), orders);
+        assertEquals(List.of(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11), orders);
         assertEquals("Оператор дрона", ClassDefinitions.byClassKey("droneoperator").orElseThrow().name().getString());
         assertEquals("Рэйл-ганнер", ClassDefinitions.byClassKey("railgunner").orElseThrow().name().getString());
     }
@@ -96,14 +97,15 @@ class ClassDefinitionsTest {
                 Map.entry("solider", 50), Map.entry("blackops", 250), Map.entry("rebel", 500),
                 Map.entry("saboteur", 250), Map.entry("dream", 50), Map.entry("shahed", 500),
                 Map.entry("miniboss", 250), Map.entry("cowboy", 50), Map.entry("boomguy", 500),
-                Map.entry("tagilla", 250), Map.entry("killer", 1000)), prices);
+                Map.entry("tagilla", 250), Map.entry("killer", 1000),
+                Map.entry("crossbowman", 500)), prices);
         assertEquals(Map.ofEntries(
                 Map.entry("solider", ClassTier.RARE), Map.entry("blackops", ClassTier.EPIC),
                 Map.entry("rebel", ClassTier.LEGEND), Map.entry("saboteur", ClassTier.EPIC),
                 Map.entry("dream", ClassTier.RARE), Map.entry("shahed", ClassTier.LEGEND),
                 Map.entry("miniboss", ClassTier.EPIC), Map.entry("cowboy", ClassTier.RARE),
                 Map.entry("boomguy", ClassTier.LEGEND), Map.entry("tagilla", ClassTier.EPIC),
-                Map.entry("killer", ClassTier.MONSTER)), tiers);
+                Map.entry("killer", ClassTier.MONSTER), Map.entry("crossbowman", ClassTier.LEGEND)), tiers);
 
         for (String classKey : prices.keySet()) {
             assertEquals(ClassCategory.SHOP, ClassDefinitions.byClassKey(classKey).orElseThrow().category());

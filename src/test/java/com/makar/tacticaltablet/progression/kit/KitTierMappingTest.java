@@ -24,4 +24,12 @@ class KitTierMappingTest {
                 KitManager.getKitFileCandidates("class", 4, true));
         assertEquals(List.of("class_rare_alt", "class_alt"), KitManager.getKitFileCandidates("class", 1, true));
     }
+
+    @Test
+    void crossbowmanLegendTierFallsBackToServerCrossbowmanJson() {
+        assertEquals(
+                List.of("crossbowman_legend", "crossbowman_epic", "crossbowman_rare", "crossbowman"),
+                KitManager.getKitFileCandidates("crossbowman", 3, false)
+        );
+    }
 }
