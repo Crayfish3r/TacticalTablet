@@ -1,6 +1,7 @@
 package com.makar.tacticaltablet.tablet.client;
 
 import com.makar.tacticaltablet.game.MatchPhase;
+import com.makar.tacticaltablet.game.SetGameMode;
 import com.makar.tacticaltablet.tablet.client.ui.TacticalLayout;
 import com.makar.tacticaltablet.tablet.client.ui.TacticalTheme;
 import com.makar.tacticaltablet.tablet.client.ui.TacticalUi;
@@ -10,6 +11,7 @@ import com.makar.tacticaltablet.tablet.net.PacketHandler;
 import com.makar.tacticaltablet.tablet.net.SetClanWarPacket;
 import com.makar.tacticaltablet.tablet.net.SetCompetitivePacket;
 import com.makar.tacticaltablet.tablet.net.VoteMapPacket;
+import com.makar.tacticaltablet.tablet.net.VoteSetModePacket;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.chat.Component;
@@ -21,12 +23,13 @@ import java.util.List;
 
 public final class MapVotingScreen extends TacticalPhaseScreen {
     private static final int PANEL_W = 366;
-    private static final int PANEL_H = 268;
+    private static final int PANEL_H = 320;
     private static final int CARD_H = 86;
     private static final int GAP = 6;
     private static final int PENDING_TIMEOUT_TICKS = 60;
 
     private final List<MapCardButton> mapButtons = new ArrayList<>();
+    private final List<ModeButton> modeButtons = new ArrayList<>();
     private TacticalLayout.Rect viewport = new TacticalLayout.Rect(0, 0, 0, 0);
     private int columns = 1;
     private int visibleRows = 1;
@@ -40,6 +43,8 @@ public final class MapVotingScreen extends TacticalPhaseScreen {
     private int timeoutMessageTicks;
     private TacticalButton competitiveToggleButton;
     private TacticalButton clanWarToggleButton;
+    private SetGameMode pendingMode;
+    private int pendingModeTicks;
 
     public MapVotingScreen() {
         super(Component.translatable("screen.tacticaltablet.map_voting.title"));
@@ -49,8 +54,9 @@ public final class MapVotingScreen extends TacticalPhaseScreen {
     protected void init() {
         clearWidgets();
         mapButtons.clear();
+        modeButtons.clear();
         TacticalLayout.Rect panel = panelBounds(PANEL_W, PANEL_H);
-        int footerHeight = MapVoteClientState.isOperator() ? 34 : 24;
+        int footerHeight = MapVoteClientState.isOperator() ? 112 : 70;
         viewport = new TacticalLayout.Rect(panel.x() + 12, panel.y() + 39,
                 Math.max(1, panel.width() - 24), Math.max(1, panel.height() - 47 - footerHeight));
         List<String> maps = MapVoteClientState.getMaps();
@@ -64,6 +70,7 @@ public final class MapVotingScreen extends TacticalPhaseScreen {
             mapButtons.add(addRenderableWidget(button));
         }
         layoutCards();
+        createModeButtons(panel);
         createOperatorToggles(panel);
 
         MapCardButton initial = mapButtons.stream()
@@ -74,6 +81,18 @@ public final class MapVotingScreen extends TacticalPhaseScreen {
             setInitialFocus(initial);
         } else if (competitiveToggleButton != null) {
             setInitialFocus(competitiveToggleButton);
+        }
+    }
+
+    private void createModeButtons(TacticalLayout.Rect panel) {
+        int gap = 6;
+        int width = Math.max(1, (panel.width() - 24 - gap * 2) / 3);
+        int y = panel.bottom() - (MapVoteClientState.isOperator() ? 86 : 48);
+        int index = 0;
+        for (SetGameMode mode : SetGameMode.values()) {
+            ModeButton button = new ModeButton(panel.x() + 12 + index * (width + gap), y, width, mode);
+            modeButtons.add(addRenderableWidget(button));
+            index++;
         }
     }
 
@@ -107,6 +126,7 @@ public final class MapVotingScreen extends TacticalPhaseScreen {
         if (pendingMap != null && tickPendingMap()) pendingMap = null;
         if (pendingCompetitive != null && tickPendingCompetitive()) pendingCompetitive = null;
         if (pendingClanWar != null && tickPendingClanWar()) pendingClanWar = null;
+        if (pendingMode != null && tickPendingMode()) pendingMode = null;
         if (timeoutMessageTicks > 0) timeoutMessageTicks--;
     }
 
@@ -136,6 +156,9 @@ public final class MapVotingScreen extends TacticalPhaseScreen {
         }
         if (competitiveToggleButton != null) competitiveToggleButton.render(graphics, mouseX, mouseY, partialTick);
         if (clanWarToggleButton != null) clanWarToggleButton.render(graphics, mouseX, mouseY, partialTick);
+        for (ModeButton button : modeButtons) button.render(graphics, mouseX, mouseY, partialTick);
+        for (ModeButton button : modeButtons) if (button.isHovered() && button.mode == SetGameMode.RACE)
+            graphics.renderTooltip(font, Component.literal("Режим появится позже"), mouseX, mouseY);
         renderFooterStatus(graphics, panel);
     }
 
@@ -207,7 +230,7 @@ public final class MapVotingScreen extends TacticalPhaseScreen {
     private void renderFooterStatus(GuiGraphics graphics, TacticalLayout.Rect panel) {
         Component status;
         int color;
-        if (pendingMap != null || pendingCompetitive != null || pendingClanWar != null) {
+        if (pendingMap != null || pendingCompetitive != null || pendingClanWar != null || pendingMode != null) {
             status = Component.translatable("screen.tacticaltablet.common.awaiting_server");
             color = TacticalTheme.WARNING;
         } else if (timeoutMessageTicks > 0) {
@@ -219,11 +242,14 @@ public final class MapVotingScreen extends TacticalPhaseScreen {
         } else if (MapVoteClientState.isNextSetCompetitive()) {
             status = Component.translatable("screen.tacticaltablet.map_voting.competitive_enabled");
             color = TacticalTheme.WARNING;
+        } else if (!MapVoteClientState.areOrdinaryModesEnabled()) {
+            status = Component.literal("Режим сета задан оператором");
+            color = TacticalTheme.WARNING;
         } else {
             status = Component.translatable("screen.tacticaltablet.map_voting.hint");
             color = TacticalTheme.TEXT_SECONDARY;
         }
-        int y = MapVoteClientState.isOperator() ? panel.bottom() - 39 : panel.bottom() - 17;
+        int y = MapVoteClientState.isOperator() ? panel.bottom() - 54 : panel.bottom() - 17;
         graphics.drawCenteredString(font, status, panel.x() + panel.width() / 2, y, color);
     }
 
@@ -252,6 +278,23 @@ public final class MapVotingScreen extends TacticalPhaseScreen {
         pendingClanWarTicks = 0;
         clanWarToggleButton.active = false;
         PacketHandler.sendToServer(new SetClanWarPacket(pendingClanWar));
+    }
+
+    private void submitMode(SetGameMode mode) {
+        if (pendingMode != null || mode == null || !mode.selectable()
+                || !MapVoteClientState.areOrdinaryModesEnabled()) return;
+        playClick();
+        pendingMode = mode;
+        pendingModeTicks = 0;
+        PacketHandler.sendToServer(new VoteSetModePacket(mode));
+    }
+
+    private boolean tickPendingMode() {
+        pendingModeTicks++;
+        if (pendingMode == MapVoteClientState.getSelectedMode()) return true;
+        if (pendingModeTicks < PENDING_TIMEOUT_TICKS) return false;
+        timeoutMessageTicks = PENDING_TIMEOUT_TICKS;
+        return true;
     }
 
     private boolean tickPendingMap() {
@@ -337,6 +380,29 @@ public final class MapVotingScreen extends TacticalPhaseScreen {
             graphics.drawCenteredString(font, Component.translatable("screen.tacticaltablet.map_voting.votes",
                             MapVoteClientState.getVoteCount(mapName)),
                     getX() + width / 2, getY() + 75, TacticalTheme.TEXT_SECONDARY);
+        }
+    }
+
+    private final class ModeButton extends TacticalButton {
+        private final SetGameMode mode;
+
+        private ModeButton(int x, int y, int width, SetGameMode mode) {
+            super(x, y, width, 24, Component.literal(mode.displayName()), ignored -> submitMode(mode));
+            this.mode = mode;
+            selectedWhen(() -> MapVoteClientState.getSelectedMode() == mode);
+            withFocusKey("map_voting.set_mode." + mode.name().toLowerCase());
+            onHover(TacticalPhaseScreen::playHover);
+            active = mode.selectable() && MapVoteClientState.areOrdinaryModesEnabled();
+        }
+
+        @Override
+        protected void renderContent(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+            active = pendingMode == null && mode.selectable() && MapVoteClientState.areOrdinaryModesEnabled();
+            int color = active ? TacticalTheme.TEXT_PRIMARY : TacticalTheme.TEXT_DISABLED;
+            graphics.drawCenteredString(font, mode.displayName(), getX() + width / 2, getY() + 5, color);
+            if (mode.selectable()) graphics.drawCenteredString(font,
+                    Component.literal(String.valueOf(MapVoteClientState.getModeVoteCount(mode))),
+                    getX() + width / 2, getY() + 14, color);
         }
     }
 }

@@ -30,6 +30,9 @@ class VotingUiArchitectureTest {
         assertTrue(maps.contains("new VoteMapPacket(mapName)"));
         assertTrue(maps.contains("new SetCompetitivePacket(pendingCompetitive)"));
         assertTrue(maps.contains("new SetClanWarPacket(pendingClanWar)"));
+        assertTrue(maps.contains("new VoteSetModePacket(mode)"));
+        assertTrue(maps.contains("mode.selectable() && MapVoteClientState.areOrdinaryModesEnabled()"));
+        assertTrue(maps.contains("Режим появится позже"));
     }
 
     @Test

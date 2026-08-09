@@ -10,6 +10,8 @@ import com.makar.tacticaltablet.game.GameStateManager;
 import com.makar.tacticaltablet.game.MapSetManager;
 import com.makar.tacticaltablet.game.MatchAdmissionManager;
 import com.makar.tacticaltablet.game.MatchMode;
+import com.makar.tacticaltablet.game.chaos.ChaosSetManager;
+import com.makar.tacticaltablet.tablet.ClassDefinitions;
 import com.makar.tacticaltablet.game.team.TeamId;
 import com.makar.tacticaltablet.game.team.TeamMatchManager;
 import com.makar.tacticaltablet.game.set.SetResultService;
@@ -55,6 +57,7 @@ public final class DiscordLeaderboardService {
     private static final int OVERALL_COLOR = 0xF1C40F;
     private static final int MATCH_COLOR = 0xE74C3C;
     private static final int RANKED_MATCH_COLOR = 0x9B59B6;
+    private static final int CHAOS_COLOR = 0xFF4FA3;
     private static final int CLAN_WAR_COLOR = 0x2ECC71;
     private static final int CLAN_WAR_WIN_CLAN_COINS = 10;
     private static final int SET_STATS_DATA_VERSION = 3;
@@ -522,13 +525,16 @@ public final class DiscordLeaderboardService {
 
         SetLeaderboardSnapshot snapshot = MapSetManager.getLeaderboardSnapshot();
         boolean competitiveSet = currentSetCompetitive || MapSetManager.isCompetitiveSet();
+        boolean chaosSet = MapSetManager.isChaosSet();
+        if (chaosSet) ChaosSetManager.prepareSet(server);
         List<DiscordEmbed> embeds = buildSetEmbeds(
-                (competitiveSet ? "Итоги рейтингового матча" : "Итоги сета")
+                (chaosSet ? "Результаты матча · ХАОС" : competitiveSet ? "Итоги рейтингового матча" : "Итоги сета")
                         + " из " + currentSetMatches + " игр - " + config.getServerName(),
                 currentMapName(server),
                 currentSetStartedAtMillis,
                 currentSetAirdrops,
                 competitiveSet,
+                chaosSet,
                 summary,
                 snapshot
         );
@@ -631,8 +637,10 @@ public final class DiscordLeaderboardService {
         MatchMode safeMode = mode == null ? MatchMode.SOLO : mode;
         List<MatchStats> sorted = sortedMatch(players);
         MatchStats damageLeader = damageLeader(sorted);
+        boolean chaosSet = MapSetManager.isChaosSet();
+        if (chaosSet) ChaosSetManager.prepareSet(server);
         DiscordEmbed embed = buildMatchEmbed(
-                "Итоги матча - " + config.getServerName(),
+                (chaosSet ? "Результаты матча · ХАОС" : "Итоги матча") + " - " + config.getServerName(),
                 currentMapName(server),
                 winnerName,
                 sorted,
@@ -641,7 +649,8 @@ public final class DiscordLeaderboardService {
                 airdrops,
                 damageLeader,
                 safeMode,
-                teams
+                teams,
+                chaosSet
         );
 
         return DiscordWebhookClient.sendEmbedAsync(config.getWebhookUrl(), embed);
@@ -734,16 +743,22 @@ public final class DiscordLeaderboardService {
             int airdrops,
             MatchStats damageLeader,
             MatchMode mode,
-            Map<TeamId, List<String>> teams
+            Map<TeamId, List<String>> teams,
+            boolean chaosSet
     ) {
         MatchMode safeMode = mode == null ? MatchMode.SOLO : mode;
         int count = Math.min(Math.max(1, topLimit), players.size());
         StringBuilder description = new StringBuilder();
 
-        appendHeaderLine(description, "Режим", safeMode.displayName());
+        appendHeaderLine(description, "Режим", chaosSet ? "Хаос" : safeMode.displayName());
         appendHeaderLine(description, "Карта", mapName);
         appendHeaderLine(description, "Длительность", formatDuration(startedAtMillis));
         description.append("**Сбросов за матч:** `").append(Math.max(0, airdrops)).append("`\n");
+        if (chaosSet) {
+            description.append("**Награда за убийство:** `8 coins`\n");
+            description.append("**Классовый XP:** `отключён`\n");
+            appendChaosClasses(description);
+        }
 
         if (winnerName != null && !winnerName.isBlank()) {
             MatchStats winner = findMatchPlayer(players, winnerName);
@@ -772,7 +787,7 @@ public final class DiscordLeaderboardService {
             }
         }
 
-        return new DiscordEmbed(title, description.toString(), MATCH_COLOR, "Тактический планшет");
+        return new DiscordEmbed(title, description.toString(), chaosSet ? CHAOS_COLOR : MATCH_COLOR, "Тактический планшет");
     }
 
     private static List<DiscordEmbed> buildSetEmbeds(
@@ -781,6 +796,7 @@ public final class DiscordLeaderboardService {
             long startedAtMillis,
             int airdrops,
             boolean competitiveSet,
+            boolean chaosSet,
             SetRewardSummary summary,
             SetLeaderboardSnapshot snapshot
     ) {
@@ -789,6 +805,12 @@ public final class DiscordLeaderboardService {
         appendHeaderLine(description, "Длительность сета", formatDuration(startedAtMillis));
         description.append("**Игры:** `").append(currentSetMatches).append("`\n");
         description.append("**Аирдропы за сет:** `").append(Math.max(0, airdrops)).append("`\n");
+        if (chaosSet) {
+            appendHeaderLine(description, "Режим", "Хаос");
+            description.append("**Награда за убийство:** `8 coins`\n");
+            description.append("**Классовый XP:** `отключён`\n");
+            appendChaosClasses(description);
+        }
 
         if (summary != null) {
             description.append("**Уникальные участники:** `").append(summary.participantCount()).append("`\n");
@@ -800,7 +822,7 @@ public final class DiscordLeaderboardService {
                 }
             }
         }
-        int color = competitiveSet ? RANKED_MATCH_COLOR : MATCH_COLOR;
+        int color = chaosSet ? CHAOS_COLOR : competitiveSet ? RANKED_MATCH_COLOR : MATCH_COLOR;
         List<String> pages = SetDiscordFormatter.formatLeaderboardPages(snapshot, 3400);
         List<DiscordEmbed> embeds = new ArrayList<>();
         embeds.add(new DiscordEmbed(title, description + pages.get(0), color, "Тактический планшет"));
@@ -809,6 +831,19 @@ public final class DiscordLeaderboardService {
                     "Тактический планшет"));
         }
         return List.copyOf(embeds);
+    }
+
+    private static void appendChaosClasses(StringBuilder description) {
+        List<List<String>> games = ChaosSetManager.usedGameClasses();
+        if (games.isEmpty()) return;
+        description.append("**Наборы классов:**\n");
+        for (int index = 0; index < games.size(); index++) {
+            String names = games.get(index).stream()
+                    .map(id -> ClassDefinitions.byClassKey(id)
+                            .map(definition -> definition.name().getString()).orElse(id))
+                    .reduce((left, right) -> left + ", " + right).orElse("—");
+            description.append("Игра ").append(index + 1).append(" — ").append(names).append('\n');
+        }
     }
 
     static String formatSetPlacement(

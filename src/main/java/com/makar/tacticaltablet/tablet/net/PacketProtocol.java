@@ -29,7 +29,9 @@ public final class PacketProtocol {
             entry(22, ClanLeavePacket.class, NetworkDirection.PLAY_TO_SERVER), entry(23, ClanDisbandPacket.class, NetworkDirection.PLAY_TO_SERVER),
             entry(24, ClanRejectJoinPacket.class, NetworkDirection.PLAY_TO_SERVER), entry(25, ClanKickMemberPacket.class, NetworkDirection.PLAY_TO_SERVER),
             entry(26, ClanChangeColorPacket.class, NetworkDirection.PLAY_TO_SERVER), entry(27, PrefixListPacket.class, NetworkDirection.PLAY_TO_CLIENT),
-            entry(28, KillFeedPacket.class, NetworkDirection.PLAY_TO_CLIENT)
+            entry(28, KillFeedPacket.class, NetworkDirection.PLAY_TO_CLIENT),
+            entry(29, VoteSetModePacket.class, NetworkDirection.PLAY_TO_SERVER),
+            entry(30, ChaosStatePacket.class, NetworkDirection.PLAY_TO_CLIENT)
     );
 
     private PacketProtocol() { }

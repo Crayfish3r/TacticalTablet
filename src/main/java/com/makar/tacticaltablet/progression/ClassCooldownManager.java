@@ -1,5 +1,6 @@
 package com.makar.tacticaltablet.progression;
 
+import com.makar.tacticaltablet.game.MapSetManager;
 import com.makar.tacticaltablet.tablet.PlayerTabletState;
 
 import net.minecraft.server.level.ServerPlayer;
@@ -73,6 +74,7 @@ public class ClassCooldownManager {
 
     public static void setCooldownForSelectedClass(ServerPlayer player) {
         if (player == null || !PlayerTabletState.isKitUsed(player)) return;
+        if (MapSetManager.isChaosSet()) return;
 
         int classId = classIdForClass(PlayerTabletState.getSelectedClass(player));
         if (classId < 0) return;

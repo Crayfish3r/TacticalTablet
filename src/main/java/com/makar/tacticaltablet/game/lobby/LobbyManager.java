@@ -6,10 +6,13 @@ import com.makar.tacticaltablet.airdrop.AirdropManager;
 import com.makar.tacticaltablet.game.contract.ContractManager;
 import com.makar.tacticaltablet.game.lives.LivesManager;
 import com.makar.tacticaltablet.game.respawn.RtpTimerManager;
+import com.makar.tacticaltablet.game.MapSetManager;
+import com.makar.tacticaltablet.game.chaos.ChaosSetManager;
 import com.makar.tacticaltablet.game.team.TeamMatchManager;
 import com.makar.tacticaltablet.inventory.InventoryManager;
 import com.makar.tacticaltablet.progression.ClassXPManager;
 import com.makar.tacticaltablet.tablet.net.PacketHandler;
+import com.makar.tacticaltablet.tablet.net.ChaosStatePacket;
 import com.makar.tacticaltablet.tablet.PlayerTabletState;
 
 import net.minecraft.core.BlockPos;
@@ -87,7 +90,7 @@ public class LobbyManager {
         if (canUseTabletNow) {
             InventoryManager.giveFreshTablet(player);
             AirdropManager.giveCompassToJoiningPlayer(player);
-            if (matchRunning) {
+            if (matchRunning && (!MapSetManager.isChaosSet() || !ChaosSetManager.requiresSelection(player))) {
                 RtpTimerManager.start(player);
             } else {
                 sync(player);
@@ -172,6 +175,7 @@ public class LobbyManager {
         if (player == null) return;
 
         PacketHandler.sendToPlayer(player, ClassXPManager.createStatePacket(player));
+        PacketHandler.sendToPlayer(player, new ChaosStatePacket(ChaosSetManager.snapshot(player)));
         ContractManager.syncSelection(player);
     }
 }

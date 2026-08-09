@@ -37,8 +37,13 @@ public class KitManager {
 
     public static boolean giveKit(ServerPlayer player, String kitName) {
         if (player == null || kitName == null || kitName.isBlank()) return false;
+        return giveKit(player, kitName, ClassXPManager.getLevel(player, kitName));
+    }
 
-        int tier = ClassXPManager.getLevel(player, kitName);
+    public static boolean giveKit(ServerPlayer player, String kitName, int requestedTier) {
+        if (player == null || kitName == null || kitName.isBlank()) return false;
+
+        int tier = ClassTier.clamp(requestedTier).id();
         List<String> regularCandidates = getKitFileCandidates(kitName, tier, false);
         String loadedKitName = regularCandidates.get(0);
         String loadedDirectory = KIT_DIRECTORY;

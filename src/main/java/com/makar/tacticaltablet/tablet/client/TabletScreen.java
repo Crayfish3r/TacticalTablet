@@ -428,13 +428,23 @@ public class TabletScreen extends Screen {
     }
 
     private void renderShell(GuiGraphics g, int x, int y) {
-        drawHeader(g, x, y, PAGES[pageState.currentPage()].title());
+        if (ChaosClientState.isActive() && PAGES[pageState.currentPage()].type() == PageType.ACTIONS) {
+            drawHeader(g, x, y, "ХАОС · Игра " + ChaosClientState.gameNumber());
+            g.drawString(font, "Выбери класс для следующей жизни", x + HEADER_X, y + 36, 0xFFFFA6CE, false);
+        } else {
+            drawHeader(g, x, y, PAGES[pageState.currentPage()].title());
+        }
     }
 
     private void renderFooter(GuiGraphics g, int x, int y) {
         TabletPage page = PAGES[pageState.currentPage()];
         String footer;
         if (page.type() == PageType.ACTIONS) {
+            if (ChaosClientState.isActive()) {
+                footer = "Доступно: " + ChaosClientState.availableCount() + " из 3";
+                g.drawString(Minecraft.getInstance().font, fitText(footer, 266), x + 96, y + 201, 0xFFFFA6CE, false);
+                return;
+            }
             int rows = ScrollableGridLayout.rowCount(page.actions().size());
             footer = page.actions().size() + " классов";
             if (rows > ScrollableGridLayout.VISIBLE_ROWS) {
@@ -934,10 +944,9 @@ public class TabletScreen extends Screen {
                                   int mouseX, int mouseY, float partialTick, boolean focused) {
         boolean hover = focused || mouseX >= x && mouseX < x + width && mouseY >= y && mouseY < y + height;
         ActionPresentation presentation = describeAction(action);
-        ClassTier actualTier = ClassButtonStyle.actualTier(
-                action.fixedLevel(),
-                TabletClientState.getClassTier(action.classKey())
-        );
+        ClassTier actualTier = ChaosClientState.isActive() && ChaosClientState.isOffered(action.classKey())
+                ? ClassTier.clamp(ChaosClientState.tier(action.classKey()))
+                : ClassButtonStyle.actualTier(action.fixedLevel(), TabletClientState.getClassTier(action.classKey()));
         ResourceLocation resolvedIcon = ClassDefinitions.byClassKey(action.classKey())
                 .map(definition -> ClassIconResolver.resolve(definition,
                         ClientResourcePresenceCache::exists))
@@ -957,6 +966,11 @@ public class TabletScreen extends Screen {
 
     private void pressAction(TabletAction action) {
         if (!isActionActive(action) || action.locked()) return;
+        if (ChaosClientState.isActive() && !action.rtp()) {
+            playSound(CLICK);
+            PacketHandler.sendToServer(new TabletPacket(action.actionId()));
+            return;
+        }
         if (isClanWarSetupOnly()) return;
         if (TabletClientState.isCompetitiveSet() && action.shop()) return;
         if (isClanWarSoloShopRestricted(action)) return;
@@ -990,6 +1004,13 @@ public class TabletScreen extends Screen {
     }
 
     private boolean isActionActive(TabletAction action) {
+        if (ChaosClientState.isActive() && !action.rtp()) {
+            return TabletClientState.isGameRunning()
+                    && ChaosClientState.requiresSelection()
+                    && ChaosClientState.isOffered(action.classKey())
+                    && !ChaosClientState.isSpent(action.classKey())
+                    && ChaosClientState.selected().isBlank();
+        }
         if (action.locked() || isClanWarSetupOnly()) return false;
         if (isMarineAction(action) && !isMarineUnlockedForCurrentClan()) return canBuyMarineForCurrentClan();
         if (action.exclusive() && !isMarineAction(action)
@@ -1014,6 +1035,16 @@ public class TabletScreen extends Screen {
 
     private ActionPresentation describeAction(TabletAction action) {
         boolean active = isActionActive(action);
+        if (ChaosClientState.isActive() && !action.rtp()) {
+            if (action.classKey().equals(ChaosClientState.selected()))
+                return unavailable("Используется сейчас", "✓");
+            if (ChaosClientState.isSpent(action.classKey()))
+                return unavailable("Класс уже потрачен", "×");
+            if (!ChaosClientState.isOffered(action.classKey()))
+                return unavailable("В режиме Хаос доступны только 3 класса этой игры");
+            return new ActionPresentation("Доступен в Хаосе", "Выбрать для следующей жизни",
+                    active, 0xFFFF4FA3, "!");
+        }
         if (isClanWarSetupOnly()) return unavailable("Матч ещё не начался");
         if (isMarineAction(action)) {
             long cooldown = TabletClientState.getCooldown(action.actionId());
@@ -1154,10 +1185,15 @@ public class TabletScreen extends Screen {
     }
 
     private boolean isRtpActive() {
-        return TabletClientState.isGameRunning() && !TabletClientState.isRtpUsed();
+        return TabletClientState.isGameRunning()
+                && !TabletClientState.isRtpUsed()
+                && (!ChaosClientState.isActive() || !ChaosClientState.requiresSelection());
     }
 
     private String rtpUnavailableReason() {
+        if (ChaosClientState.isActive() && ChaosClientState.requiresSelection()) {
+            return "\u0421\u043d\u0430\u0447\u0430\u043b\u0430 \u0432\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u043a\u043b\u0430\u0441\u0441 \u0434\u043b\u044f \u0441\u043b\u0435\u0434\u0443\u044e\u0449\u0435\u0439 \u0436\u0438\u0437\u043d\u0438";
+        }
         if (TabletClientState.isRtpUsed()) return "RTP уже использован";
         if (!TabletClientState.isGameRunning()) return "Недоступно: нет активной игры";
         return "Случайная телепортация";

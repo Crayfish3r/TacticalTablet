@@ -18,9 +18,9 @@ class PacketRegistryTest {
         Map<Class<?>, PacketProtocol.Entry> map = entries.stream()
                 .collect(java.util.stream.Collectors.toMap(PacketProtocol.Entry::packetClass, entry -> entry));
 
-        assertEquals(29, entries.size());
-        assertEquals(29, new HashSet<>(entries.stream().map(PacketProtocol.Entry::id).toList()).size());
-        assertEquals(IntStream.range(0, 29).boxed().toList(), entries.stream().map(PacketProtocol.Entry::id).toList());
+        assertEquals(31, entries.size());
+        assertEquals(31, new HashSet<>(entries.stream().map(PacketProtocol.Entry::id).toList()).size());
+        assertEquals(IntStream.range(0, 31).boxed().toList(), entries.stream().map(PacketProtocol.Entry::id).toList());
         assertEquals(List.of(
                 TabletPacket.class, TabletStatePacket.class, VoteModePacket.class, JoinTeamPacket.class, VoteMapPacket.class,
                 MapVoteStatePacket.class, SetCompetitivePacket.class, SetClanWarPacket.class, ContractSelectionStatePacket.class,
@@ -32,7 +32,7 @@ class PacketRegistryTest {
                 com.makar.tacticaltablet.clan.ClanLeavePacket.class, com.makar.tacticaltablet.clan.ClanDisbandPacket.class,
                 com.makar.tacticaltablet.clan.ClanRejectJoinPacket.class, com.makar.tacticaltablet.clan.ClanKickMemberPacket.class,
                 com.makar.tacticaltablet.clan.ClanChangeColorPacket.class, com.makar.tacticaltablet.prefix.PrefixListPacket.class,
-                KillFeedPacket.class
+                KillFeedPacket.class, VoteSetModePacket.class, ChaosStatePacket.class
         ), entries.stream().map(PacketProtocol.Entry::packetClass).toList());
         assertEquals(19, map.get(com.makar.tacticaltablet.clan.ClanCreatePacket.class).id());
         assertEquals(18, map.get(com.makar.tacticaltablet.clan.ClanListPacket.class).id());
@@ -48,7 +48,8 @@ class PacketRegistryTest {
                 NetworkDirection.PLAY_TO_CLIENT, NetworkDirection.PLAY_TO_SERVER, NetworkDirection.PLAY_TO_SERVER,
                 NetworkDirection.PLAY_TO_SERVER, NetworkDirection.PLAY_TO_SERVER, NetworkDirection.PLAY_TO_SERVER,
                 NetworkDirection.PLAY_TO_SERVER, NetworkDirection.PLAY_TO_SERVER, NetworkDirection.PLAY_TO_SERVER,
-                NetworkDirection.PLAY_TO_CLIENT, NetworkDirection.PLAY_TO_CLIENT
+                NetworkDirection.PLAY_TO_CLIENT, NetworkDirection.PLAY_TO_CLIENT,
+                NetworkDirection.PLAY_TO_SERVER, NetworkDirection.PLAY_TO_CLIENT
         ), entries.stream().map(PacketProtocol.Entry::direction).toList());
         PacketProtocol.verify();
     }
@@ -65,7 +66,7 @@ class PacketRegistryTest {
                 PacketHandler.CLAN_CREATE, PacketHandler.CLAN_JOIN_REQUEST, PacketHandler.CLAN_ACCEPT_JOIN,
                 PacketHandler.CLAN_LEAVE, PacketHandler.CLAN_DISBAND, PacketHandler.CLAN_REJECT_JOIN,
                 PacketHandler.CLAN_KICK_MEMBER, PacketHandler.CLAN_CHANGE_COLOR, PacketHandler.PREFIX_LIST,
-                PacketHandler.KILL_FEED
+                PacketHandler.KILL_FEED, PacketHandler.VOTE_SET_MODE, PacketHandler.CHAOS_STATE
         );
 
         assertEquals(PacketProtocol.entries().stream().map(PacketProtocol.Entry::id).toList(), constants);

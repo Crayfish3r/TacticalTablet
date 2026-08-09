@@ -4,6 +4,7 @@ import com.makar.tacticaltablet.clan.ClanManager;
 import com.makar.tacticaltablet.game.GameStateManager;
 import com.makar.tacticaltablet.game.MatchMode;
 import com.makar.tacticaltablet.game.MapSetManager;
+import com.makar.tacticaltablet.game.chaos.ChaosSetManager;
 import com.makar.tacticaltablet.game.contract.ContractManager;
 import com.makar.tacticaltablet.game.lives.LivesManager;
 import com.makar.tacticaltablet.game.respawn.RtpTimerManager;
@@ -13,6 +14,7 @@ import com.makar.tacticaltablet.inventory.InventoryManager;
 import com.makar.tacticaltablet.tablet.TabletAppearanceManager;
 import com.makar.tacticaltablet.tablet.net.PacketHandler;
 import com.makar.tacticaltablet.tablet.net.TabletStatePacket;
+import com.makar.tacticaltablet.tablet.net.ChaosStatePacket;
 import com.makar.tacticaltablet.tablet.PlayerTabletState;
 
 import net.minecraft.network.chat.Component;
@@ -50,6 +52,7 @@ public class ClassXPManager {
 
     public static int addXP(ServerPlayer player, String clazz, int amount) {
         if (player == null || clazz == null || clazz.isBlank() || amount <= 0) return 0;
+        if (MapSetManager.isChaosSet()) return 0;
         if (PlayerProgressManager.isShopClass(clazz)) return 0;
 
         int awarded = PlayerProgressManager.addXP(player, clazz, applyBoost(player, amount));
@@ -59,6 +62,7 @@ public class ClassXPManager {
 
     public static void addXPToAllClasses(ServerPlayer player, int amount) {
         if (player == null || amount <= 0) return;
+        if (MapSetManager.isChaosSet()) return;
 
         for (String clazz : PlayerProgressManager.getStandardClasses()) {
             PlayerProgressManager.addXP(player, clazz, applyBoost(player, amount));
@@ -86,6 +90,7 @@ public class ClassXPManager {
 
         InventoryManager.updateTabletModels(player);
         PacketHandler.sendToPlayer(player, createStatePacket(player));
+        PacketHandler.sendToPlayer(player, new ChaosStatePacket(ChaosSetManager.snapshot(player)));
         ClanManager.sync(player);
         ContractManager.syncSelection(player);
     }

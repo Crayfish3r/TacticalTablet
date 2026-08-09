@@ -24,7 +24,7 @@ import java.util.function.Supplier;
 
 /** Tactical Tablet protocol registry. Protocol 34 carries complete personalized kill-feed entries. */
 public final class PacketHandler {
-    public static final String VERSION = "34";
+    public static final String VERSION = "36";
 
     public static final int TABLET = 0, TABLET_STATE = 1, VOTE_MODE = 2, JOIN_TEAM = 3, VOTE_MAP = 4,
             MAP_VOTE_STATE = 5, SET_COMPETITIVE = 6, SET_CLAN_WAR = 7, CONTRACT_SELECTION_STATE = 8,
@@ -33,7 +33,7 @@ public final class PacketHandler {
             SPECTATOR_CAMERA_SWITCH = 16, SPECTATOR_CAMERA_LOCK_STATE = 17, CLAN_LIST = 18,
             CLAN_CREATE = 19, CLAN_JOIN_REQUEST = 20, CLAN_ACCEPT_JOIN = 21, CLAN_LEAVE = 22,
             CLAN_DISBAND = 23, CLAN_REJECT_JOIN = 24, CLAN_KICK_MEMBER = 25,
-            CLAN_CHANGE_COLOR = 26, PREFIX_LIST = 27, KILL_FEED = 28;
+            CLAN_CHANGE_COLOR = 26, PREFIX_LIST = 27, KILL_FEED = 28, VOTE_SET_MODE = 29, CHAOS_STATE = 30;
 
     public static final SimpleChannel INSTANCE = NetworkRegistry.newSimpleChannel(
             new ResourceLocation("tacticaltablet", "main"), () -> VERSION, VERSION::equals, VERSION::equals);
@@ -85,6 +85,8 @@ public final class PacketHandler {
         register(CLAN_CHANGE_COLOR, ClanChangeColorPacket.class, ClanChangeColorPacket::encode, ClanChangeColorPacket::new, ClanChangeColorPacket::handle, NetworkDirection.PLAY_TO_SERVER);
         register(PREFIX_LIST, PrefixListPacket.class, PrefixListPacket::encode, PrefixListPacket::new, PrefixListPacket::handle, NetworkDirection.PLAY_TO_CLIENT);
         register(KILL_FEED, KillFeedPacket.class, KillFeedPacket::encode, KillFeedPacket::new, KillFeedPacket::handle, NetworkDirection.PLAY_TO_CLIENT);
+        register(VOTE_SET_MODE, VoteSetModePacket.class, VoteSetModePacket::encode, VoteSetModePacket::new, VoteSetModePacket::handle, NetworkDirection.PLAY_TO_SERVER);
+        register(CHAOS_STATE, ChaosStatePacket.class, ChaosStatePacket::encode, ChaosStatePacket::new, ChaosStatePacket::handle, NetworkDirection.PLAY_TO_CLIENT);
         verifyUniqueIds();
         registered = true;
     }

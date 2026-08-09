@@ -50,6 +50,11 @@ public class ClientEvents {
             return;
         }
 
+        if (ChaosClientState.requiresSelection() && !(current instanceof TabletScreen)) {
+            mc.setScreen(new TabletScreen());
+            return;
+        }
+
         boolean voting = TabletClientState.getMatchPhase() == MatchPhase.VOTING;
         boolean teamSelect = TabletClientState.getMatchPhase() == MatchPhase.TEAM_SELECT;
         boolean mapVoting = TabletClientState.getMatchPhase() == MatchPhase.MAP_VOTING

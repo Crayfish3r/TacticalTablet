@@ -13,6 +13,7 @@ import com.makar.tacticaltablet.game.lives.LivesManager;
 import com.makar.tacticaltablet.game.lobby.LobbyManager;
 import com.makar.tacticaltablet.game.respawn.RtpTimerManager;
 import com.makar.tacticaltablet.game.respawn.DeathTransitionManager;
+import com.makar.tacticaltablet.game.chaos.ChaosSetManager;
 import com.makar.tacticaltablet.game.respawn.PostRtpProtectionManager;
 import com.makar.tacticaltablet.game.teleport.SafeTeleport;
 import com.makar.tacticaltablet.game.team.TeamMatchManager;
@@ -534,6 +535,7 @@ public class ServerEvents {
         PlayerProgressManager.addDeath(victim);
         DiscordLeaderboardService.recordMatchDeath(victim);
         TeamId victimTeam = TeamMatchManager.getTeam(victim);
+        ChaosSetManager.onDeath(victim);
         LivesManager.handleDeath(victim);
         if (LivesManager.isEliminated(victim)) {
             SetMatchRuntime.recordPlayerEliminated(victim.getUUID(), victim.server.getTickCount());
@@ -587,7 +589,8 @@ public class ServerEvents {
         PlayerProgressManager.addKill(killer);
         DiscordLeaderboardService.recordMatchKill(killer);
         int coinsBefore = PlayerProgressManager.getCoins(killer);
-        PlayerProgressManager.addCoins(killer, PlayerProgressManager.KILL_COIN_REWARD);
+        PlayerProgressManager.addCoins(killer, MapSetManager.isChaosSet()
+                ? ChaosSetManager.KILL_COINS : PlayerProgressManager.KILL_COIN_REWARD);
         int awardedCoins = Math.max(0, PlayerProgressManager.getCoins(killer) - coinsBefore);
         for (CombatAssistTracker.AssistCredit assist : SetMatchRuntime.resolveAssists(
                 victim.getUUID(), killer.getUUID(), victim.server.getTickCount())) {
@@ -596,6 +599,7 @@ public class ServerEvents {
 
         String clazz = PlayerTabletState.getSelectedClass(killer);
         if (clazz == null || clazz.isBlank()) return new TacticalKillFeed.KillReward(awardedCoins, 0);
+        if (MapSetManager.isChaosSet()) return new TacticalKillFeed.KillReward(awardedCoins, 0);
 
         XPResult result = calculateXP(killer, victim, source, direct);
         if (result.xp <= 0) return new TacticalKillFeed.KillReward(awardedCoins, 0);

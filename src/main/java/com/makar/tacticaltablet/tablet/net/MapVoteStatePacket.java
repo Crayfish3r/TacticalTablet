@@ -1,6 +1,7 @@
 package com.makar.tacticaltablet.tablet.net;
 
 import com.makar.tacticaltablet.tablet.client.MapVoteClientState;
+import com.makar.tacticaltablet.game.SetGameMode;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraftforge.network.NetworkEvent;
 
@@ -20,6 +21,9 @@ public final class MapVoteStatePacket {
     private final boolean operator;
     private final boolean nextSetCompetitive;
     private final boolean nextSetClanWar;
+    private final boolean ordinaryModesEnabled;
+    private final SetGameMode selectedMode;
+    private final Map<SetGameMode, Integer> modeVoteCounts;
     private final int secondsLeft;
     private final String selectedMap;
     private final List<String> maps;
@@ -31,6 +35,9 @@ public final class MapVoteStatePacket {
             boolean operator,
             boolean nextSetCompetitive,
             boolean nextSetClanWar,
+            boolean ordinaryModesEnabled,
+            SetGameMode selectedMode,
+            Map<SetGameMode, Integer> modeVoteCounts,
             int secondsLeft,
             String selectedMap,
             List<String> maps,
@@ -41,6 +48,9 @@ public final class MapVoteStatePacket {
         this.operator = operator;
         this.nextSetCompetitive = nextSetCompetitive;
         this.nextSetClanWar = nextSetClanWar;
+        this.ordinaryModesEnabled = ordinaryModesEnabled;
+        this.selectedMode = selectedMode;
+        this.modeVoteCounts = sanitizeModeCounts(modeVoteCounts);
         this.secondsLeft = Math.max(0, secondsLeft);
         this.selectedMap = selectedMap == null ? "" : selectedMap;
         this.maps = sanitizeMaps(maps);
@@ -53,6 +63,11 @@ public final class MapVoteStatePacket {
         operator = buf.readBoolean();
         nextSetCompetitive = buf.readBoolean();
         nextSetClanWar = buf.readBoolean();
+        ordinaryModesEnabled = buf.readBoolean();
+        selectedMode = PacketCodecs.readOptionalEnumOrdinal(buf, SetGameMode.values(), "set mode vote");
+        Map<SetGameMode, Integer> decodedModeCounts = new LinkedHashMap<>();
+        for (SetGameMode mode : SetGameMode.values()) if (mode.selectable()) decodedModeCounts.put(mode, Math.max(0, buf.readInt()));
+        modeVoteCounts = Map.copyOf(decodedModeCounts);
         secondsLeft = Math.max(0, buf.readInt());
         selectedMap = buf.readUtf(MAX_MAP_NAME_LENGTH);
 
@@ -75,6 +90,9 @@ public final class MapVoteStatePacket {
         buf.writeBoolean(operator);
         buf.writeBoolean(nextSetCompetitive);
         buf.writeBoolean(nextSetClanWar);
+        buf.writeBoolean(ordinaryModesEnabled);
+        buf.writeByte(selectedMode == null ? -1 : selectedMode.ordinal());
+        for (SetGameMode mode : SetGameMode.values()) if (mode.selectable()) buf.writeInt(modeVoteCounts.getOrDefault(mode, 0));
         buf.writeInt(secondsLeft);
         buf.writeUtf(selectedMap, MAX_MAP_NAME_LENGTH);
         buf.writeInt(maps.size());
@@ -92,6 +110,9 @@ public final class MapVoteStatePacket {
                 operator,
                 nextSetCompetitive,
                 nextSetClanWar,
+                ordinaryModesEnabled,
+                selectedMode,
+                modeVoteCounts,
                 secondsLeft,
                 selectedMap,
                 maps,
@@ -114,6 +135,14 @@ public final class MapVoteStatePacket {
         Map<String, Integer> result = new LinkedHashMap<>();
         for (String map : maps) {
             result.put(map, Math.max(0, input == null ? 0 : input.getOrDefault(map, 0)));
+        }
+        return Map.copyOf(result);
+    }
+
+    private static Map<SetGameMode, Integer> sanitizeModeCounts(Map<SetGameMode, Integer> input) {
+        Map<SetGameMode, Integer> result = new LinkedHashMap<>();
+        for (SetGameMode mode : SetGameMode.values()) if (mode.selectable()) {
+            result.put(mode, Math.max(0, input == null ? 0 : input.getOrDefault(mode, 0)));
         }
         return Map.copyOf(result);
     }

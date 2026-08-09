@@ -1,9 +1,11 @@
 package com.makar.tacticaltablet.tablet.net;
 
 import com.makar.tacticaltablet.clan.ClanManager;
+import com.makar.tacticaltablet.core.TacticalTabletMod;
 import com.makar.tacticaltablet.game.GameStateManager;
 import com.makar.tacticaltablet.game.MatchAdmissionManager;
 import com.makar.tacticaltablet.game.MapSetManager;
+import com.makar.tacticaltablet.game.chaos.ChaosSetManager;
 import com.makar.tacticaltablet.game.clanwar.ClanWarManager;
 import com.makar.tacticaltablet.game.lives.LivesManager;
 import com.makar.tacticaltablet.game.lobby.LobbyManager;
@@ -82,18 +84,25 @@ public class TabletPacket {
             }
 
             if (isUnlockBaseAction(actionId)) {
+                if (MapSetManager.isChaosSet()) { LobbyManager.sync(player); return; }
                 handleBaseUnlock(player, actionId - UNLOCK_BASE_ACTION_OFFSET);
                 return;
             }
 
             Optional<UpgradeAction> upgrade = decodeUpgradeAction(actionId);
             if (upgrade.isPresent()) {
+                if (MapSetManager.isChaosSet()) { LobbyManager.sync(player); return; }
                 handleTierUpgrade(player, upgrade.get().classActionId(), upgrade.get().targetTier());
                 return;
             }
 
             String kit = KITS.get(actionId);
             if (kit == null) {
+                return;
+            }
+
+            if (MapSetManager.isChaosSet()) {
+                handleKit(player, kit);
                 return;
             }
 
@@ -229,6 +238,10 @@ public class TabletPacket {
             LobbyManager.sync(player);
             return;
         }
+        if (MapSetManager.isChaosSet()) {
+            handleChaosKit(player, kit);
+            return;
+        }
         if (MapSetManager.isCompetitiveSet() && PlayerProgressManager.isShopClass(kit)) {
             player.sendSystemMessage(Component.literal("[WAR] Магазинные классы недоступны в соревновательном режиме."));
             LobbyManager.sync(player);
@@ -319,6 +332,34 @@ public class TabletPacket {
             InventoryManager.clearTablets(player);
         }
 
+        LobbyManager.sync(player);
+    }
+
+    private void handleChaosKit(ServerPlayer player, String kit) {
+        if (!GameStateManager.isRunning(player.server) || !LivesManager.canContinueMatch(player)
+                || (!GameStateManager.isInLobby(player) && !player.getTags().contains("in_lobby"))) {
+            LobbyManager.sync(player);
+            return;
+        }
+        if (!ChaosSetManager.canUse(player, kit)) {
+            player.sendSystemMessage(Component.literal("[WAR] В режиме Хаос доступны только три класса текущей игры; использованные классы выбрать нельзя."));
+            LobbyManager.sync(player);
+            return;
+        }
+        if (!KitManager.giveKit(player, kit, ChaosSetManager.tierFor(player, kit))) {
+            player.sendSystemMessage(Component.literal("[WAR] Не удалось выдать набор Хаоса. Выбери другой класс или проверь конфигурацию набора."));
+            LobbyManager.sync(player);
+            return;
+        }
+        if (!ChaosSetManager.select(player, kit)) {
+            TacticalTabletMod.LOGGER.error("Chaos class selection changed unexpectedly after kit issue for player {}", player.getUUID());
+            LobbyManager.sync(player);
+            return;
+        }
+        PlayerTabletState.setSelectedClass(player, kit);
+        PlayerTabletState.setKitUsed(player);
+        RtpTimerManager.start(player);
+        if (PlayerTabletState.isRtpUsed(player)) InventoryManager.clearTablets(player);
         LobbyManager.sync(player);
     }
 

@@ -23,6 +23,7 @@ import com.makar.tacticaltablet.game.lifecycle.integration.MatchStartRejectionRe
 import com.makar.tacticaltablet.game.lifecycle.integration.MatchStartResult;
 import com.makar.tacticaltablet.game.lifecycle.integration.MatchStartStatus;
 import com.makar.tacticaltablet.game.respawn.RespawnControlManager;
+import com.makar.tacticaltablet.game.chaos.ChaosSetManager;
 import com.makar.tacticaltablet.game.respawn.RtpTimerManager;
 import com.makar.tacticaltablet.game.teleport.SafeTeleport;
 import com.makar.tacticaltablet.game.team.TeamId;
@@ -433,6 +434,7 @@ public class GameStateManager {
         }
 
         showWinnerTitle(server, winnerName, winnerTeam);
+        ChaosSetManager.finishGame();
     }
 
 
@@ -475,6 +477,7 @@ public class GameStateManager {
         matchPhase = MatchPhase.WAITING;
         currentMode = MatchMode.SOLO;
         SetMatchRuntime.reset();
+        ChaosSetManager.clear();
         ClanWarManager.resetRuntime();
         VoteManager.reset();
         SpectatorCameraManager.onMatchEnd(server);
@@ -504,6 +507,7 @@ public class GameStateManager {
         SET_REWARD_COUNTDOWN.reset();
         matchPhase = MatchPhase.WAITING;
         SetMatchRuntime.reset();
+        ChaosSetManager.clear();
 
         cleanupMatchRuntime(server);
         broadcast(server, hadActiveState
@@ -1037,6 +1041,7 @@ public class GameStateManager {
                     PassiveClassXPManager.clearAll();
                     RespawnControlManager.reset(server);
                     LivesManager.resetAll(server);
+                    ChaosSetManager.beginGame(server, MapSetManager.getCurrentGameNumber());
                 }
                 case CONFIGURE_TEAMS -> {
                     if (MapSetManager.isClanWarSet()) {

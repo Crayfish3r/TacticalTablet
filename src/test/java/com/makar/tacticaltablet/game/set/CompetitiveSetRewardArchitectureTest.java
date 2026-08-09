@@ -38,7 +38,7 @@ class CompetitiveSetRewardArchitectureTest {
         String discord = source("integration/discord/DiscordLeaderboardService.java");
 
         assertTrue(progress.contains("public static final int KILL_COIN_REWARD = 5;"));
-        assertTrue(events.contains("PlayerProgressManager.addCoins(killer, PlayerProgressManager.KILL_COIN_REWARD);"));
+        assertTrue(events.contains("? ChaosSetManager.KILL_COINS : PlayerProgressManager.KILL_COIN_REWARD"));
         assertTrue(rewardService.contains("return participantCount < 2 ? 0 : 15 + Math.max(0, participantCount - 2) * 5;"));
         assertTrue(discord.contains("ClanManager.addClanCoins(server, clanWinner.clanId, CLAN_WAR_WIN_CLAN_COINS);"));
     }

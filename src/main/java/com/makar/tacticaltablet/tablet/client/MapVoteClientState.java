@@ -1,5 +1,6 @@
 package com.makar.tacticaltablet.tablet.client;
 
+import com.makar.tacticaltablet.game.SetGameMode;
 import net.minecraft.client.Minecraft;
 
 import java.util.LinkedHashMap;
@@ -12,6 +13,9 @@ public final class MapVoteClientState {
     private static boolean operator;
     private static boolean nextSetCompetitive;
     private static boolean nextSetClanWar;
+    private static boolean ordinaryModesEnabled;
+    private static SetGameMode selectedMode;
+    private static Map<SetGameMode, Integer> modeVoteCounts = Map.of();
     private static int secondsLeft;
     private static String selectedMap = "";
     private static List<String> maps = List.of();
@@ -26,6 +30,9 @@ public final class MapVoteClientState {
             boolean isOperator,
             boolean competitive,
             boolean clanWar,
+            boolean modesEnabled,
+            SetGameMode mode,
+            Map<SetGameMode, Integer> modeCounts,
             int remainingSeconds,
             String selected,
             List<String> mapPool,
@@ -35,6 +42,9 @@ public final class MapVoteClientState {
         operator = isOperator;
         nextSetCompetitive = competitive;
         nextSetClanWar = clanWar;
+        ordinaryModesEnabled = modesEnabled;
+        selectedMode = mode;
+        modeVoteCounts = modeCounts == null ? Map.of() : Map.copyOf(modeCounts);
         secondsLeft = Math.max(0, remainingSeconds);
         selectedMap = selected == null ? "" : selected;
         maps = mapPool == null ? List.of() : List.copyOf(mapPool);
@@ -66,6 +76,10 @@ public final class MapVoteClientState {
     public static boolean isNextSetClanWar() {
         return nextSetClanWar;
     }
+
+    public static boolean areOrdinaryModesEnabled() { return ordinaryModesEnabled; }
+    public static SetGameMode getSelectedMode() { return selectedMode; }
+    public static int getModeVoteCount(SetGameMode mode) { return modeVoteCounts.getOrDefault(mode, 0); }
 
     public static String getSelectedMap() {
         return selectedMap;

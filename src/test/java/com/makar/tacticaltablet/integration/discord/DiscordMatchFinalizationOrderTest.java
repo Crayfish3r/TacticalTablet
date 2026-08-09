@@ -37,7 +37,7 @@ class DiscordMatchFinalizationOrderTest {
         assertTrue(!processDeath.contains("checkForMatchEnd"));
         assertTrue(!killerConsequences.contains("checkForMatchEnd"));
         assertTrue(killerConsequences.indexOf("DiscordLeaderboardService.recordMatchKill(killer)")
-                < killerConsequences.indexOf("PlayerProgressManager.addCoins(killer, PlayerProgressManager.KILL_COIN_REWARD)"));
+                < killerConsequences.indexOf("PlayerProgressManager.addCoins(killer,"));
     }
 
     @Test

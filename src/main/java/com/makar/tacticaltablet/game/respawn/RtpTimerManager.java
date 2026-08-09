@@ -5,6 +5,7 @@ import com.makar.tacticaltablet.clan.ClanManager;
 import com.makar.tacticaltablet.game.GameStateManager;
 import com.makar.tacticaltablet.game.MatchAdmissionManager;
 import com.makar.tacticaltablet.game.MapSetManager;
+import com.makar.tacticaltablet.game.chaos.ChaosSetManager;
 import com.makar.tacticaltablet.game.set.SetMatchRuntime;
 import com.makar.tacticaltablet.game.clanwar.ClanWarManager;
 import com.makar.tacticaltablet.game.lives.LivesManager;
@@ -345,7 +346,8 @@ public class RtpTimerManager {
                 true,
                 GameStateManager.isRunning(player.server),
                 sameMatch,
-                LivesManager.canContinueMatch(player) && clanEligible && !player.isSpectator(),
+                LivesManager.canContinueMatch(player) && clanEligible && !player.isSpectator()
+                        && (!MapSetManager.isChaosSet() || !ChaosSetManager.requiresSelection(player)),
                 PlayerTabletState.isRtpUsed(player),
                 GameStateManager.isInLobby(player),
                 player.getTags().contains("in_lobby")

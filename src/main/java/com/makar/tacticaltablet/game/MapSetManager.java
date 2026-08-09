@@ -54,6 +54,7 @@ public final class MapSetManager {
     private static List<String> votingMaps = List.of();
 
     private static final Map<UUID, String> votes = new HashMap<>();
+    private static final Map<UUID, SetGameMode> modeVotes = new HashMap<>();
     private static SetState state = new SetState();
     private static Path statePath;
     private static boolean voting;
@@ -106,8 +107,12 @@ public final class MapSetManager {
             state.setReportDispatched = false;
             state.competitiveSet = state.nextSetCompetitive;
             state.clanWarSet = state.nextSetClanWar;
+            state.setMode = state.competitiveSet || state.clanWarSet
+                    ? SetGameMode.CASUAL : state.nextSetMode;
+            state.chaosDeck.clear();
             state.nextSetCompetitive = false;
             state.nextSetClanWar = false;
+            state.nextSetMode = SetGameMode.CASUAL;
             saveState();
         } else if (state.lastRotation.isBlank() && !lastRotation.isBlank()) {
             state.lastRotation = lastRotation;
@@ -309,6 +314,38 @@ public final class MapSetManager {
         return state.clanWarSet;
     }
 
+    public static synchronized boolean isChaosSet() {
+        return !state.competitiveSet && !state.clanWarSet && state.setMode == SetGameMode.CHAOS;
+    }
+
+    public static synchronized SetGameMode getSetMode() {
+        return isChaosSet() ? SetGameMode.CHAOS : SetGameMode.CASUAL;
+    }
+
+    public static synchronized void fallbackChaosToCasual(MinecraftServer server) {
+        fallbackChaosToCasual(server, "техническая ошибка подготовки режима");
+    }
+
+    public static synchronized void fallbackChaosToCasual(MinecraftServer server, String reason) {
+        if (state.setMode != SetGameMode.CHAOS) return;
+        state.setMode = SetGameMode.CASUAL;
+        state.chaosDeck.clear();
+        if (!saveState()) TacticalTabletMod.LOGGER.error("Failed to persist safe fallback from Chaos to Casual");
+        String safeReason = reason == null || reason.isBlank() ? "неизвестная ошибка" : reason.trim();
+        broadcast(server, "[WAR] Хаос недоступен: " + safeReason + ". Сет продолжится в режиме Казуал.");
+    }
+
+    public static synchronized List<String> getChaosDeck() { return List.copyOf(state.chaosDeck); }
+
+    public static synchronized boolean saveChaosDeck(MinecraftServer server, List<String> cards) {
+        initStorage(server);
+        List<String> previous = List.copyOf(state.chaosDeck);
+        state.chaosDeck = new ArrayList<>(cards == null ? List.of() : cards);
+        if (saveState()) return true;
+        state.chaosDeck = new ArrayList<>(previous);
+        return false;
+    }
+
     public static synchronized boolean isNextSetCompetitive() {
         return state.nextSetCompetitive;
     }
@@ -352,6 +389,7 @@ public final class MapSetManager {
         RewardPhaseStatus previousRewardPhaseStatus = state.rewardPhaseStatus;
         boolean previousNextSetCompetitive = state.nextSetCompetitive;
         boolean previousNextSetClanWar = state.nextSetClanWar;
+        SetGameMode previousNextSetMode = state.nextSetMode;
         List<String> previousHistory = List.copyOf(state.recentPlayedMaps);
         List<String> updatedHistory = MapVoteCandidatePolicy.reconcileRecentPlayedMaps(
                 fullPool, previousHistory, RECENT_MAP_COOLDOWN);
@@ -384,6 +422,7 @@ public final class MapSetManager {
 
         state.nextSetCompetitive = false;
         state.nextSetClanWar = false;
+        state.nextSetMode = SetGameMode.CASUAL;
         if (!MapVoteOpeningTransaction.commit(MapSetManager::saveState, () -> {
             state.completedGames = previousCompletedGames;
             state.rewardSummary = previousRewardSummary;
@@ -392,6 +431,7 @@ public final class MapSetManager {
             state.rewardPhaseStatus = previousRewardPhaseStatus;
             state.nextSetCompetitive = previousNextSetCompetitive;
             state.nextSetClanWar = previousNextSetClanWar;
+            state.nextSetMode = previousNextSetMode;
             state.recentPlayedMaps = new ArrayList<>(previousHistory);
         })) {
             TacticalTabletMod.LOGGER.error(
@@ -402,6 +442,7 @@ public final class MapSetManager {
 
         votingMaps = selectedCandidates;
         votes.clear();
+        modeVotes.clear();
         selectedMap = "";
         voteSecondsLeft = MAP_VOTE_SECONDS;
         voting = true;
@@ -424,11 +465,20 @@ public final class MapSetManager {
         syncAll(player.server, false);
     }
 
+    public static synchronized void voteSetMode(ServerPlayer player, SetGameMode mode) {
+        if (player == null || !voting || !GameStateManager.isInLobby(player)) return;
+        if (!SetModeVotePolicy.ordinaryModesEnabled(state.nextSetCompetitive, state.nextSetClanWar)) return;
+        if (mode == null || !mode.selectable()) return;
+        modeVotes.put(player.getUUID(), mode);
+        syncAll(player.server, false);
+    }
+
     public static synchronized void setNextSetCompetitive(ServerPlayer player, boolean competitive) {
         if (player == null || !player.hasPermissions(2) || !voting) return;
         state.nextSetCompetitive = competitive;
         if (competitive) {
             state.nextSetClanWar = false;
+            modeVotes.clear();
         }
         saveState();
         broadcast(player.server, "[WAR] Следующий сет: "
@@ -441,6 +491,7 @@ public final class MapSetManager {
         state.nextSetClanWar = clanWar;
         if (clanWar) {
             state.nextSetCompetitive = false;
+            modeVotes.clear();
         }
         saveState();
         broadcast(player.server, "[WAR] Следующий сет: "
@@ -470,6 +521,15 @@ public final class MapSetManager {
 
         String winner = selectedMap.isBlank() ? resolveWinner() : selectedMap;
         selectedMap = winner;
+        state.nextSetMode = SetModeVotePolicy.ordinaryModesEnabled(
+                state.nextSetCompetitive, state.nextSetClanWar)
+                ? SetModeVotePolicy.selectWinner(modeVoteCounts(), RANDOM)
+                : SetGameMode.CASUAL;
+        if (!saveState()) {
+            TacticalTabletMod.LOGGER.error("Failed to persist selected set mode {}", state.nextSetMode);
+            voteSecondsLeft = 10;
+            return VoteTickResult.FAILED;
+        }
         try {
             MapRotationManager.setNextMap(server, winner);
             MapRotationManager.arm(server);
@@ -532,6 +592,9 @@ public final class MapSetManager {
                 player.hasPermissions(2),
                 state.nextSetCompetitive,
                 state.nextSetClanWar,
+                SetModeVotePolicy.ordinaryModesEnabled(state.nextSetCompetitive, state.nextSetClanWar),
+                modeVotes.get(player.getUUID()),
+                modeVoteCounts(),
                 voteSecondsLeft,
                 votes.getOrDefault(player.getUUID(), ""),
                 votingMaps,
@@ -550,6 +613,13 @@ public final class MapSetManager {
         Map<String, Integer> counts = new LinkedHashMap<>();
         for (String map : votingMaps) counts.put(map, 0);
         for (String vote : votes.values()) counts.computeIfPresent(vote, (ignored, value) -> value + 1);
+        return counts;
+    }
+
+    private static Map<SetGameMode, Integer> modeVoteCounts() {
+        Map<SetGameMode, Integer> counts = new LinkedHashMap<>();
+        for (SetGameMode mode : SetGameMode.values()) if (mode.selectable()) counts.put(mode, 0);
+        for (SetGameMode vote : modeVotes.values()) counts.computeIfPresent(vote, (ignored, value) -> value + 1);
         return counts;
     }
 
@@ -669,6 +739,11 @@ public final class MapSetManager {
         if (candidate.nextSetCompetitive && candidate.nextSetClanWar) {
             candidate.nextSetClanWar = false;
         }
+        if (candidate.setMode == null || !candidate.setMode.selectable()) candidate.setMode = SetGameMode.CASUAL;
+        if (candidate.nextSetMode == null || !candidate.nextSetMode.selectable()) candidate.nextSetMode = SetGameMode.CASUAL;
+        if (candidate.competitiveSet || candidate.clanWarSet) candidate.setMode = SetGameMode.CASUAL;
+        if (candidate.nextSetCompetitive || candidate.nextSetClanWar) candidate.nextSetMode = SetGameMode.CASUAL;
+        if (candidate.chaosDeck == null) candidate.chaosDeck = new ArrayList<>();
     }
 
     private static String currentMapName(MinecraftServer server) {
@@ -708,6 +783,7 @@ public final class MapSetManager {
 
     private static void resetRuntimeState() {
         votes.clear();
+        modeVotes.clear();
         voting = false;
         voteSecondsLeft = 0;
         restartSecondsLeft = -1;
@@ -742,6 +818,9 @@ public final class MapSetManager {
         boolean nextSetCompetitive;
         boolean clanWarSet;
         boolean nextSetClanWar;
+        SetGameMode setMode = SetGameMode.CASUAL;
+        SetGameMode nextSetMode = SetGameMode.CASUAL;
+        List<String> chaosDeck = new ArrayList<>();
         String setId = UUID.randomUUID().toString();
         Map<String, String> participants = new LinkedHashMap<>();
         SetRewardSummary rewardSummary;

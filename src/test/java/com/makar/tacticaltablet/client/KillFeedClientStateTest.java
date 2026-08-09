@@ -46,6 +46,8 @@ class KillFeedClientStateTest {
                 packet(UUID.randomUUID(), "K", "V", 2, 5, 0)));
         assertEquals("+12 XP", KillFeedOverlay.rewardText(
                 packet(UUID.randomUUID(), "K", "V", 3, 0, 12)));
+        assertEquals("+8 coins", KillFeedOverlay.rewardText(
+                packet(UUID.randomUUID(), "K", "V", 4, 8, 0)));
     }
 
     private static KillFeedPacket packet(UUID victim, String killer, String victimName, long time,
