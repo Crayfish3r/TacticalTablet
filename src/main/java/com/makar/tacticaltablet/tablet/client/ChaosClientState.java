@@ -1,7 +1,5 @@
 package com.makar.tacticaltablet.tablet.client;
 
-import net.minecraft.client.Minecraft;
-
 import java.util.List;
 import java.util.Set;
 import java.util.Map;
@@ -26,9 +24,6 @@ public final class ChaosClientState {
         spent = used == null ? Set.of() : Set.copyOf(used);
         selected = current == null ? "" : current;
         requiresSelection = enabled && required;
-        Minecraft minecraft = Minecraft.getInstance();
-        if (requiresSelection && minecraft.player != null && minecraft.level != null
-                && !(minecraft.screen instanceof TabletScreen)) minecraft.setScreen(new TabletScreen());
     }
 
     public static boolean isActive() { return active; }

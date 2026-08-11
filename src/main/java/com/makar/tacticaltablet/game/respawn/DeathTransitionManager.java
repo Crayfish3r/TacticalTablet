@@ -1,11 +1,13 @@
 package com.makar.tacticaltablet.game.respawn;
 
+import com.makar.tacticaltablet.core.TacticalTabletMod;
 import com.makar.tacticaltablet.game.MapSetManager;
 import com.makar.tacticaltablet.game.MatchAdmissionManager;
 import com.makar.tacticaltablet.game.clanwar.ClanWarManager;
 import com.makar.tacticaltablet.game.extraction.ExtractionPointManager;
 import com.makar.tacticaltablet.game.lives.LivesManager;
 import com.makar.tacticaltablet.game.lobby.LobbyManager;
+import com.makar.tacticaltablet.game.team.TeamMatchManager;
 import com.makar.tacticaltablet.progression.ClassXPManager;
 import com.makar.tacticaltablet.progression.PlayerProgressManager;
 import com.makar.tacticaltablet.tablet.net.DeathScreenPacket;
@@ -158,6 +160,9 @@ public final class DeathTransitionManager {
             }
         }
 
+        TacticalTabletMod.LOGGER.debug(
+                "Completing individual death respawn for victim {} on team {}; no teammates are transitioned",
+                player.getGameProfile().getName(), TeamMatchManager.getTeam(player));
         LobbyManager.moveToLobby(player);
         ExtractionPointManager.onPlayerRespawn(player);
         VoiceChatTeamManager.assignPlayerToVoiceGroup(player);

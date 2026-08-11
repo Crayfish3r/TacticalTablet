@@ -2,6 +2,7 @@ package com.makar.tacticaltablet.game.respawn;
 
 import com.makar.tacticaltablet.airdrop.AirdropManager;
 import com.makar.tacticaltablet.clan.ClanManager;
+import com.makar.tacticaltablet.core.TacticalTabletMod;
 import com.makar.tacticaltablet.game.GameStateManager;
 import com.makar.tacticaltablet.game.MatchAdmissionManager;
 import com.makar.tacticaltablet.game.MapSetManager;
@@ -68,7 +69,8 @@ public class RtpTimerManager {
     private enum FailureReason {
         NO_SAFE_POINT,
         POOL_PREPARING,
-        TEMPORARILY_INELIGIBLE
+        TEMPORARILY_INELIGIBLE,
+        CHAOS_TEAM_NOT_READY
     }
 
     public static void start(ServerPlayer player) {
@@ -238,6 +240,14 @@ public class RtpTimerManager {
             return true;
         }
 
+        if (shouldPostponeTeamRtp(MapSetManager.isChaosSet(),
+                members.stream().map(RtpTimerManager::isChaosDeploymentReady).toList())) {
+            scheduleRetry(trigger.getUUID(), "chaos team awaiting class selection");
+            notifyRateLimited(trigger, FailureReason.CHAOS_TEAM_NOT_READY,
+                    "[WAR] RTP команды ожидает, пока все участники выберут класс Хаоса.");
+            return true;
+        }
+
         boolean success = members.size() == 1
                 ? SafeTeleport.teleport(members.get(0))
                 : SafeTeleport.teleportTeam(members);
@@ -263,6 +273,14 @@ public class RtpTimerManager {
         if (MatchAdmissionManager.isLateSpectator(player)) {
             cancel(player);
             MatchAdmissionManager.enforceLateSpectator(player, false);
+            return;
+        }
+        if (!isChaosDeploymentReady(player)) {
+            TacticalTabletMod.LOGGER.error(
+                    "Blocked successful Chaos RTP finalization for unready player {}",
+                    player.getGameProfile().getName());
+            cancel(player);
+            LobbyManager.sync(player);
             return;
         }
         UUID uuid = player.getUUID();
@@ -347,7 +365,7 @@ public class RtpTimerManager {
                 GameStateManager.isRunning(player.server),
                 sameMatch,
                 LivesManager.canContinueMatch(player) && clanEligible && !player.isSpectator()
-                        && (!MapSetManager.isChaosSet() || !ChaosSetManager.requiresSelection(player)),
+                        && isChaosDeploymentReady(player),
                 PlayerTabletState.isRtpUsed(player),
                 GameStateManager.isInLobby(player),
                 player.getTags().contains("in_lobby")
@@ -387,6 +405,21 @@ public class RtpTimerManager {
             boolean spectator
     ) {
         return canContinue && inLobbyDimension && hasLobbyTag && !rtpUsed && !spectator;
+    }
+
+    private static boolean isChaosDeploymentReady(ServerPlayer player) {
+        return player != null && isChaosDeploymentReady(
+                MapSetManager.isChaosSet(),
+                ChaosSetManager.requiresSelection(player),
+                PlayerTabletState.isKitUsed(player));
+    }
+
+    static boolean isChaosDeploymentReady(boolean chaosSet, boolean requiresSelection, boolean kitIssued) {
+        return !chaosSet || (!requiresSelection && kitIssued);
+    }
+
+    static boolean shouldPostponeTeamRtp(boolean chaosSet, List<Boolean> memberReadiness) {
+        return chaosSet && memberReadiness != null && memberReadiness.stream().anyMatch(ready -> !Boolean.TRUE.equals(ready));
     }
 
     private static void notifyRateLimited(ServerPlayer player, FailureReason reason, String message) {

@@ -2,6 +2,8 @@ package com.makar.tacticaltablet.game.respawn;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -62,5 +64,35 @@ class RtpRequestPolicyTest {
         assertTrue(firstLateJoin);
         assertTrue(secondLateJoin);
         assertFalse(existingTeammate);
+    }
+
+    @Test
+    void chaosTeamWaitsUntilEveryPendingLobbyMemberHasSelectedAndReceivedKit() {
+        boolean ready = RtpTimerManager.isChaosDeploymentReady(true, false, true);
+        boolean unselected = RtpTimerManager.isChaosDeploymentReady(true, true, false);
+        boolean selectedWithoutKit = RtpTimerManager.isChaosDeploymentReady(true, false, false);
+
+        assertTrue(RtpTimerManager.shouldPostponeTeamRtp(true, List.of(ready, unselected)));
+        assertTrue(RtpTimerManager.shouldPostponeTeamRtp(true, List.of(ready, selectedWithoutKit)));
+        assertFalse(RtpTimerManager.shouldPostponeTeamRtp(true, List.of(ready, ready)));
+    }
+
+    @Test
+    void fightingAndEliminatedTeammatesDoNotJoinOrBlockLaterDeployment() {
+        boolean waitingReadyPlayer = RtpTimerManager.isPendingRtpParticipant(true, true, true, false, false);
+        boolean alreadyFighting = RtpTimerManager.isPendingRtpParticipant(true, false, false, true, false);
+        boolean eliminated = RtpTimerManager.isPendingRtpParticipant(false, false, false, false, true);
+
+        assertTrue(waitingReadyPlayer);
+        assertFalse(alreadyFighting);
+        assertFalse(eliminated);
+        assertFalse(RtpTimerManager.shouldPostponeTeamRtp(true, List.of(
+                RtpTimerManager.isChaosDeploymentReady(true, false, true))));
+    }
+
+    @Test
+    void nonChaosTeamDeploymentRemainsUnchanged() {
+        assertTrue(RtpTimerManager.isChaosDeploymentReady(false, true, false));
+        assertFalse(RtpTimerManager.shouldPostponeTeamRtp(false, List.of(false, false)));
     }
 }

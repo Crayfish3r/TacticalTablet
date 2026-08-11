@@ -44,9 +44,23 @@ class ChaosIntegrationArchitectureTest {
         String tablet = source("tablet/client/TabletScreen.java");
         assertTrue(xp.contains("if (MapSetManager.isChaosSet()) return 0;"));
         assertTrue(xp.contains("if (MapSetManager.isChaosSet()) return;"));
-        assertTrue(rtp.contains("!ChaosSetManager.requiresSelection(player)"));
+        assertTrue(rtp.contains("ChaosSetManager.requiresSelection(player)"));
+        assertTrue(rtp.contains("PlayerTabletState.isKitUsed(player)"));
+        assertTrue(rtp.contains("isChaosDeploymentReady(player)"));
         assertTrue(lobby.contains("new ChaosStatePacket(ChaosSetManager.snapshot(player))"));
         assertTrue(tablet.contains("!ChaosClientState.requiresSelection()"));
+    }
+
+    @Test
+    void chaosPacketStateCannotOpenClientGuiByItself() throws IOException {
+        String state = source("tablet/client/ChaosClientState.java");
+        String events = source("tablet/client/ClientEvents.java");
+
+        assertTrue(!state.contains("Minecraft"));
+        assertTrue(!state.contains("setScreen"));
+        assertTrue(events.contains("ChaosAutoOpenPolicy.shouldOpen"));
+        assertTrue(events.contains("GameStateManager.LOBBY_DIMENSION"));
+        assertTrue(events.contains("hasTabletInInventory(mc.player)"));
     }
 
     @Test

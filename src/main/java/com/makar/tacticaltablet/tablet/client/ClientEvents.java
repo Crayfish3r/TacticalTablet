@@ -3,6 +3,7 @@ package com.makar.tacticaltablet.tablet.client;
 import com.makar.tacticaltablet.client.DeathScreenOverlay;
 import com.makar.tacticaltablet.client.SpectatorCameraClientState;
 import com.makar.tacticaltablet.core.TacticalTabletMod;
+import com.makar.tacticaltablet.game.GameStateManager;
 import com.makar.tacticaltablet.game.MatchPhase;
 import com.makar.tacticaltablet.prefix.PrefixClientState;
 import com.makar.tacticaltablet.tablet.TacticalTabletItem;
@@ -46,14 +47,17 @@ public class ClientEvents {
         if (mc.level == null || mc.player == null) return;
 
         Screen current = mc.screen;
-        if (DeathScreenOverlay.isActive()) {
-            return;
-        }
-
-        if (ChaosClientState.requiresSelection() && !(current instanceof TabletScreen)) {
+        boolean deathOverlayActive = DeathScreenOverlay.isActive();
+        if (ChaosAutoOpenPolicy.shouldOpen(
+                ChaosClientState.requiresSelection(),
+                deathOverlayActive,
+                mc.player.level().dimension().equals(GameStateManager.LOBBY_DIMENSION),
+                hasTabletInInventory(mc.player),
+                current instanceof TabletScreen)) {
             mc.setScreen(new TabletScreen());
             return;
         }
+        if (deathOverlayActive) return;
 
         boolean voting = TabletClientState.getMatchPhase() == MatchPhase.VOTING;
         boolean teamSelect = TabletClientState.getMatchPhase() == MatchPhase.TEAM_SELECT;
@@ -87,6 +91,7 @@ public class ClientEvents {
 
     @SubscribeEvent
     public static void onClientLogout(ClientPlayerNetworkEvent.LoggingOut event) {
+        ChaosClientState.clear();
         PrefixClientState.clear();
         SpectatorCameraClientState.clear();
     }
@@ -95,6 +100,14 @@ public class ClientEvents {
         if (player == null) return false;
         return isTablet(player.getItemInHand(InteractionHand.MAIN_HAND))
                 || isTablet(player.getItemInHand(InteractionHand.OFF_HAND));
+    }
+
+    private static boolean hasTabletInInventory(Player player) {
+        if (player == null) return false;
+        for (int slot = 0; slot < player.getInventory().getContainerSize(); slot++) {
+            if (isTablet(player.getInventory().getItem(slot))) return true;
+        }
+        return false;
     }
 
     private static boolean isTablet(ItemStack stack) {
