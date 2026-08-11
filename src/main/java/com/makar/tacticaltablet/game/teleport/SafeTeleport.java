@@ -38,6 +38,7 @@ public class SafeTeleport {
     private static final int TEAM_CLUSTER_CHUNK_LOADS_PER_CALL = 4;
     private static final int TEST_CHUNK_LOADS_PER_CALL = 16;
     private static final int PREPARED_CHUNK_LOADS_PER_CALL = 2;
+    private static final int PREPARED_VALIDATIONS_PER_TICK = 4;
     private static final int[][] TEAM_OFFSETS = new int[][]{
             {0, 0},
             {3, 0},
@@ -66,6 +67,7 @@ public class SafeTeleport {
     private static int poolMaxAttempts = 0;
     private static int chunkLoadBudget = 0;
     private static int refillCooldownTicks = 0;
+    private static int preparedValidationCursor = 0;
     private static RtpSettings activeRtpSettings = RtpSettings.surfaceDefaults();
     private static String poolConfigurationError = "";
 
@@ -76,6 +78,7 @@ public class SafeTeleport {
     public static synchronized PoolStatus beginPoolPreparation(MinecraftServer server) {
         preparedSpawns.clear();
         preparedSpawnKeys.clear();
+        preparedValidationCursor = 0;
         recentSpawns.clear();
         poolPreparing = false;
         poolTarget = 0;
@@ -130,7 +133,7 @@ public class SafeTeleport {
             return new PoolStatus(poolTarget, preparedSpawns.size(), poolAttempts, 0.0D, 0.0D);
         }
 
-        pruneInvalidPreparedSpawns(overworld);
+        pruneInvalidPreparedSpawnsIncrementally(overworld, PREPARED_VALIDATIONS_PER_TICK);
         if (refillCooldownTicks > 0) refillCooldownTicks--;
 
         if (!poolPreparing && shouldStartRefill(preparedSpawns.size(), poolTarget, refillCooldownTicks)) {
@@ -222,6 +225,7 @@ public class SafeTeleport {
     public static synchronized void clearPool() {
         preparedSpawns.clear();
         preparedSpawnKeys.clear();
+        preparedValidationCursor = 0;
         recentSpawns.clear();
         poolPreparing = false;
         poolTarget = 0;
@@ -477,6 +481,39 @@ public class SafeTeleport {
             if (shouldPrune(validateSpawn(overworld, position))) {
                 preparedSpawns.remove(i);
                 preparedSpawnKeys.remove(position.asLong());
+            }
+        }
+    }
+
+    private static void pruneInvalidPreparedSpawnsIncrementally(ServerLevel level, int validationBudget) {
+        if (preparedSpawns.isEmpty()) {
+            preparedValidationCursor = 0;
+            return;
+        }
+        if (validationBudget <= 0) return;
+
+        int validated = 0;
+        while (validated < validationBudget && !preparedSpawns.isEmpty()) {
+            if (preparedValidationCursor >= preparedSpawns.size()) {
+                preparedValidationCursor = 0;
+            }
+
+            BlockPos position = preparedSpawns.get(preparedValidationCursor);
+            validated++;
+            if (shouldPrune(validateSpawn(level, position))) {
+                preparedSpawns.remove(preparedValidationCursor);
+                preparedSpawnKeys.remove(position.asLong());
+                if (preparedSpawns.isEmpty()) {
+                    preparedValidationCursor = 0;
+                } else if (preparedValidationCursor >= preparedSpawns.size()) {
+                    preparedValidationCursor = 0;
+                }
+                continue;
+            }
+
+            preparedValidationCursor++;
+            if (preparedValidationCursor >= preparedSpawns.size()) {
+                preparedValidationCursor = 0;
             }
         }
     }

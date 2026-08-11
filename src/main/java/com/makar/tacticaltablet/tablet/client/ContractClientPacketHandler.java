@@ -1,6 +1,7 @@
 package com.makar.tacticaltablet.tablet.client;
 
 import com.makar.tacticaltablet.tablet.net.ContractSelectionStatePacket;
+import com.makar.tacticaltablet.tablet.net.ContractSelectionTimerPacket;
 import com.makar.tacticaltablet.tablet.net.ContractTrackerStatePacket;
 
 import net.minecraft.client.Minecraft;
@@ -27,6 +28,14 @@ public final class ContractClientPacketHandler {
                 packet.hasActiveContract(),
                 packet.soloMode(),
                 sanitizeSelectionTargets(packet.targets())
+        );
+    }
+
+    public static void handleSelectionTimer(ContractSelectionTimerPacket packet) {
+        if (packet == null) return;
+        ContractClientState.updateSelectionTimer(
+                packet.selectionActive(),
+                packet.selectionSecondsLeft()
         );
     }
 

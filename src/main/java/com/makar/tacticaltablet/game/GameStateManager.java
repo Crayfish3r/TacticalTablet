@@ -794,7 +794,7 @@ public class GameStateManager {
         }
 
         VoteManager.tickSecond();
-        ClassXPManager.syncAll(server);
+        ClassXPManager.syncMatchSetupAll(server);
 
         if (!VoteManager.isComplete()) return;
 
@@ -822,7 +822,7 @@ public class GameStateManager {
         }
 
         TeamMatchManager.tickSecond();
-        ClassXPManager.syncAll(server);
+        ClassXPManager.syncMatchSetupAll(server);
 
         if (!TeamMatchManager.isSelectionComplete()) return;
 

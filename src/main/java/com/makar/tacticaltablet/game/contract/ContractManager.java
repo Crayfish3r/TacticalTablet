@@ -11,6 +11,7 @@ import com.makar.tacticaltablet.progression.ClassXPManager;
 import com.makar.tacticaltablet.progression.PlayerProgressManager;
 import com.makar.tacticaltablet.tablet.PlayerTabletState;
 import com.makar.tacticaltablet.tablet.net.ContractSelectionStatePacket;
+import com.makar.tacticaltablet.tablet.net.ContractSelectionTimerPacket;
 import com.makar.tacticaltablet.tablet.net.ContractTrackerStatePacket;
 import com.makar.tacticaltablet.tablet.net.PacketHandler;
 
@@ -91,8 +92,10 @@ public final class ContractManager {
             if (selectionSecondsLeft <= 0) {
                 selectionActive = false;
                 removeUnclaimedSelectionTrackers(server);
+                syncSelectionAll(server);
+            } else {
+                syncSelectionTimerAll(server);
             }
-            syncSelectionAll(server);
         }
 
         if (contractsByOwner.isEmpty()) return;
@@ -410,32 +413,41 @@ public final class ContractManager {
 
     public static void syncSelectionAll(MinecraftServer server) {
         if (server == null) return;
-        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-            syncSelection(player);
+        List<ServerPlayer> players = server.getPlayerList().getPlayers();
+        List<SelectionTargetSnapshot> candidates = selectionCandidatesForBroadcast(server, players);
+        for (ServerPlayer player : players) {
+            sendSelectionState(player, candidates);
         }
     }
 
     public static ContractSelectionStatePacket selectionState(ServerPlayer viewer) {
+        List<SelectionTargetSnapshot> candidates = canSelectContract(viewer)
+                ? buildSelectionTargetSnapshots(viewer.server)
+                : List.of();
+        return selectionState(viewer, candidates);
+    }
+
+    private static ContractSelectionStatePacket selectionState(
+            ServerPlayer viewer,
+            List<SelectionTargetSnapshot> candidates
+    ) {
         List<ContractSelectionStatePacket.TargetEntry> entries = new ArrayList<>();
         boolean canSelect = canSelectContract(viewer);
 
-        if (viewer != null && canSelect) {
-            List<ServerPlayer> targets = new ArrayList<>(viewer.server.getPlayerList().getPlayers());
-            targets.sort(Comparator.comparing(player -> player.getName().getString(), String.CASE_INSENSITIVE_ORDER));
-            for (ServerPlayer target : targets) {
+        if (canSelect) {
+            for (SelectionTargetSnapshot target : candidates) {
                 if (entries.size() >= MAX_SELECTION_TARGETS) break;
-                if (!isValidTarget(viewer, target)) continue;
-                ContractDifficulty difficulty = difficultyFor(target);
+                if (!isSelectableSnapshotForViewer(viewer, target)) continue;
                 entries.add(new ContractSelectionStatePacket.TargetEntry(
-                        target.getUUID(),
-                        target.getName().getString(),
-                        selectedClassName(target),
-                        PlayerProgressManager.getKills(target),
-                        PlayerProgressManager.getWins(target),
-                        PlayerProgressManager.getCareerProgressPercent(target),
-                        difficulty.ordinal(),
-                        difficulty.price(),
-                        difficulty.reward()
+                        target.uuid(),
+                        target.name(),
+                        target.selectedClass(),
+                        target.kills(),
+                        target.wins(),
+                        target.careerPercent(),
+                        target.difficulty(),
+                        target.price(),
+                        target.reward()
                 ));
             }
         }
@@ -448,6 +460,66 @@ public final class ContractManager {
                 GameStateManager.getCurrentMode() != null,
                 entries
         );
+    }
+
+    private static void sendSelectionState(
+            ServerPlayer player,
+            List<SelectionTargetSnapshot> candidates
+    ) {
+        PacketHandler.sendToPlayer(player, selectionState(player, candidates));
+    }
+
+    private static void syncSelectionTimerAll(MinecraftServer server) {
+        ContractSelectionTimerPacket packet = new ContractSelectionTimerPacket(selectionActive, selectionSecondsLeft);
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            PacketHandler.sendToPlayer(player, packet);
+        }
+    }
+
+    private static List<SelectionTargetSnapshot> selectionCandidatesForBroadcast(
+            MinecraftServer server,
+            List<ServerPlayer> players
+    ) {
+        for (ServerPlayer player : players) {
+            if (canSelectContract(player)) {
+                return buildSelectionTargetSnapshots(server);
+            }
+        }
+        return List.of();
+    }
+
+    private static List<SelectionTargetSnapshot> buildSelectionTargetSnapshots(MinecraftServer server) {
+        List<SelectionTargetSnapshot> targets = new ArrayList<>();
+        for (ServerPlayer target : server.getPlayerList().getPlayers()) {
+            if (!LivesManager.isAliveParticipant(target)) continue;
+
+            int careerPercent = PlayerProgressManager.getCareerProgressPercent(target);
+            ContractDifficulty difficulty = ContractDifficulty.forCareerPercent(careerPercent);
+            targets.add(new SelectionTargetSnapshot(
+                    target.getUUID(),
+                    target.getName().getString(),
+                    selectedClassName(target),
+                    PlayerProgressManager.getKills(target),
+                    PlayerProgressManager.getWins(target),
+                    careerPercent,
+                    difficulty.ordinal(),
+                    difficulty.price(),
+                    difficulty.reward()
+            ));
+        }
+        targets.sort(Comparator.comparing(SelectionTargetSnapshot::name, String.CASE_INSENSITIVE_ORDER));
+        return List.copyOf(targets);
+    }
+
+    private static boolean isSelectableSnapshotForViewer(
+            ServerPlayer viewer,
+            SelectionTargetSnapshot target
+    ) {
+        return viewer != null
+                && target != null
+                && !viewer.getUUID().equals(target.uuid())
+                && !TeamMatchManager.areTeammates(viewer.getUUID(), target.uuid())
+                && !isTargetClaimedByTeam(viewer, target.uuid());
     }
 
     public static void sendTrackerState(ServerPlayer player, boolean open) {
@@ -474,7 +546,9 @@ public final class ContractManager {
 
     private static void giveSelectionTrackers(MinecraftServer server) {
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-            giveSelectionTrackerIfAvailable(player);
+            if (canSelectContract(player)) {
+                giveTracker(player);
+            }
         }
     }
 
@@ -727,18 +801,33 @@ public final class ContractManager {
     private static void refreshContractAccess(MinecraftServer server) {
         if (server == null) return;
 
-        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+        List<ServerPlayer> players = server.getPlayerList().getPlayers();
+        List<SelectionTargetSnapshot> candidates = selectionCandidatesForBroadcast(server, players);
+        for (ServerPlayer player : players) {
             boolean needsTracker = canSelectContract(player) || !visibleContracts(player).isEmpty();
             if (needsTracker) {
                 giveTracker(player);
             } else {
                 removeTracker(player);
             }
-            syncSelection(player);
+            sendSelectionState(player, candidates);
             if (trackerViewers.contains(player.getUUID())) {
                 sendTrackerState(player, false);
             }
         }
+    }
+
+    private record SelectionTargetSnapshot(
+            UUID uuid,
+            String name,
+            String selectedClass,
+            int kills,
+            int wins,
+            int careerPercent,
+            int difficulty,
+            int price,
+            int reward
+    ) {
     }
 
     private static void giveTracker(ServerPlayer player) {

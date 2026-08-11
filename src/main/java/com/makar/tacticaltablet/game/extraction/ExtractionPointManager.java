@@ -35,12 +35,21 @@ import java.util.Random;
 import java.util.UUID;
 
 public final class ExtractionPointManager {
+    private static final int PLAYER_SCAN_INTERVAL_TICKS = 2;
+    private static final int BOSSBAR_UPDATE_INTERVAL_TICKS = 4;
+    private static final int BOSSBAR_MEMBERSHIP_SYNC_INTERVAL_TICKS = 20;
     private static final Random RANDOM = new Random();
     private static ExtractionPointData data = ExtractionPointData.idle();
     private static ExtractionPointConfig config = new ExtractionPointConfig();
     private static long matchStartTick = 0L;
     private static int particleTicker = 0;
     private static double decayRemainderTicks = 0.0D;
+    private static int playerScanTicker = 0;
+    private static int bossbarUpdateTicker = 0;
+    private static int bossbarMembershipSyncTicker = 0;
+    private static String lastBossbarText = null;
+    private static BossEvent.BossBarColor lastBossbarColor = null;
+    private static float lastBossbarProgress = Float.NaN;
     private static Boolean forcedContested = null;
     private static UUID forcedOwnerPlayerId = null;
     private static ExtractionPointVisualHelper.VisualMode debugVisualMode = null;
@@ -108,6 +117,7 @@ public final class ExtractionPointManager {
         debugVisualMode = null;
         particleTicker = 0;
         decayRemainderTicks = 0.0D;
+        resetBossbarRuntimeState();
     }
 
     public static void cleanup(MinecraftServer server) {
@@ -126,6 +136,7 @@ public final class ExtractionPointManager {
             data.playersInside.clear();
             data.teamsInside.clear();
         }
+        resetBossbarRuntimeState();
     }
 
     public static void onPlayerDeathOrLogout(ServerPlayer player) {
@@ -325,8 +336,11 @@ public final class ExtractionPointManager {
     }
 
     private static void startActive(MinecraftServer server, ServerLevel level) {
+        resetBossbarRuntimeState();
+        updatePlayersInside(server);
         ensureBossbar(server);
         syncBossbarPlayers(server);
+        updateBossbar(server);
         if (config.navigatorEnabled) {
             for (ServerPlayer player : server.getPlayerList().getPlayers()) {
                 if (isEligibleForExtraction(player)) {
@@ -346,9 +360,16 @@ public final class ExtractionPointManager {
             return;
         }
 
-        updatePlayersInside(server);
+        if (++playerScanTicker >= PLAYER_SCAN_INTERVAL_TICKS) {
+            playerScanTicker = 0;
+            updatePlayersInside(server);
+        }
         updateCapture(server);
-        updateBossbar(server);
+        if (++bossbarUpdateTicker >= BOSSBAR_UPDATE_INTERVAL_TICKS) {
+            bossbarUpdateTicker = 0;
+            updateBossbar(server);
+        }
+        reconcileBossbarPlayers(server);
         tickParticles(level);
 
         if (data.globalCaptureProgressTicks >= data.requiredCaptureTicks) {
@@ -357,7 +378,7 @@ public final class ExtractionPointManager {
     }
 
     private static void tickEnding(MinecraftServer server) {
-        syncBossbarPlayers(server);
+        reconcileBossbarPlayers(server);
         ServerLevel level = GameStateManager.getOverworld(server);
         if (level != null) {
             tickParticles(level);
@@ -480,6 +501,7 @@ public final class ExtractionPointManager {
         data.state = ExtractionPointState.ENDING_WINNER;
         data.endingUntilTick = now(server) + config.winnerBossbarSeconds * 20L;
         updateBossbarWinner(server);
+        syncBossbarPlayers(server);
         ExtractionPointVisualHelper.playCaptured(level, data.center);
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
             performCleanup(player);
@@ -491,9 +513,7 @@ public final class ExtractionPointManager {
         data.state = ExtractionPointState.ENDING_EXPIRED;
         data.endingUntilTick = now(server) + config.endingFadeSeconds * 20L;
         ensureBossbar(server);
-        data.bossbar.setName(Component.literal("Сигнал бизнес-точки потерян"));
-        data.bossbar.setColor(BossEvent.BossBarColor.WHITE);
-        data.bossbar.setProgress(Math.max(0.0F, progress()));
+        applyBossbarState("Сигнал бизнес-точки потерян", BossEvent.BossBarColor.WHITE, progress());
         syncBossbarPlayers(server);
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
             performCleanup(player);
@@ -556,9 +576,9 @@ public final class ExtractionPointManager {
                     BossEvent.BossBarColor.YELLOW,
                     BossEvent.BossBarOverlay.PROGRESS
             );
+            clearBossbarDisplayCache();
         }
         data.bossbar.setVisible(true);
-        syncBossbarPlayers(server);
     }
 
     private static void syncBossbarPlayers(MinecraftServer server) {
@@ -570,43 +590,78 @@ public final class ExtractionPointManager {
                 data.bossbar.removePlayer(player);
             }
         }
+        bossbarMembershipSyncTicker = 0;
+    }
+
+    private static void reconcileBossbarPlayers(MinecraftServer server) {
+        if (++bossbarMembershipSyncTicker < BOSSBAR_MEMBERSHIP_SYNC_INTERVAL_TICKS) return;
+        syncBossbarPlayers(server);
     }
 
     private static void updateBossbar(MinecraftServer server) {
         ensureBossbar(server);
-        data.bossbar.setProgress(progress());
+        String text;
+        BossEvent.BossBarColor color;
         if (data.contested) {
-            data.bossbar.setName(Component.literal("Зона оспаривается"));
-            data.bossbar.setColor(BossEvent.BossBarColor.RED);
-            return;
-        }
-        if (data.playersInside.isEmpty()) {
-            data.bossbar.setName(Component.literal("бизнес-точка свободна — прогресс снижается"));
-            data.bossbar.setColor(BossEvent.BossBarColor.YELLOW);
-            return;
-        }
-        int progressSeconds = data.globalCaptureProgressTicks / 20;
-        int requiredSeconds = Math.max(1, data.requiredCaptureTicks / 20);
-        if (data.currentOwnerTeamId != null) {
-            data.bossbar.setName(Component.literal("Захват: Команда " + data.currentOwnerTeamId + " — " + progressSeconds + "/" + requiredSeconds + " сек"));
+            text = "Зона оспаривается";
+            color = BossEvent.BossBarColor.RED;
+        } else if (data.playersInside.isEmpty()) {
+            text = "бизнес-точка свободна — прогресс снижается";
+            color = BossEvent.BossBarColor.YELLOW;
         } else {
-            ServerPlayer owner = data.currentOwnerPlayerId == null ? null : server.getPlayerList().getPlayer(data.currentOwnerPlayerId);
-            String name = owner == null ? "-" : owner.getName().getString();
-            data.bossbar.setName(Component.literal("Захват: " + name + " — " + progressSeconds + "/" + requiredSeconds + " сек"));
+            int progressSeconds = data.globalCaptureProgressTicks / 20;
+            int requiredSeconds = Math.max(1, data.requiredCaptureTicks / 20);
+            if (data.currentOwnerTeamId != null) {
+                text = "Захват: Команда " + data.currentOwnerTeamId + " — " + progressSeconds + "/" + requiredSeconds + " сек";
+            } else {
+                ServerPlayer owner = data.currentOwnerPlayerId == null ? null : server.getPlayerList().getPlayer(data.currentOwnerPlayerId);
+                String name = owner == null ? "-" : owner.getName().getString();
+                text = "Захват: " + name + " — " + progressSeconds + "/" + requiredSeconds + " сек";
+            }
+            color = BossEvent.BossBarColor.GREEN;
         }
-        data.bossbar.setColor(BossEvent.BossBarColor.GREEN);
+        applyBossbarState(text, color, progress());
     }
 
     private static void updateBossbarWinner(MinecraftServer server) {
         ensureBossbar(server);
-        data.bossbar.setColor(BossEvent.BossBarColor.GREEN);
-        data.bossbar.setProgress(1.0F);
+        String text;
         if (data.currentOwnerTeamId != null) {
-            data.bossbar.setName(Component.literal("бизнес-точка захвачена: Команда " + data.currentOwnerTeamId));
-            return;
+            text = "бизнес-точка захвачена: Команда " + data.currentOwnerTeamId;
+        } else {
+            ServerPlayer owner = data.currentOwnerPlayerId == null ? null : server.getPlayerList().getPlayer(data.currentOwnerPlayerId);
+            text = "бизнес-точка захвачена: " + (owner == null ? "-" : owner.getName().getString());
         }
-        ServerPlayer owner = data.currentOwnerPlayerId == null ? null : server.getPlayerList().getPlayer(data.currentOwnerPlayerId);
-        data.bossbar.setName(Component.literal("бизнес-точка захвачена: " + (owner == null ? "-" : owner.getName().getString())));
+        applyBossbarState(text, BossEvent.BossBarColor.GREEN, 1.0F);
+    }
+
+    private static void applyBossbarState(String text, BossEvent.BossBarColor color, float progress) {
+        float clampedProgress = Math.max(0.0F, Math.min(1.0F, progress));
+        if (!text.equals(lastBossbarText)) {
+            data.bossbar.setName(Component.literal(text));
+            lastBossbarText = text;
+        }
+        if (color != lastBossbarColor) {
+            data.bossbar.setColor(color);
+            lastBossbarColor = color;
+        }
+        if (Float.compare(clampedProgress, lastBossbarProgress) != 0) {
+            data.bossbar.setProgress(clampedProgress);
+            lastBossbarProgress = clampedProgress;
+        }
+    }
+
+    private static void resetBossbarRuntimeState() {
+        playerScanTicker = 0;
+        bossbarUpdateTicker = 0;
+        bossbarMembershipSyncTicker = 0;
+        clearBossbarDisplayCache();
+    }
+
+    private static void clearBossbarDisplayCache() {
+        lastBossbarText = null;
+        lastBossbarColor = null;
+        lastBossbarProgress = Float.NaN;
     }
 
     private static void tickParticles(ServerLevel level) {

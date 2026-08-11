@@ -3,6 +3,7 @@ package com.makar.tacticaltablet.progression;
 import com.makar.tacticaltablet.clan.ClanManager;
 import com.makar.tacticaltablet.game.GameStateManager;
 import com.makar.tacticaltablet.game.MatchMode;
+import com.makar.tacticaltablet.game.MatchPhase;
 import com.makar.tacticaltablet.game.MapSetManager;
 import com.makar.tacticaltablet.game.chaos.ChaosSetManager;
 import com.makar.tacticaltablet.game.contract.ContractManager;
@@ -13,6 +14,7 @@ import com.makar.tacticaltablet.game.team.VoteManager;
 import com.makar.tacticaltablet.inventory.InventoryManager;
 import com.makar.tacticaltablet.tablet.TabletAppearanceManager;
 import com.makar.tacticaltablet.tablet.net.PacketHandler;
+import com.makar.tacticaltablet.tablet.net.TabletMatchSetupStatePacket;
 import com.makar.tacticaltablet.tablet.net.TabletStatePacket;
 import com.makar.tacticaltablet.tablet.net.ChaosStatePacket;
 import com.makar.tacticaltablet.tablet.PlayerTabletState;
@@ -51,12 +53,26 @@ public class ClassXPManager {
     }
 
     public static int addXP(ServerPlayer player, String clazz, int amount) {
+        return addXPInternal(player, clazz, amount, true);
+    }
+
+    /**
+     * Awards XP without sending player state immediately. Intended for server-side mutation
+     * batches that perform one authoritative sync after all related mutations complete.
+     */
+    public static int addXPDeferredSync(ServerPlayer player, String clazz, int amount) {
+        return addXPInternal(player, clazz, amount, false);
+    }
+
+    private static int addXPInternal(ServerPlayer player, String clazz, int amount, boolean syncAfter) {
         if (player == null || clazz == null || clazz.isBlank() || amount <= 0) return 0;
         if (MapSetManager.isChaosSet()) return 0;
         if (PlayerProgressManager.isShopClass(clazz)) return 0;
 
         int awarded = PlayerProgressManager.addXP(player, clazz, applyBoost(player, amount));
-        sync(player);
+        if (syncAfter) {
+            sync(player);
+        }
         return awarded;
     }
 
@@ -103,16 +119,23 @@ public class ClassXPManager {
         }
     }
 
+    public static void syncMatchSetup(ServerPlayer player) {
+        if (player == null) return;
+        PacketHandler.sendToPlayer(player, createMatchSetupState(player).toPacket());
+    }
+
+    public static void syncMatchSetupAll(MinecraftServer server) {
+        if (server == null) return;
+
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            syncMatchSetup(player);
+        }
+    }
+
     public static TabletStatePacket createStatePacket(ServerPlayer player) {
         int ticksLeft = RtpTimerManager.getTimeLeft(player);
         long endTime = ticksLeft > 0 ? System.currentTimeMillis() + ticksLeft * 50L : 0L;
-        MatchMode selectedVote = VoteManager.getVote(player);
-        java.util.Map<MatchMode, Integer> voteCounts = VoteManager.getVoteCounts();
-        TeamMatchManager.Snapshot teamSnapshot = TeamMatchManager.snapshot(
-                player.server,
-                player,
-                GameStateManager.getCurrentMode()
-        );
+        MatchSetupState matchSetup = createMatchSetupState(player);
 
         return new TabletStatePacket(
                 ClassCooldownManager.getCooldowns(player),
@@ -135,9 +158,32 @@ public class ClassXPManager {
                 LivesManager.getAlivePlayerCount(player.server),
                 LivesManager.getRemainingLivesTotal(player.server),
                 TabletAppearanceManager.getAppearanceTier(player),
+                matchSetup.matchPhase(),
+                matchSetup.matchMode(),
+                matchSetup.selectedVote(),
+                matchSetup.voteTimeLeft(),
+                matchSetup.soloVotes(),
+                matchSetup.duoVotes(),
+                matchSetup.trioVotes(),
+                matchSetup.squadVotes(),
+                matchSetup.voteOptionsMask(),
+                matchSetup.teamSelectTimeLeft(),
+                matchSetup.teamSlotSize(),
+                matchSetup.selectedTeam(),
+                matchSetup.teamSlots(),
+                matchSetup.competitiveSet(),
+                matchSetup.clanWarSet()
+        );
+    }
+
+    private static MatchSetupState createMatchSetupState(ServerPlayer player) {
+        MatchMode matchMode = GameStateManager.getCurrentMode();
+        Map<MatchMode, Integer> voteCounts = VoteManager.getVoteCounts();
+        TeamMatchManager.Snapshot teamSnapshot = TeamMatchManager.snapshot(player.server, player, matchMode);
+        return new MatchSetupState(
                 GameStateManager.getMatchPhase(),
-                GameStateManager.getCurrentMode(),
-                selectedVote,
+                matchMode,
+                VoteManager.getVote(player),
                 VoteManager.getSecondsLeft(),
                 voteCounts.getOrDefault(MatchMode.SOLO, 0),
                 voteCounts.getOrDefault(MatchMode.DUO, 0),
@@ -189,5 +235,43 @@ public class ClassXPManager {
             case "rpgtrooper" -> "РПГ-боец";
             default -> clazz == null ? "класс" : clazz;
         };
+    }
+
+    private record MatchSetupState(
+            MatchPhase matchPhase,
+            MatchMode matchMode,
+            MatchMode selectedVote,
+            int voteTimeLeft,
+            int soloVotes,
+            int duoVotes,
+            int trioVotes,
+            int squadVotes,
+            int voteOptionsMask,
+            int teamSelectTimeLeft,
+            int teamSlotSize,
+            int selectedTeam,
+            Map<String, String> teamSlots,
+            boolean competitiveSet,
+            boolean clanWarSet
+    ) {
+        private TabletMatchSetupStatePacket toPacket() {
+            return new TabletMatchSetupStatePacket(
+                    matchPhase,
+                    matchMode,
+                    selectedVote,
+                    voteTimeLeft,
+                    soloVotes,
+                    duoVotes,
+                    trioVotes,
+                    squadVotes,
+                    voteOptionsMask,
+                    teamSelectTimeLeft,
+                    teamSlotSize,
+                    selectedTeam,
+                    teamSlots,
+                    competitiveSet,
+                    clanWarSet
+            );
+        }
     }
 }

@@ -22,7 +22,7 @@ class KillFeedRewardArchitectureTest {
         assertEquals(1, occurrences(process, "TacticalKillFeed.publish("));
         assertTrue(process.indexOf("processKillerConsequences") < process.indexOf("TacticalKillFeed.publish("));
         assertTrue(rewards.contains("PlayerProgressManager.getCoins(killer) - coinsBefore"));
-        assertTrue(rewards.contains("int awardedXp = ClassXPManager.addXP"));
+        assertTrue(rewards.contains("int awardedXp = ClassXPManager.addXPDeferredSync"));
         assertTrue(rewards.contains("ChaosSetManager.KILL_COINS"));
         assertTrue(rewards.contains("if (MapSetManager.isChaosSet()) return new TacticalKillFeed.KillReward(awardedCoins, 0)"));
         assertFalse(rewards.contains("XpNotifier.send"));

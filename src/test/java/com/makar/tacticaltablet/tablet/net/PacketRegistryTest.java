@@ -3,24 +3,28 @@ package com.makar.tacticaltablet.tablet.net;
 import org.junit.jupiter.api.Test;
 import net.minecraftforge.network.NetworkDirection;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.IntStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PacketRegistryTest {
 
     @Test
-    void registryPreservesAllProtocol33IdsAndDirections() {
+    void registryPreservesAllProtocol38IdsAndDirections() {
         var entries = PacketProtocol.entries();
         Map<Class<?>, PacketProtocol.Entry> map = entries.stream()
                 .collect(java.util.stream.Collectors.toMap(PacketProtocol.Entry::packetClass, entry -> entry));
 
-        assertEquals(31, entries.size());
-        assertEquals(31, new HashSet<>(entries.stream().map(PacketProtocol.Entry::id).toList()).size());
-        assertEquals(IntStream.range(0, 31).boxed().toList(), entries.stream().map(PacketProtocol.Entry::id).toList());
+        assertEquals(33, entries.size());
+        assertEquals(33, new HashSet<>(entries.stream().map(PacketProtocol.Entry::id).toList()).size());
+        assertEquals(IntStream.range(0, 33).boxed().toList(), entries.stream().map(PacketProtocol.Entry::id).toList());
         assertEquals(List.of(
                 TabletPacket.class, TabletStatePacket.class, VoteModePacket.class, JoinTeamPacket.class, VoteMapPacket.class,
                 MapVoteStatePacket.class, SetCompetitivePacket.class, SetClanWarPacket.class, ContractSelectionStatePacket.class,
@@ -32,12 +36,17 @@ class PacketRegistryTest {
                 com.makar.tacticaltablet.clan.ClanLeavePacket.class, com.makar.tacticaltablet.clan.ClanDisbandPacket.class,
                 com.makar.tacticaltablet.clan.ClanRejectJoinPacket.class, com.makar.tacticaltablet.clan.ClanKickMemberPacket.class,
                 com.makar.tacticaltablet.clan.ClanChangeColorPacket.class, com.makar.tacticaltablet.prefix.PrefixListPacket.class,
-                KillFeedPacket.class, VoteSetModePacket.class, ChaosStatePacket.class
+                KillFeedPacket.class, VoteSetModePacket.class, ChaosStatePacket.class, TabletMatchSetupStatePacket.class,
+                ContractSelectionTimerPacket.class
         ), entries.stream().map(PacketProtocol.Entry::packetClass).toList());
         assertEquals(19, map.get(com.makar.tacticaltablet.clan.ClanCreatePacket.class).id());
         assertEquals(18, map.get(com.makar.tacticaltablet.clan.ClanListPacket.class).id());
         assertEquals(NetworkDirection.PLAY_TO_SERVER, map.get(com.makar.tacticaltablet.clan.ClanCreatePacket.class).direction());
         assertEquals(NetworkDirection.PLAY_TO_CLIENT, map.get(com.makar.tacticaltablet.clan.ClanListPacket.class).direction());
+        assertEquals(31, map.get(TabletMatchSetupStatePacket.class).id());
+        assertEquals(NetworkDirection.PLAY_TO_CLIENT, map.get(TabletMatchSetupStatePacket.class).direction());
+        assertEquals(32, map.get(ContractSelectionTimerPacket.class).id());
+        assertEquals(NetworkDirection.PLAY_TO_CLIENT, map.get(ContractSelectionTimerPacket.class).direction());
         assertEquals(List.of(
                 NetworkDirection.PLAY_TO_SERVER, NetworkDirection.PLAY_TO_CLIENT, NetworkDirection.PLAY_TO_SERVER,
                 NetworkDirection.PLAY_TO_SERVER, NetworkDirection.PLAY_TO_SERVER, NetworkDirection.PLAY_TO_CLIENT,
@@ -49,7 +58,8 @@ class PacketRegistryTest {
                 NetworkDirection.PLAY_TO_SERVER, NetworkDirection.PLAY_TO_SERVER, NetworkDirection.PLAY_TO_SERVER,
                 NetworkDirection.PLAY_TO_SERVER, NetworkDirection.PLAY_TO_SERVER, NetworkDirection.PLAY_TO_SERVER,
                 NetworkDirection.PLAY_TO_CLIENT, NetworkDirection.PLAY_TO_CLIENT,
-                NetworkDirection.PLAY_TO_SERVER, NetworkDirection.PLAY_TO_CLIENT
+                NetworkDirection.PLAY_TO_SERVER, NetworkDirection.PLAY_TO_CLIENT, NetworkDirection.PLAY_TO_CLIENT,
+                NetworkDirection.PLAY_TO_CLIENT
         ), entries.stream().map(PacketProtocol.Entry::direction).toList());
         PacketProtocol.verify();
     }
@@ -66,9 +76,36 @@ class PacketRegistryTest {
                 PacketHandler.CLAN_CREATE, PacketHandler.CLAN_JOIN_REQUEST, PacketHandler.CLAN_ACCEPT_JOIN,
                 PacketHandler.CLAN_LEAVE, PacketHandler.CLAN_DISBAND, PacketHandler.CLAN_REJECT_JOIN,
                 PacketHandler.CLAN_KICK_MEMBER, PacketHandler.CLAN_CHANGE_COLOR, PacketHandler.PREFIX_LIST,
-                PacketHandler.KILL_FEED, PacketHandler.VOTE_SET_MODE, PacketHandler.CHAOS_STATE
+                PacketHandler.KILL_FEED, PacketHandler.VOTE_SET_MODE, PacketHandler.CHAOS_STATE,
+                PacketHandler.TABLET_MATCH_SETUP_STATE, PacketHandler.CONTRACT_SELECTION_TIMER
         );
 
         assertEquals(PacketProtocol.entries().stream().map(PacketProtocol.Entry::id).toList(), constants);
+    }
+
+    @Test
+    void lightweightMatchSetupPacketIsRegisteredPlayToClient() throws IOException {
+        String handler = Files.readString(Path.of(
+                "src/main/java/com/makar/tacticaltablet/tablet/net/PacketHandler.java"
+        ));
+
+        assertTrue(handler.contains(
+                "register(TABLET_MATCH_SETUP_STATE, TabletMatchSetupStatePacket.class, "
+                        + "TabletMatchSetupStatePacket::encode, TabletMatchSetupStatePacket::new, "
+                        + "TabletMatchSetupStatePacket::handle, NetworkDirection.PLAY_TO_CLIENT)"
+        ));
+    }
+
+    @Test
+    void contractSelectionTimerPacketIsRegisteredPlayToClient() throws IOException {
+        String handler = Files.readString(Path.of(
+                "src/main/java/com/makar/tacticaltablet/tablet/net/PacketHandler.java"
+        ));
+
+        assertTrue(handler.contains(
+                "register(CONTRACT_SELECTION_TIMER, ContractSelectionTimerPacket.class, "
+                        + "ContractSelectionTimerPacket::encode, ContractSelectionTimerPacket::new, "
+                        + "ContractSelectionTimerPacket::handle, NetworkDirection.PLAY_TO_CLIENT)"
+        ));
     }
 }

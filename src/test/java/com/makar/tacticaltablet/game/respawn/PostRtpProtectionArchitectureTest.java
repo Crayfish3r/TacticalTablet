@@ -48,7 +48,7 @@ class PostRtpProtectionArchitectureTest {
         assertFalse(manager.contains("void tick("));
         assertFalse(manager.contains("System.currentTimeMillis"));
         assertTrue(manager.contains("overworld().getGameTime()"));
-        assertTrue(packetHandler.contains("public static final String VERSION = \"36\""));
+        assertTrue(packetHandler.contains("public static final String VERSION = \"38\""));
     }
 
     private static String read(String relativePath) throws IOException {

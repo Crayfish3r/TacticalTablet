@@ -47,6 +47,13 @@ public final class ContractClientState {
         revision++;
     }
 
+    public static void updateSelectionTimer(boolean active, int secondsLeft) {
+        long now = System.currentTimeMillis();
+        selectionActive = active;
+        selectionSecondsLeft = Math.max(0, secondsLeft);
+        selectionEndsAtMs = now + selectionSecondsLeft * 1000L;
+    }
+
     public static void updateTracker(
             boolean active,
             int centerX,

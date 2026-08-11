@@ -604,7 +604,7 @@ public class ServerEvents {
         XPResult result = calculateXP(killer, victim, source, direct);
         if (result.xp <= 0) return new TacticalKillFeed.KillReward(awardedCoins, 0);
 
-        int awardedXp = ClassXPManager.addXP(killer, clazz, result.xp);
+        int awardedXp = ClassXPManager.addXPDeferredSync(killer, clazz, result.xp);
         return new TacticalKillFeed.KillReward(awardedCoins, awardedXp);
     }
 

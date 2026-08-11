@@ -229,22 +229,15 @@ public final class SpectatorCameraManager {
         if (targetUuid == null) return null;
 
         ServerPlayer target = server.getPlayerList().getPlayer(targetUuid);
-        if (containsTarget(getAvailableTargets(spectator), targetUuid) && isAliveCameraTarget(spectator, target)) {
-            return target;
-        }
-        return null;
+        return isAllowedCameraTarget(spectator, target) ? target : null;
     }
 
     private static ServerPlayer getCurrentValidCameraTarget(ServerPlayer spectator) {
         if (spectator == null) return null;
 
         Entity camera = spectator.getCamera();
-        if (camera instanceof ServerPlayer target
-                && containsTarget(getAvailableTargets(spectator), target.getUUID())
-                && isAliveCameraTarget(spectator, target)) {
-            return target;
-        }
-        return null;
+        if (!(camera instanceof ServerPlayer target)) return null;
+        return isAllowedCameraTarget(spectator, target) ? target : null;
     }
 
     private static ServerPlayer selectInitialTarget(ServerPlayer spectator) {
@@ -262,9 +255,10 @@ public final class SpectatorCameraManager {
             return targets.get(Math.floorMod(oldIndex + 1, targets.size()));
         }
 
-        int oldOrderIndex = indexOfTarget(getTargetOrder(spectator), oldTargetUuid);
+        List<ServerPlayer> order = getTargetOrder(spectator);
+        int oldOrderIndex = indexOfTarget(order, oldTargetUuid);
         if (oldOrderIndex >= 0) {
-            ServerPlayer nextByOrder = firstTargetAfterOrderIndex(spectator, targets, oldOrderIndex);
+            ServerPlayer nextByOrder = firstTargetAfterOrderIndex(targets, order, oldOrderIndex);
             if (nextByOrder != null) {
                 return nextByOrder;
             }
@@ -294,11 +288,10 @@ public final class SpectatorCameraManager {
     }
 
     private static ServerPlayer firstTargetAfterOrderIndex(
-            ServerPlayer spectator,
             List<ServerPlayer> targets,
+            List<ServerPlayer> order,
             int oldOrderIndex
     ) {
-        List<ServerPlayer> order = getTargetOrder(spectator);
         if (order.isEmpty()) return null;
 
         for (int offset = 1; offset <= order.size(); offset++) {
@@ -354,6 +347,28 @@ public final class SpectatorCameraManager {
         if (target.isSpectator()) return false;
         if (LivesManager.isEliminated(target)) return false;
         return true;
+    }
+
+    private static boolean isAllowedCameraTarget(ServerPlayer spectator, ServerPlayer target) {
+        if (!isAliveCameraTarget(spectator, target)) return false;
+
+        MatchMode mode = GameStateManager.getCurrentMode();
+        if (mode == null || !mode.isTeamMode()) return true;
+        if (TeamMatchManager.areTeammates(spectator, target)) return true;
+        return !hasAvailableTeammateCameraTarget(spectator);
+    }
+
+    private static boolean hasAvailableTeammateCameraTarget(ServerPlayer spectator) {
+        if (spectator == null || spectator.server == null) return false;
+        TeamId teamId = TeamMatchManager.getTeam(spectator);
+        if (teamId == null) return false;
+
+        for (ServerPlayer teammate : TeamMatchManager.getOnlineTeamMembers(spectator.server, teamId)) {
+            if (isAliveCameraTarget(spectator, teammate)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean shouldLockSpectator(ServerPlayer player) {
