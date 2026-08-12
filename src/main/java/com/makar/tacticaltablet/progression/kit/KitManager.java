@@ -1,6 +1,7 @@
 package com.makar.tacticaltablet.progression.kit;
 
 import com.makar.tacticaltablet.inventory.InventoryManager;
+import com.makar.tacticaltablet.integration.curios.CuriosInventoryBridge;
 import com.makar.tacticaltablet.progression.ClassXPManager;
 import com.makar.tacticaltablet.progression.ClassTier;
 
@@ -11,6 +12,7 @@ import com.google.gson.JsonParser;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.TagParser;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.fml.loading.FMLPaths;
 
@@ -31,6 +33,12 @@ public class KitManager {
     private static final String ALT_KIT_DIRECTORY = "kits_alt";
     private static final String ALT_SUFFIX = "_alt";
     private static final int MAX_KIT_NBT_LENGTH = 2048;
+    private static final List<EquipmentSlot> ARMOR_SLOTS = List.of(
+            EquipmentSlot.HEAD,
+            EquipmentSlot.CHEST,
+            EquipmentSlot.LEGS,
+            EquipmentSlot.FEET
+    );
 
     private static final Map<String, CachedKit> CACHE = new ConcurrentHashMap<>();
     private static final Set<String> MISSING_TIER_KITS_LOGGED = ConcurrentHashMap.newKeySet();
@@ -88,13 +96,35 @@ public class KitManager {
                 + ", level=" + tier
                 + ", file=" + loadedDirectory + "/" + loadedKitName + ".json");
 
-        for (ItemStack stack : items) {
-            player.getInventory().add(stack.copy());
-        }
+        for (ItemStack stack : items) giveItem(player, stack);
 
         player.getInventory().setChanged();
         InventoryManager.syncInventory(player);
         return true;
+    }
+
+    private static void giveItem(ServerPlayer player, ItemStack configuredStack) {
+        ItemStack remainder = equipArmor(player, configuredStack.copy());
+        remainder = CuriosInventoryBridge.equipFirstAvailable(player, remainder);
+
+        if (!remainder.isEmpty()) {
+            player.getInventory().add(remainder);
+        }
+    }
+
+    private static ItemStack equipArmor(ServerPlayer player, ItemStack stack) {
+        if (stack.isEmpty()) return ItemStack.EMPTY;
+
+        for (EquipmentSlot slot : ARMOR_SLOTS) {
+            if (!player.getItemBySlot(slot).isEmpty() || !stack.canEquip(slot, player)) {
+                continue;
+            }
+
+            player.setItemSlot(slot, stack.split(1));
+            return stack;
+        }
+
+        return stack;
     }
 
     /** Returns ordered file stems, from the requested tier down to BASIC. */
@@ -239,4 +269,3 @@ public class KitManager {
     private record CachedKit(long lastModified, long length, List<ItemStack> items) {
     }
 }
-

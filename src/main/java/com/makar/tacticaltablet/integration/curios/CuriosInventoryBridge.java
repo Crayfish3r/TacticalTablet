@@ -27,6 +27,17 @@ public final class CuriosInventoryBridge {
         CuriosLoaded.clear(player);
     }
 
+    /**
+     * Equips as much of the stack as possible into the first empty compatible functional slot.
+     * The returned remainder must still be given to the player's ordinary inventory.
+     */
+    public static ItemStack equipFirstAvailable(ServerPlayer player, ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return ItemStack.EMPTY;
+        if (player == null || !ModList.get().isLoaded("curios")) return stack;
+
+        return CuriosLoaded.equipFirstAvailable(player, stack);
+    }
+
     /** Loaded only after the mod-presence guard, keeping Curios types out of the common bridge API. */
     private static final class CuriosLoaded {
         private CuriosLoaded() {
@@ -64,6 +75,27 @@ public final class CuriosInventoryBridge {
                     clearCosmeticSlot(slot);
                 }
             });
+        }
+
+        private static ItemStack equipFirstAvailable(ServerPlayer player, ItemStack stack) {
+            var handler = top.theillusivec4.curios.api.CuriosApi.getCuriosInventory(player)
+                    .resolve()
+                    .orElse(null);
+            if (handler == null) return stack;
+
+            for (var stacksHandler : handler.getCurios().values()) {
+                var stacks = stacksHandler.getStacks();
+                for (int slot = 0; slot < stacks.getSlots(); slot++) {
+                    if (!stacks.getStackInSlot(slot).isEmpty()) continue;
+
+                    ItemStack remainder = stacks.insertItem(slot, stack, false);
+                    if (remainder.getCount() < stack.getCount()) {
+                        return remainder;
+                    }
+                }
+            }
+
+            return stack;
         }
 
         private static void clearFunctionalSlot(
