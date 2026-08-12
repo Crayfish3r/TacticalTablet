@@ -17,14 +17,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class PacketRegistryTest {
 
     @Test
-    void registryPreservesAllProtocol38IdsAndDirections() {
+    void registryPreservesAllProtocol39IdsAndDirections() {
         var entries = PacketProtocol.entries();
         Map<Class<?>, PacketProtocol.Entry> map = entries.stream()
                 .collect(java.util.stream.Collectors.toMap(PacketProtocol.Entry::packetClass, entry -> entry));
 
-        assertEquals(33, entries.size());
-        assertEquals(33, new HashSet<>(entries.stream().map(PacketProtocol.Entry::id).toList()).size());
-        assertEquals(IntStream.range(0, 33).boxed().toList(), entries.stream().map(PacketProtocol.Entry::id).toList());
+        assertEquals(34, entries.size());
+        assertEquals(34, new HashSet<>(entries.stream().map(PacketProtocol.Entry::id).toList()).size());
+        assertEquals(IntStream.range(0, 34).boxed().toList(), entries.stream().map(PacketProtocol.Entry::id).toList());
         assertEquals(List.of(
                 TabletPacket.class, TabletStatePacket.class, VoteModePacket.class, JoinTeamPacket.class, VoteMapPacket.class,
                 MapVoteStatePacket.class, SetCompetitivePacket.class, SetClanWarPacket.class, ContractSelectionStatePacket.class,
@@ -37,7 +37,7 @@ class PacketRegistryTest {
                 com.makar.tacticaltablet.clan.ClanRejectJoinPacket.class, com.makar.tacticaltablet.clan.ClanKickMemberPacket.class,
                 com.makar.tacticaltablet.clan.ClanChangeColorPacket.class, com.makar.tacticaltablet.prefix.PrefixListPacket.class,
                 KillFeedPacket.class, VoteSetModePacket.class, ChaosStatePacket.class, TabletMatchSetupStatePacket.class,
-                ContractSelectionTimerPacket.class
+                ContractSelectionTimerPacket.class, SpectatorHudStatePacket.class
         ), entries.stream().map(PacketProtocol.Entry::packetClass).toList());
         assertEquals(19, map.get(com.makar.tacticaltablet.clan.ClanCreatePacket.class).id());
         assertEquals(18, map.get(com.makar.tacticaltablet.clan.ClanListPacket.class).id());
@@ -47,6 +47,8 @@ class PacketRegistryTest {
         assertEquals(NetworkDirection.PLAY_TO_CLIENT, map.get(TabletMatchSetupStatePacket.class).direction());
         assertEquals(32, map.get(ContractSelectionTimerPacket.class).id());
         assertEquals(NetworkDirection.PLAY_TO_CLIENT, map.get(ContractSelectionTimerPacket.class).direction());
+        assertEquals(33, map.get(SpectatorHudStatePacket.class).id());
+        assertEquals(NetworkDirection.PLAY_TO_CLIENT, map.get(SpectatorHudStatePacket.class).direction());
         assertEquals(List.of(
                 NetworkDirection.PLAY_TO_SERVER, NetworkDirection.PLAY_TO_CLIENT, NetworkDirection.PLAY_TO_SERVER,
                 NetworkDirection.PLAY_TO_SERVER, NetworkDirection.PLAY_TO_SERVER, NetworkDirection.PLAY_TO_CLIENT,
@@ -59,7 +61,7 @@ class PacketRegistryTest {
                 NetworkDirection.PLAY_TO_SERVER, NetworkDirection.PLAY_TO_SERVER, NetworkDirection.PLAY_TO_SERVER,
                 NetworkDirection.PLAY_TO_CLIENT, NetworkDirection.PLAY_TO_CLIENT,
                 NetworkDirection.PLAY_TO_SERVER, NetworkDirection.PLAY_TO_CLIENT, NetworkDirection.PLAY_TO_CLIENT,
-                NetworkDirection.PLAY_TO_CLIENT
+                NetworkDirection.PLAY_TO_CLIENT, NetworkDirection.PLAY_TO_CLIENT
         ), entries.stream().map(PacketProtocol.Entry::direction).toList());
         PacketProtocol.verify();
     }
@@ -77,7 +79,8 @@ class PacketRegistryTest {
                 PacketHandler.CLAN_LEAVE, PacketHandler.CLAN_DISBAND, PacketHandler.CLAN_REJECT_JOIN,
                 PacketHandler.CLAN_KICK_MEMBER, PacketHandler.CLAN_CHANGE_COLOR, PacketHandler.PREFIX_LIST,
                 PacketHandler.KILL_FEED, PacketHandler.VOTE_SET_MODE, PacketHandler.CHAOS_STATE,
-                PacketHandler.TABLET_MATCH_SETUP_STATE, PacketHandler.CONTRACT_SELECTION_TIMER
+                PacketHandler.TABLET_MATCH_SETUP_STATE, PacketHandler.CONTRACT_SELECTION_TIMER,
+                PacketHandler.SPECTATOR_HUD_STATE
         );
 
         assertEquals(PacketProtocol.entries().stream().map(PacketProtocol.Entry::id).toList(), constants);
@@ -106,6 +109,19 @@ class PacketRegistryTest {
                 "register(CONTRACT_SELECTION_TIMER, ContractSelectionTimerPacket.class, "
                         + "ContractSelectionTimerPacket::encode, ContractSelectionTimerPacket::new, "
                         + "ContractSelectionTimerPacket::handle, NetworkDirection.PLAY_TO_CLIENT)"
+        ));
+    }
+
+    @Test
+    void spectatorHudStatePacketIsAppendedPlayToClient() throws IOException {
+        String handler = Files.readString(Path.of(
+                "src/main/java/com/makar/tacticaltablet/tablet/net/PacketHandler.java"
+        ));
+
+        assertTrue(handler.contains(
+                "register(SPECTATOR_HUD_STATE, SpectatorHudStatePacket.class, "
+                        + "SpectatorHudStatePacket::encode, SpectatorHudStatePacket::new, "
+                        + "SpectatorHudStatePacket::handle, NetworkDirection.PLAY_TO_CLIENT)"
         ));
     }
 }

@@ -16,6 +16,7 @@ import com.makar.tacticaltablet.tablet.net.TabletPacket;
 import com.makar.tacticaltablet.tablet.ClassCategory;
 import com.makar.tacticaltablet.tablet.ClassDefinition;
 import com.makar.tacticaltablet.tablet.ClassDefinitions;
+import com.makar.tacticaltablet.tablet.CompetitiveClassPolicy;
 import com.makar.tacticaltablet.progression.ClassTier;
 import com.makar.tacticaltablet.progression.PlayerProgressManager;
 import com.makar.tacticaltablet.tablet.client.ui.TacticalUi;
@@ -1012,6 +1013,9 @@ public class TabletScreen extends Screen {
                     && ChaosClientState.selected().isBlank();
         }
         if (action.locked() || isClanWarSetupOnly()) return false;
+        if (CompetitiveClassPolicy.isVipBlocked(TabletClientState.isCompetitiveSet(), action.classKey())) {
+            return false;
+        }
         if (isMarineAction(action) && !isMarineUnlockedForCurrentClan()) return canBuyMarineForCurrentClan();
         if (action.exclusive() && !isMarineAction(action)
                 && !TabletClientState.isClassPurchased(action.classKey())) return false;
@@ -1066,6 +1070,10 @@ public class TabletScreen extends Screen {
                     marine.color(),
                     marine.marker()
             );
+        }
+        if (action.exclusive() && TabletClientState.isCompetitiveSet()) {
+            return unavailable(Component.translatable(
+                    "screen.tacticaltablet.class.vip_competitive_unavailable").getString());
         }
         if (action.exclusive()
                 && !isMarineAction(action)

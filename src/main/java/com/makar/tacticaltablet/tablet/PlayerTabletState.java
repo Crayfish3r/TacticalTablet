@@ -1,5 +1,6 @@
 package com.makar.tacticaltablet.tablet;
 
+import com.makar.tacticaltablet.game.SpectatorCameraManager;
 import net.minecraft.server.level.ServerPlayer;
 
 import java.util.HashMap;
@@ -19,6 +20,7 @@ public class PlayerTabletState {
     public static void setSelectedClass(ServerPlayer player, String clazz) {
         if (player == null) return;
         getState(player).selectedClass = clazz == null ? "" : clazz;
+        SpectatorCameraManager.onTargetClassChanged(player);
     }
 
     public static String getSelectedClass(ServerPlayer player) {

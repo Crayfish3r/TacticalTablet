@@ -2,6 +2,7 @@ package com.makar.tacticaltablet.tablet.client;
 
 import com.makar.tacticaltablet.client.DeathScreenOverlay;
 import com.makar.tacticaltablet.client.SpectatorCameraClientState;
+import com.makar.tacticaltablet.client.SpectatorHudClientState;
 import com.makar.tacticaltablet.core.TacticalTabletMod;
 import com.makar.tacticaltablet.game.GameStateManager;
 import com.makar.tacticaltablet.game.MatchPhase;
@@ -94,6 +95,7 @@ public class ClientEvents {
         ChaosClientState.clear();
         PrefixClientState.clear();
         SpectatorCameraClientState.clear();
+        SpectatorHudClientState.clear();
     }
 
     private static boolean hasTabletInHand(Player player) {

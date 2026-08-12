@@ -16,6 +16,7 @@ import com.makar.tacticaltablet.progression.ClassTier;
 import com.makar.tacticaltablet.progression.kit.KitManager;
 import com.makar.tacticaltablet.progression.PlayerProgressManager;
 import com.makar.tacticaltablet.tablet.ClassDefinitions;
+import com.makar.tacticaltablet.tablet.CompetitiveClassPolicy;
 import com.makar.tacticaltablet.tablet.PlayerTabletState;
 
 import net.minecraft.network.FriendlyByteBuf;
@@ -240,6 +241,11 @@ public class TabletPacket {
         }
         if (MapSetManager.isChaosSet()) {
             handleChaosKit(player, kit);
+            return;
+        }
+        if (CompetitiveClassPolicy.isVipBlocked(MapSetManager.isCompetitiveSet(), kit)) {
+            player.sendSystemMessage(Component.translatable("message.tacticaltablet.competitive_vip_unavailable"));
+            LobbyManager.sync(player);
             return;
         }
         if (MapSetManager.isCompetitiveSet() && PlayerProgressManager.isShopClass(kit)) {

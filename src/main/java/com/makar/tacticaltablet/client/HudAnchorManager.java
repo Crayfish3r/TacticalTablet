@@ -44,6 +44,17 @@ public final class HudAnchorManager {
         return new Rect(x, y, safeWidth, safeHeight);
     }
 
+    public static Rect spectatorPanel(int screenWidth, int screenHeight, int width, int height, Rect hint) {
+        int safeWidth = fit(width, screenWidth);
+        int safeHeight = Math.min(Math.max(0, height), Math.max(0, screenHeight - SAFE_MARGIN * 2));
+        int x = clamp(screenWidth / 2 - safeWidth / 2, SAFE_MARGIN,
+                Math.max(SAFE_MARGIN, screenWidth - SAFE_MARGIN - safeWidth));
+        int upperLimit = hint == null ? screenHeight - SAFE_MARGIN : hint.y() - ZONE_GAP;
+        int y = clamp(upperLimit - safeHeight, SAFE_MARGIN,
+                Math.max(SAFE_MARGIN, screenHeight - SAFE_MARGIN - safeHeight));
+        return new Rect(x, y, safeWidth, safeHeight);
+    }
+
     private static int fit(int requested, int screenWidth) {
         return Math.min(Math.max(0, requested), Math.max(0, screenWidth - SAFE_MARGIN * 2));
     }

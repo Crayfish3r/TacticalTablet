@@ -459,6 +459,7 @@ public class ServerEvents {
                     && LivesManager.isAliveParticipant(player);
 
             PlayerProgressManager.savePlayer(player);
+            SpectatorCameraManager.onPlayerDisconnect(player);
             DeathTransitionManager.clear(player);
             ContractManager.onPlayerDisconnect(player);
             ExtractionPointManager.onPlayerDeathOrLogout(player);

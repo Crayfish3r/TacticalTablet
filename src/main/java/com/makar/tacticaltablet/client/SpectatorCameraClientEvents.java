@@ -1,6 +1,8 @@
 package com.makar.tacticaltablet.client;
 
 import com.makar.tacticaltablet.core.TacticalTabletMod;
+import com.makar.tacticaltablet.game.SpectatorHudSnapshot;
+import com.makar.tacticaltablet.tablet.client.TabletClientState;
 import com.makar.tacticaltablet.tablet.net.PacketHandler;
 import com.makar.tacticaltablet.tablet.net.SpectatorCameraSwitchPacket;
 import com.makar.tacticaltablet.tablet.client.ui.TacticalTheme;
@@ -120,7 +122,53 @@ public final class SpectatorCameraClientEvents {
                     2, 1, TacticalTheme.BORDER, 0xB812181D);
             graphics.drawCenteredString(minecraft.font, lockHint,
                     anchor.x() + anchor.width() / 2, anchor.y() + paddingY, TacticalTheme.TEXT_PRIMARY);
+
+            if (TabletClientState.isCompetitiveSet()) {
+                SpectatorHudClientState.snapshot().ifPresent(snapshot ->
+                        renderSpectatorPanel(graphics, minecraft, screenWidth, screenHeight, anchor, snapshot));
+            }
         }
+    }
+
+    private static void renderSpectatorPanel(
+            GuiGraphics graphics,
+            Minecraft minecraft,
+            int screenWidth,
+            int screenHeight,
+            HudAnchorManager.Rect hint,
+            SpectatorHudSnapshot snapshot
+    ) {
+        Component classValue = snapshot.className().isBlank()
+                ? Component.translatable("hud.tacticaltablet.spectator.not_selected")
+                : Component.literal(snapshot.className());
+        Component classLine = Component.translatable("hud.tacticaltablet.spectator.class", classValue);
+        Component combatLine = Component.translatable(
+                "hud.tacticaltablet.spectator.combat_stats",
+                snapshot.kills(), snapshot.deaths(), snapshot.formattedKd());
+        Component matchLine = Component.translatable(
+                "hud.tacticaltablet.spectator.match_stats", snapshot.wins(), snapshot.matchesPlayed());
+
+        int contentWidth = Math.max(minecraft.font.width(snapshot.playerName()),
+                Math.max(minecraft.font.width(classLine),
+                        Math.max(minecraft.font.width(combatLine), minecraft.font.width(matchLine))));
+        int panelWidth = Math.min(250, Math.max(150, contentWidth + 16));
+        int panelHeight = minecraft.font.lineHeight * 4 + 9;
+        HudAnchorManager.Rect panel = HudAnchorManager.spectatorPanel(
+                screenWidth, screenHeight, panelWidth, panelHeight, hint);
+
+        TacticalUi.drawCutCornerBorder(graphics, panel.x(), panel.y(), panel.width(), panel.height(),
+                TacticalTheme.CORNER_CUT, TacticalTheme.BORDER_WIDTH,
+                TacticalTheme.ACCENT_MUTED, 0xC412181D);
+        int textX = panel.x() + 8;
+        int textY = panel.y() + 3;
+        graphics.drawString(minecraft.font, snapshot.playerName(), textX, textY,
+                TacticalTheme.ACCENT, false);
+        graphics.drawString(minecraft.font, classLine, textX, textY + minecraft.font.lineHeight,
+                TacticalTheme.TEXT_SECONDARY, false);
+        graphics.drawString(minecraft.font, combatLine, textX, textY + minecraft.font.lineHeight * 2,
+                TacticalTheme.TEXT_PRIMARY, false);
+        graphics.drawString(minecraft.font, matchLine, textX, textY + minecraft.font.lineHeight * 3,
+                TacticalTheme.TEXT_PRIMARY, false);
     }
 
     private static boolean isLockedGameplay() {

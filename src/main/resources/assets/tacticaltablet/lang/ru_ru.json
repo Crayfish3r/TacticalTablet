@@ -42,5 +42,11 @@
   "screen.tacticaltablet.map_voting.competitive_enabled": "Следующий сет: СОРЕВНОВАТЕЛЬНЫЙ",
   "screen.tacticaltablet.map_voting.clan_war_enabled": "Следующий сет: ВОЙНА КЛАНОВ",
   "hud.tacticaltablet.airdrop": "СНАБЖЕНИЕ",
-  "hud.tacticaltablet.spectator_hint": "Режим наблюдателя · переключение: PageUp / PageDown"
+  "hud.tacticaltablet.spectator_hint": "Режим наблюдателя · переключение: PageUp / PageDown",
+  "hud.tacticaltablet.spectator.not_selected": "Не выбран",
+  "hud.tacticaltablet.spectator.class": "Класс: %s",
+  "hud.tacticaltablet.spectator.combat_stats": "Убийства: %s  Смерти: %s  K/D: %s",
+  "hud.tacticaltablet.spectator.match_stats": "Победы: %s  Матчи: %s",
+  "screen.tacticaltablet.class.vip_competitive_unavailable": "Недоступен в соревновательном режиме",
+  "message.tacticaltablet.competitive_vip_unavailable": "[WAR] VIP-классы недоступны в соревновательном режиме."
 }

@@ -5,8 +5,13 @@ import com.makar.tacticaltablet.game.lives.LivesManager;
 import com.makar.tacticaltablet.game.team.TeamId;
 import com.makar.tacticaltablet.game.team.TeamMatchManager;
 import com.makar.tacticaltablet.moderation.ModerModeManager;
+import com.makar.tacticaltablet.progression.PlayerProgressManager;
+import com.makar.tacticaltablet.stats.PlayerStats;
+import com.makar.tacticaltablet.tablet.ClassDefinitions;
+import com.makar.tacticaltablet.tablet.PlayerTabletState;
 import com.makar.tacticaltablet.tablet.net.PacketHandler;
 import com.makar.tacticaltablet.tablet.net.SpectatorCameraLockStatePacket;
+import com.makar.tacticaltablet.tablet.net.SpectatorHudStatePacket;
 
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
@@ -25,6 +30,7 @@ public final class SpectatorCameraManager {
     private static final int SWITCH_COOLDOWN_TICKS = 5;
     private static final Map<UUID, UUID> spectatorTargets = new ConcurrentHashMap<>();
     private static final Map<UUID, Integer> switchCooldownTicks = new ConcurrentHashMap<>();
+    private static final Map<UUID, SpectatorHudSnapshot> hudSnapshots = new ConcurrentHashMap<>();
     private static int tickCounter = 0;
 
     private SpectatorCameraManager() {
@@ -94,6 +100,7 @@ public final class SpectatorCameraManager {
             if (!target.getUUID().equals(oldTargetUuid)) {
                 sendLockState(player, true);
             }
+            sendHudStateIfChanged(player, target);
             forceCamera(player, target);
         }
     }
@@ -103,6 +110,23 @@ public final class SpectatorCameraManager {
 
         clearSpectatorCameraState(player);
         retargetViewersOf(player.server, player.getUUID());
+    }
+
+    public static void onPlayerDisconnect(ServerPlayer player) {
+        if (player == null) return;
+        clearSpectatorCameraState(player);
+        retargetViewersOf(player.server, player.getUUID());
+    }
+
+    public static void onTargetClassChanged(ServerPlayer target) {
+        if (target == null || !MapSetManager.isCompetitiveSet()) return;
+        for (Map.Entry<UUID, UUID> entry : spectatorTargets.entrySet()) {
+            if (!target.getUUID().equals(entry.getValue())) continue;
+            ServerPlayer spectator = target.server.getPlayerList().getPlayer(entry.getKey());
+            if (spectator != null && shouldLockSpectator(spectator)) {
+                sendHudStateIfChanged(spectator, target);
+            }
+        }
     }
 
     public static void switchCamera(ServerPlayer spectator, int direction) {
@@ -162,6 +186,7 @@ public final class SpectatorCameraManager {
         }
         spectatorTargets.clear();
         switchCooldownTicks.clear();
+        hudSnapshots.clear();
         tickCounter = 0;
     }
 
@@ -247,7 +272,8 @@ public final class SpectatorCameraManager {
     }
 
     private static ServerPlayer selectNextTargetAfter(ServerPlayer spectator, UUID oldTargetUuid) {
-        List<ServerPlayer> targets = getAvailableTargets(spectator);
+        List<ServerPlayer> targets = new ArrayList<>(getAvailableTargets(spectator));
+        targets.removeIf(target -> oldTargetUuid.equals(target.getUUID()));
         if (targets.isEmpty()) return null;
 
         int oldIndex = indexOfTarget(targets, oldTargetUuid);
@@ -405,9 +431,10 @@ public final class SpectatorCameraManager {
 
         boolean hadTarget = spectatorTargets.remove(player.getUUID()) != null;
         boolean hadCooldown = switchCooldownTicks.remove(player.getUUID()) != null;
+        boolean hadHud = hudSnapshots.remove(player.getUUID()) != null;
         boolean cameraChanged = player.getCamera() != player;
 
-        if (hadTarget || hadCooldown || cameraChanged) {
+        if (hadTarget || hadCooldown || hadHud || cameraChanged) {
             sendLockState(player, false);
         }
 
@@ -419,6 +446,45 @@ public final class SpectatorCameraManager {
     private static void sendLockState(ServerPlayer player, boolean locked) {
         if (player != null) {
             PacketHandler.sendToPlayer(player, new SpectatorCameraLockStatePacket(locked));
+            if (!locked) {
+                hudSnapshots.remove(player.getUUID());
+                PacketHandler.sendToPlayer(player, SpectatorHudStatePacket.clear());
+                return;
+            }
+            ServerPlayer target = getStoredValidTarget(player.server, player);
+            if (target != null) sendHudStateIfChanged(player, target);
         }
+    }
+
+    private static void sendHudStateIfChanged(ServerPlayer spectator, ServerPlayer target) {
+        if (spectator == null || target == null) return;
+        if (!MapSetManager.isCompetitiveSet()) {
+            if (hudSnapshots.remove(spectator.getUUID()) != null) {
+                PacketHandler.sendToPlayer(spectator, SpectatorHudStatePacket.clear());
+            }
+            return;
+        }
+
+        SpectatorHudSnapshot snapshot = snapshotFor(target);
+        SpectatorHudSnapshot previous = hudSnapshots.put(spectator.getUUID(), snapshot);
+        if (!snapshot.equals(previous)) {
+            PacketHandler.sendToPlayer(spectator, new SpectatorHudStatePacket(snapshot));
+        }
+    }
+
+    private static SpectatorHudSnapshot snapshotFor(ServerPlayer target) {
+        String classKey = PlayerTabletState.getSelectedClass(target);
+        String className = ClassDefinitions.byClassKey(classKey)
+                .map(definition -> definition.name().getString())
+                .orElse("");
+        PlayerStats stats = new PlayerStats(
+                target.getGameProfile().getName(),
+                PlayerProgressManager.getKills(target),
+                PlayerProgressManager.getDeaths(target),
+                PlayerProgressManager.getWins(target),
+                PlayerProgressManager.getMatchesPlayed(target),
+                0
+        );
+        return SpectatorHudSnapshot.from(stats, className);
     }
 }

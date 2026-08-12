@@ -10,7 +10,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-/** Immutable protocol-38 map; deliberately independent of Forge channel bootstrap. */
+/** Immutable protocol-39 map; deliberately independent of Forge channel bootstrap. */
 public final class PacketProtocol {
     public record Entry(int id, Class<?> packetClass, NetworkDirection direction) { }
 
@@ -33,7 +33,8 @@ public final class PacketProtocol {
             entry(29, VoteSetModePacket.class, NetworkDirection.PLAY_TO_SERVER),
             entry(30, ChaosStatePacket.class, NetworkDirection.PLAY_TO_CLIENT),
             entry(31, TabletMatchSetupStatePacket.class, NetworkDirection.PLAY_TO_CLIENT),
-            entry(32, ContractSelectionTimerPacket.class, NetworkDirection.PLAY_TO_CLIENT)
+            entry(32, ContractSelectionTimerPacket.class, NetworkDirection.PLAY_TO_CLIENT),
+            entry(33, SpectatorHudStatePacket.class, NetworkDirection.PLAY_TO_CLIENT)
     );
 
     private PacketProtocol() { }

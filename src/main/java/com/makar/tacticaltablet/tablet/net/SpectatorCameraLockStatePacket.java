@@ -25,9 +25,10 @@ public final class SpectatorCameraLockStatePacket {
 
     public void handle(Supplier<NetworkEvent.Context> contextSupplier) {
         NetworkEvent.Context context = contextSupplier.get();
-        context.enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () ->
-                com.makar.tacticaltablet.client.SpectatorCameraClientState.setLocked(locked)
-        ));
+        context.enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> {
+            com.makar.tacticaltablet.client.SpectatorCameraClientState.setLocked(locked);
+            if (!locked) com.makar.tacticaltablet.client.SpectatorHudClientState.clear();
+        }));
         context.setPacketHandled(true);
     }
 }

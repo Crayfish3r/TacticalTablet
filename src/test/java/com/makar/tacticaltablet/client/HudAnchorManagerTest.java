@@ -13,6 +13,8 @@ class HudAnchorManagerTest {
         assertInside(HudAnchorManager.hotbarSide(320, 180, 120, 18), 320, 180);
         assertInside(HudAnchorManager.topCenter(320, 180, 280, 40), 320, 180);
         assertInside(HudAnchorManager.spectatorHint(320, 180, 260, 17), 320, 180);
+        HudAnchorManager.Rect hint = HudAnchorManager.spectatorHint(320, 180, 260, 17);
+        assertInside(HudAnchorManager.spectatorPanel(320, 180, 250, 45, hint), 320, 180);
     }
 
     @Test
@@ -26,13 +28,28 @@ class HudAnchorManagerTest {
 
     @Test
     void tacticalZonesDoNotOverlapAtMinimumViewport() {
-        HudAnchorManager.Rect notice = HudAnchorManager.topCenter(320, 180, 280, 40);
+        HudAnchorManager.Rect notice = HudAnchorManager.topCenter(320, 180, 280, 37);
         HudAnchorManager.Rect lives = HudAnchorManager.hotbarSide(320, 180, 120, 18);
         HudAnchorManager.Rect spectator = HudAnchorManager.spectatorHint(320, 180, 260, 17);
+        HudAnchorManager.Rect panel = HudAnchorManager.spectatorPanel(320, 180, 250, 45, spectator);
 
         assertFalse(notice.intersects(lives));
         assertFalse(notice.intersects(spectator));
         assertFalse(lives.intersects(spectator));
+        assertFalse(panel.intersects(spectator));
+        assertFalse(panel.intersects(lives));
+        assertFalse(panel.intersects(notice));
+    }
+
+    @Test
+    void spectatorPanelStaysAboveHintAcrossViewports() {
+        for (int[] viewport : new int[][]{{320, 180}, {426, 240}, {640, 360}}) {
+            HudAnchorManager.Rect hint = HudAnchorManager.spectatorHint(viewport[0], viewport[1], 260, 17);
+            HudAnchorManager.Rect panel = HudAnchorManager.spectatorPanel(viewport[0], viewport[1], 250, 45, hint);
+            assertInside(panel, viewport[0], viewport[1]);
+            assertFalse(panel.intersects(hint));
+            assertTrue(panel.y() + panel.height() < hint.y());
+        }
     }
 
     private static void assertInside(HudAnchorManager.Rect rect, int width, int height) {

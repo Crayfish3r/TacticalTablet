@@ -22,9 +22,9 @@ import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
-/** Tactical Tablet protocol registry. Protocol 38 adds lightweight contract-selection timer updates. */
+/** Tactical Tablet protocol registry. Protocol 39 adds competitive spectator HUD snapshots. */
 public final class PacketHandler {
-    public static final String VERSION = "38";
+    public static final String VERSION = "39";
 
     public static final int TABLET = 0, TABLET_STATE = 1, VOTE_MODE = 2, JOIN_TEAM = 3, VOTE_MAP = 4,
             MAP_VOTE_STATE = 5, SET_COMPETITIVE = 6, SET_CLAN_WAR = 7, CONTRACT_SELECTION_STATE = 8,
@@ -34,7 +34,7 @@ public final class PacketHandler {
             CLAN_CREATE = 19, CLAN_JOIN_REQUEST = 20, CLAN_ACCEPT_JOIN = 21, CLAN_LEAVE = 22,
             CLAN_DISBAND = 23, CLAN_REJECT_JOIN = 24, CLAN_KICK_MEMBER = 25,
             CLAN_CHANGE_COLOR = 26, PREFIX_LIST = 27, KILL_FEED = 28, VOTE_SET_MODE = 29, CHAOS_STATE = 30,
-            TABLET_MATCH_SETUP_STATE = 31, CONTRACT_SELECTION_TIMER = 32;
+            TABLET_MATCH_SETUP_STATE = 31, CONTRACT_SELECTION_TIMER = 32, SPECTATOR_HUD_STATE = 33;
 
     public static final SimpleChannel INSTANCE = NetworkRegistry.newSimpleChannel(
             new ResourceLocation("tacticaltablet", "main"), () -> VERSION, VERSION::equals, VERSION::equals);
@@ -90,6 +90,7 @@ public final class PacketHandler {
         register(CHAOS_STATE, ChaosStatePacket.class, ChaosStatePacket::encode, ChaosStatePacket::new, ChaosStatePacket::handle, NetworkDirection.PLAY_TO_CLIENT);
         register(TABLET_MATCH_SETUP_STATE, TabletMatchSetupStatePacket.class, TabletMatchSetupStatePacket::encode, TabletMatchSetupStatePacket::new, TabletMatchSetupStatePacket::handle, NetworkDirection.PLAY_TO_CLIENT);
         register(CONTRACT_SELECTION_TIMER, ContractSelectionTimerPacket.class, ContractSelectionTimerPacket::encode, ContractSelectionTimerPacket::new, ContractSelectionTimerPacket::handle, NetworkDirection.PLAY_TO_CLIENT);
+        register(SPECTATOR_HUD_STATE, SpectatorHudStatePacket.class, SpectatorHudStatePacket::encode, SpectatorHudStatePacket::new, SpectatorHudStatePacket::handle, NetworkDirection.PLAY_TO_CLIENT);
         verifyUniqueIds();
         registered = true;
     }
