@@ -210,7 +210,7 @@ public final class ContractManager {
         long cooldownUntil = pickCooldownUntil.getOrDefault(player.getUUID(), 0L);
         if (cooldownUntil > now) {
             long secondsLeft = Math.max(1L, (cooldownUntil - now + 999L) / 1000L);
-            player.sendSystemMessage(Component.literal("[WAR] РўСЂРµРєРµСЂ РїРµСЂРµР·Р°СЂСЏР¶Р°РµС‚СЃСЏ: " + secondsLeft + " СЃ."));
+            player.sendSystemMessage(Component.literal("[WAR] Трекер перезаряжается: " + secondsLeft + " с."));
             syncSelection(player);
             return;
         }

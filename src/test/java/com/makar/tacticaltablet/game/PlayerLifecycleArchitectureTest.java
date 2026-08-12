@@ -74,7 +74,7 @@ class PlayerLifecycleArchitectureTest {
     }
 
     @Test
-    void optionalCuriosBridgeUsesPublicCapabilityAndClearsBothSlotKinds() throws IOException {
+    void optionalCuriosBridgeKeepsCuriosTypesBehindTheLoaderGuard() throws IOException {
         String bridge = source("integration/curios/CuriosInventoryBridge.java");
         String build = Files.readString(Path.of("build.gradle"));
         String mods = Files.readString(Path.of("src/main/resources/META-INF/mods.toml"));
@@ -83,11 +83,8 @@ class PlayerLifecycleArchitectureTest {
         assertTrue(commonApi.contains("ModList.get().isLoaded(\"curios\")"));
         assertFalse(commonApi.contains("top.theillusivec4.curios"));
         assertTrue(bridge.contains("CuriosApi.getCuriosInventory(player)"));
-        assertTrue(bridge.contains("getStacks()"));
-        assertTrue(bridge.contains("getCosmeticStacks()"));
-        assertTrue(bridge.contains("extractItem(slot, Integer.MAX_VALUE, false)"));
-        assertTrue(bridge.contains("setStackInSlot(slot, net.minecraft.world.item.ItemStack.EMPTY)"));
         assertFalse(bridge.contains("java.lang.reflect"));
+        assertFalse(bridge.contains("top.theillusivec4.curios.common"));
         assertTrue(build.contains("compileOnly fg.deobf(\"top.theillusivec4.curios:curios-forge:${curios_version}\")"));
 
         int curiosSectionStart = mods.indexOf("modId=\"curios\"");
