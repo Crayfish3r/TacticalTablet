@@ -10,6 +10,7 @@ import com.makar.tacticaltablet.game.chaos.ChaosSetManager;
 import com.makar.tacticaltablet.game.set.SetMatchRuntime;
 import com.makar.tacticaltablet.game.clanwar.ClanWarManager;
 import com.makar.tacticaltablet.game.lives.LivesManager;
+import com.makar.tacticaltablet.game.lifecycle.PlayerLifecycleSanitizer;
 import com.makar.tacticaltablet.game.lobby.LobbyManager;
 import com.makar.tacticaltablet.game.extraction.ExtractionPointManager;
 import com.makar.tacticaltablet.game.teleport.SafeTeleport;
@@ -289,6 +290,7 @@ public class RtpTimerManager {
         requestStates.put(uuid, RtpRequestState.COMPLETED);
         lastFailureReasons.remove(uuid);
         lastNoticeTimes.remove(uuid);
+        PlayerLifecycleSanitizer.prepareForDeployment(player);
         LivesManager.ensureStarted(player);
         PlayerTabletState.setRtpUsed(player);
         PostRtpProtectionManager.grant(player, POST_RTP_PROTECTION_TICKS);

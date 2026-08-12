@@ -29,6 +29,14 @@ class ActivePvpParticipantPolicyTest {
         assertFalse(eligible(true, false, false, false, false, false));
     }
 
+    @Test
+    void runtimeEligibilityRequiresRunningMatchAndPhaseOutsidePhysicalLobby() {
+        assertFalse(runtimeEligible(true, true, true));
+        assertFalse(runtimeEligible(false, true, false));
+        assertFalse(runtimeEligible(true, false, false));
+        assertTrue(runtimeEligible(true, true, false));
+    }
+
     private static boolean eligible(
             boolean currentMatch,
             boolean playing,
@@ -44,6 +52,20 @@ class ActivePvpParticipantPolicyTest {
                 spectator,
                 moderator,
                 eliminated
+        );
+    }
+
+    private static boolean runtimeEligible(boolean matchRunning, boolean runningPhase, boolean physicalLobby) {
+        return ActivePvpParticipantPolicy.isEligible(
+                true,
+                true,
+                false,
+                false,
+                false,
+                false,
+                matchRunning,
+                runningPhase,
+                physicalLobby
         );
     }
 }

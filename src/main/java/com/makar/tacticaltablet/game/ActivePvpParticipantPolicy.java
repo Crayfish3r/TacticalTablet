@@ -19,4 +19,28 @@ public final class ActivePvpParticipantPolicy {
                 && !moderator
                 && !eliminated;
     }
+
+    public static boolean isEligible(
+            boolean currentMatchParticipant,
+            boolean warPlaying,
+            boolean lateSpectator,
+            boolean spectator,
+            boolean moderator,
+            boolean eliminated,
+            boolean matchRunning,
+            boolean runningPhase,
+            boolean physicalLobby
+    ) {
+        return matchRunning
+                && runningPhase
+                && !physicalLobby
+                && isEligible(
+                currentMatchParticipant,
+                warPlaying,
+                lateSpectator,
+                spectator,
+                moderator,
+                eliminated
+        );
+    }
 }

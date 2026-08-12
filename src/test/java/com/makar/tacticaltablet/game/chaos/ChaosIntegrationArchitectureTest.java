@@ -52,6 +52,29 @@ class ChaosIntegrationArchitectureTest {
     }
 
     @Test
+    void waitingChaosKitIsSafeInLobbyAndPreservedAtDeployment() throws IOException {
+        String packet = source("tablet/net/TabletPacket.java");
+        String rtp = source("game/respawn/RtpTimerManager.java");
+        String events = source("game/ServerEvents.java");
+        String inventoryGuard = source("inventory/InventoryGuard.java");
+
+        int giveKit = packet.indexOf("KitManager.giveKit(player, kit, ChaosSetManager.tierFor(player, kit))");
+        int waitForTeam = rtp.indexOf("shouldPostponeTeamRtp(MapSetManager.isChaosSet()");
+        int deployment = rtp.indexOf("PlayerLifecycleSanitizer.prepareForDeployment(player)");
+        int playing = rtp.indexOf("player.addTag(\"war.playing\")", deployment);
+
+        assertTrue(giveKit >= 0);
+        assertTrue(waitForTeam >= 0);
+        assertTrue(deployment >= 0 && playing > deployment);
+        assertTrue(events.contains("onLobbyEffectApplicable(MobEffectEvent.Applicable event)"));
+        assertTrue(events.contains("GameStateManager.isInLobby(player)"));
+        assertTrue(!rtp.substring(deployment, playing).contains("clearPreviousLifeState"));
+        assertTrue(!rtp.substring(deployment, playing).contains("CuriosInventoryBridge.clear"));
+        assertTrue(!inventoryGuard.contains("CuriosInventoryBridge"));
+        assertTrue(!inventoryGuard.contains("PlayerLifecycleSanitizer"));
+    }
+
+    @Test
     void chaosPacketStateCannotOpenClientGuiByItself() throws IOException {
         String state = source("tablet/client/ChaosClientState.java");
         String events = source("tablet/client/ClientEvents.java");

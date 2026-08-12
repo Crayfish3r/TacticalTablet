@@ -5,6 +5,7 @@ import com.makar.tacticaltablet.game.MapSetManager;
 import com.makar.tacticaltablet.game.MatchAdmissionManager;
 import com.makar.tacticaltablet.game.clanwar.ClanWarManager;
 import com.makar.tacticaltablet.game.extraction.ExtractionPointManager;
+import com.makar.tacticaltablet.game.lifecycle.PlayerLifecycleSanitizer;
 import com.makar.tacticaltablet.game.lives.LivesManager;
 import com.makar.tacticaltablet.game.lobby.LobbyManager;
 import com.makar.tacticaltablet.game.team.TeamMatchManager;
@@ -93,6 +94,7 @@ public final class DeathTransitionManager {
         DeathMessage message = pendingMessages.remove(player.getUUID());
         if (message == null) return false;
 
+        PlayerLifecycleSanitizer.clearPreviousLifeState(player);
         activeTransitions.put(player.getUUID(), SCREEN_TICKS + SERVER_FINISH_BUFFER_TICKS);
         player.setGameMode(GameType.SPECTATOR);
         PacketHandler.sendToPlayer(player, new DeathScreenPacket(

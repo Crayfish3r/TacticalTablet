@@ -7,6 +7,7 @@ import com.makar.tacticaltablet.game.MatchAdmissionManager;
 import com.makar.tacticaltablet.game.SpectatorCameraManager;
 import com.makar.tacticaltablet.game.clanwar.ClanWarManager;
 import com.makar.tacticaltablet.game.lobby.LobbyManager;
+import com.makar.tacticaltablet.game.lifecycle.PlayerLifecycleSanitizer;
 import com.makar.tacticaltablet.game.respawn.RespawnControlManager;
 import com.makar.tacticaltablet.game.respawn.RtpTimerManager;
 import com.makar.tacticaltablet.inventory.InventoryManager;
@@ -332,6 +333,7 @@ public class LivesManager {
         PassiveClassXPManager.clear(player);
         PlayerTabletState.reset(player);
         InventoryManager.clearInventory(player);
+        PlayerLifecycleSanitizer.clearPreviousLifeState(player);
 
         player.removeTag("war.playing");
         player.removeTag("in_lobby");

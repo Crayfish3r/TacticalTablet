@@ -34,7 +34,7 @@ class InventoryAlphaMixinArchitectureTest {
         assertTrue(curiosDependency >= 0);
         String curiosSection = modsToml.substring(curiosDependency);
         assertTrue(curiosSection.contains("mandatory=false"));
-        assertTrue(curiosSection.contains("side=\"CLIENT\""));
+        assertTrue(curiosSection.contains("side=\"BOTH\""));
     }
 
     @Test

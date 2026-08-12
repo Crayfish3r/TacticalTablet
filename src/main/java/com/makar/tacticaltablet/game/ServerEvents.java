@@ -10,6 +10,7 @@ import com.makar.tacticaltablet.game.clanwar.ClanWarManager;
 import com.makar.tacticaltablet.game.contract.ContractManager;
 import com.makar.tacticaltablet.game.extraction.ExtractionPointManager;
 import com.makar.tacticaltablet.game.lives.LivesManager;
+import com.makar.tacticaltablet.game.lifecycle.PlayerLifecycleSanitizer;
 import com.makar.tacticaltablet.game.lobby.LobbyManager;
 import com.makar.tacticaltablet.game.respawn.RtpTimerManager;
 import com.makar.tacticaltablet.game.respawn.DeathTransitionManager;
@@ -57,10 +58,12 @@ import net.minecraftforge.event.entity.living.LivingDamageEvent;
 import net.minecraftforge.event.entity.living.LivingDeathEvent;
 import net.minecraftforge.event.entity.living.LivingDropsEvent;
 import net.minecraftforge.event.entity.living.LivingHurtEvent;
+import net.minecraftforge.event.entity.living.MobEffectEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.event.ServerChatEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.eventbus.api.EventPriority;
+import net.minecraftforge.eventbus.api.Event;
 import net.minecraftforge.event.server.ServerStartedEvent;
 import net.minecraftforge.event.server.ServerStoppedEvent;
 import net.minecraftforge.event.server.ServerStoppingEvent;
@@ -280,9 +283,20 @@ public class ServerEvents {
     @SubscribeEvent(priority = EventPriority.HIGHEST)
     public static void onPostRtpAttack(LivingAttackEvent event) {
         if (!(event.getEntity() instanceof ServerPlayer player)) return;
-        if (!PostRtpProtectionManager.isProtected(player)) return;
+        if (!GameStateManager.isInLobby(player) && !PostRtpProtectionManager.isProtected(player)) return;
 
         event.setCanceled(true);
+        if (GameStateManager.isInLobby(player)) {
+            CombatAttributionLedger.clear(player.getUUID());
+        }
+    }
+
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public static void onLobbyEffectApplicable(MobEffectEvent.Applicable event) {
+        if (!(event.getEntity() instanceof ServerPlayer player)) return;
+        if (!GameStateManager.isInLobby(player)) return;
+
+        event.setResult(Event.Result.DENY);
     }
 
     @SubscribeEvent(priority = EventPriority.LOWEST, receiveCanceled = true)
@@ -306,12 +320,15 @@ public class ServerEvents {
             }
 
             Set<String> tags = player.getTags();
-            boolean inLobby = GameStateManager.isInLobby(player) || tags.contains("in_lobby");
+            boolean physicalLobby = GameStateManager.isInLobby(player);
             boolean playing = tags.contains("war.playing");
 
-            if (inLobby && !playing) {
+            if (LobbyProtectionPolicy.isProtected(physicalLobby, tags.contains("in_lobby"), playing)) {
                 event.setCanceled(true);
                 event.setAmount(0);
+                if (physicalLobby) {
+                    CombatAttributionLedger.clear(player.getUUID());
+                }
                 return;
             }
 
@@ -473,6 +490,16 @@ public class ServerEvents {
             player.server.execute(() -> syncPrefixes(player.server));
             player.server.execute(() -> GameStateManager.checkForMatchEnd(player.server));
         }
+    }
+
+    @SubscribeEvent(priority = EventPriority.HIGHEST, receiveCanceled = true)
+    public static void onLobbyDeath(LivingDeathEvent event) {
+        if (!(event.getEntity() instanceof ServerPlayer player)) return;
+        if (!GameStateManager.isInLobby(player)) return;
+
+        event.setCanceled(true);
+        PlayerLifecycleSanitizer.restoreLobbySafety(player);
+        CombatAttributionLedger.clear(player.getUUID());
     }
 
     @SubscribeEvent

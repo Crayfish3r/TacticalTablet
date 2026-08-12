@@ -4,6 +4,7 @@ import com.makar.tacticaltablet.game.GameStateManager;
 import com.makar.tacticaltablet.game.MatchAdmissionManager;
 import com.makar.tacticaltablet.airdrop.AirdropManager;
 import com.makar.tacticaltablet.game.contract.ContractManager;
+import com.makar.tacticaltablet.game.lifecycle.PlayerLifecycleSanitizer;
 import com.makar.tacticaltablet.game.lives.LivesManager;
 import com.makar.tacticaltablet.game.respawn.RtpTimerManager;
 import com.makar.tacticaltablet.game.MapSetManager;
@@ -22,8 +23,6 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.RandomSource;
-import net.minecraft.world.effect.MobEffectInstance;
-import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.level.GameRules;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.Level;
@@ -72,6 +71,7 @@ public class LobbyManager {
 
         player.removeTag("war.playing");
         InventoryManager.clearInventory(player);
+        PlayerLifecycleSanitizer.clearPreviousLifeState(player);
 
         boolean matchRunning = matchRunningOrStarting;
         boolean canUseTabletNow = GameStateManager.isTabletAvailableInLobby(player.server)
@@ -85,7 +85,7 @@ public class LobbyManager {
 
         player.changeDimension(lobby);
         player.teleportTo(lobby, 0.5, LOBBY_PLAYER_Y, 0.5, player.getYRot(), player.getXRot());
-        player.addEffect(new MobEffectInstance(MobEffects.DAMAGE_RESISTANCE, 20 * 5, 255, false, false, false));
+        PlayerLifecycleSanitizer.restoreLobbySafety(player);
 
         if (canUseTabletNow) {
             InventoryManager.giveFreshTablet(player);

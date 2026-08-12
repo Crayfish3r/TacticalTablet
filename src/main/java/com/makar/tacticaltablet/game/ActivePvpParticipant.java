@@ -18,7 +18,10 @@ public final class ActivePvpParticipant {
                 MatchAdmissionManager.isLateSpectator(player),
                 player.isSpectator(),
                 ModerModeManager.isInModerMode(player),
-                LivesManager.isEliminated(player)
+                LivesManager.isEliminated(player),
+                GameStateManager.isRunning(player.server),
+                GameStateManager.getMatchPhase() == MatchPhase.RUNNING,
+                GameStateManager.isInLobby(player)
         );
     }
 }
