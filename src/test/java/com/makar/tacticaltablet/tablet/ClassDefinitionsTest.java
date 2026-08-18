@@ -42,6 +42,7 @@ class ClassDefinitionsTest {
         expected.put(22, "microwave");
         expected.put(23, "railgunner");
         expected.put(24, "crossbowman");
+        expected.put(25, "smartstormtrooper");
 
         assertEquals(expected, ClassDefinitions.actionIdToClassKey());
     }
@@ -115,7 +116,10 @@ class ClassDefinitionsTest {
         assertEquals(ClassTier.LEGEND.id(), fixedTier("microwave"));
         assertEquals(ClassTier.MONSTER.id(), fixedTier("railgunner"));
         assertEquals(ClassTier.LEGEND.id(), fixedTier("marine"));
-        assertEquals(List.of("krot", "medic", "microwave", "railgunner", "marine"),
+        assertEquals(ClassTier.MONSTER.id(), fixedTier("smartstormtrooper"));
+        assertEquals("Smart-Штурмовик",
+                ClassDefinitions.byClassKey("smartstormtrooper").orElseThrow().name().getString());
+        assertEquals(List.of("krot", "medic", "microwave", "railgunner", "marine", "smartstormtrooper"),
                 ClassDefinitions.byCategory(ClassCategory.EXCLUSIVE).stream()
                         .map(ClassDefinition::classKey)
                         .toList());

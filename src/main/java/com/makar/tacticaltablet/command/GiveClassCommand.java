@@ -22,7 +22,8 @@ import java.util.Optional;
 
 public final class GiveClassCommand {
 
-    private static final List<String> CLASS_KEYS = List.of("killer", "miniboss", "shahed", "krot", "medic", "microwave", "railgunner");
+    private static final List<String> CLASS_KEYS = List.of(
+            "killer", "miniboss", "shahed", "krot", "medic", "microwave", "railgunner", "smartstormtrooper");
 
     private GiveClassCommand() {
     }
@@ -65,7 +66,7 @@ public final class GiveClassCommand {
         String classKey = normalizeClassKey(requestedClass);
         if (classKey == null) {
             source.sendFailure(Component.literal(
-                    "Неизвестный эксклюзивный класс. Доступно: killer, miniboss, shahed, krot, medic, microwave, railgunner."
+                    "Неизвестный эксклюзивный класс. Доступно: killer, miniboss, shahed, krot, medic, microwave, railgunner, smartstormtrooper."
             ));
             return 0;
         }
@@ -171,7 +172,7 @@ public final class GiveClassCommand {
 
     private static void sendInvalidClass(CommandSourceStack source) {
         source.sendFailure(Component.literal(
-                "Неизвестный эксклюзивный класс. Доступно: killer, miniboss, shahed, krot, medic, microwave, railgunner."
+                "Неизвестный эксклюзивный класс. Доступно: killer, miniboss, shahed, krot, medic, microwave, railgunner, smartstormtrooper."
         ));
     }
 
@@ -186,6 +187,8 @@ public final class GiveClassCommand {
             case "medic", "медик" -> "medic";
             case "microwave", "micro-wave", "micro_wave", "микровэйв", "микровейв" -> "microwave";
             case "railgunner", "rail-gunner", "rail_gunner", "рэйл-ганнер", "рэйлганнер", "рэйл_ганнер", "рейл-ганнер", "рейлганнер" -> "railgunner";
+            case "smartstormtrooper", "smart-stormtrooper", "smart_stormtrooper", "smart-штурмовик",
+                    "smart_штурмовик", "смарт-штурмовик", "смартштурмовик", "смарт_штурмовик" -> "smartstormtrooper";
             default -> null;
         };
     }
@@ -198,6 +201,7 @@ public final class GiveClassCommand {
             case "medic" -> "Медик";
             case "microwave" -> "Микровэйв";
             case "railgunner" -> "Рэйл-ганнер";
+            case "smartstormtrooper" -> "Smart-Штурмовик";
             default -> "Киллер";
         };
     }

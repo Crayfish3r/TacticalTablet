@@ -45,7 +45,8 @@ public final class ClassDefinitions {
             exclusive("medic", "Медик", 21, ClassTier.LEGEND.id(), 1),
             exclusive("microwave", "Микровэйв", 22, ClassTier.LEGEND.id(), 2),
             exclusive("railgunner", "Рэйл-ганнер", 23, ClassTier.MONSTER.id(), 3),
-            exclusive("marine", "Морпех", 20, ClassTier.LEGEND.id(), 4)
+            exclusive("marine", "Морпех", 20, ClassTier.LEGEND.id(), 4),
+            exclusive("smartstormtrooper", "Smart-Штурмовик", 25, ClassTier.MONSTER.id(), 5)
     );
 
     private static final Map<Integer, ClassDefinition> BY_ACTION_ID;

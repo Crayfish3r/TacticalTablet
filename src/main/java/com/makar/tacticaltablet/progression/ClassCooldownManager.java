@@ -39,7 +39,8 @@ public class ClassCooldownManager {
             minutes(10),
             minutes(10),
             minutes(10),
-            minutes(7)
+            minutes(7),
+            minutes(10)
     };
 
     private static final Map<UUID, Map<Integer, Long>> data = new HashMap<>();
@@ -111,6 +112,7 @@ public class ClassCooldownManager {
             case "microwave" -> 22;
             case "railgunner" -> 23;
             case "crossbowman" -> 24;
+            case "smartstormtrooper" -> 25;
             default -> -1;
         };
     }

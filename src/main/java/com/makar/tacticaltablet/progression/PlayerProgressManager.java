@@ -69,7 +69,8 @@ public class PlayerProgressManager {
             "krot",
             "medic",
             "microwave",
-            "railgunner"
+            "railgunner",
+            "smartstormtrooper"
     };
 
     private static final String[] ALL_CLASSES = java.util.stream.Stream.concat(

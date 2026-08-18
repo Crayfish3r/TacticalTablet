@@ -12,6 +12,7 @@ class CompetitiveClassPolicyTest {
         assertTrue(CompetitiveClassPolicy.isAllowed(true, ClassCategory.BASE));
         assertTrue(CompetitiveClassPolicy.isAllowed(false, ClassCategory.EXCLUSIVE));
         assertTrue(CompetitiveClassPolicy.isVipBlocked(true, "medic"));
+        assertTrue(CompetitiveClassPolicy.isVipBlocked(true, "smartstormtrooper"));
         assertFalse(CompetitiveClassPolicy.isVipBlocked(true, "sniper"));
     }
 }
