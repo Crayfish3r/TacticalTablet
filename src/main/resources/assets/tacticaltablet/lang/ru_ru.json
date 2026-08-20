@@ -48,5 +48,18 @@
   "hud.tacticaltablet.spectator.combat_stats": "Убийства: %s  Смерти: %s  K/D: %s",
   "hud.tacticaltablet.spectator.match_stats": "Победы: %s  Матчи: %s",
   "screen.tacticaltablet.class.vip_competitive_unavailable": "Недоступен в соревновательном режиме",
-  "message.tacticaltablet.competitive_vip_unavailable": "[WAR] VIP-классы недоступны в соревновательном режиме."
+  "message.tacticaltablet.competitive_vip_unavailable": "[WAR] VIP-классы недоступны в соревновательном режиме.",
+  "screen.tacticaltablet.main_menu.title": "DeluxeWarfare",
+  "screen.tacticaltablet.main_menu.play": "Играть",
+  "screen.tacticaltablet.main_menu.rules": "Правила",
+  "screen.tacticaltablet.main_menu.guide": "Справочник",
+  "screen.tacticaltablet.main_menu.settings": "Настройки",
+  "screen.tacticaltablet.main_menu.quit": "Выйти",
+  "screen.tacticaltablet.rules.title": "Правила",
+  "screen.tacticaltablet.guide.title": "Справочник",
+  "screen.tacticaltablet.settings.title": "Настройки",
+  "screen.tacticaltablet.settings.graphics": "Графика",
+  "screen.tacticaltablet.settings.controls": "Назначение клавиш",
+  "screen.tacticaltablet.common.back": "Назад",
+  "screen.tacticaltablet.common.coming_soon": "coming soon..."
 }

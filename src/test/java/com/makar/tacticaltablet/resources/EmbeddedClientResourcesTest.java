@@ -37,11 +37,11 @@ class EmbeddedClientResourcesTest {
     void everyMigratedRuntimeAssetMatchesTheRepositoryManifest() throws Exception {
         List<ManifestEntry> entries = manifest();
 
-        assertEquals(149, entries.size());
+        assertEquals(151, entries.size());
         assertEquals(Map.of(
                 "curios", 2L,
                 "minecraft", 10L,
-                "tacticaltablet", 137L
+                "tacticaltablet", 139L
         ), entries.stream().collect(java.util.stream.Collectors.groupingBy(
                 entry -> entry.path().substring(0, entry.path().indexOf('/')),
                 java.util.stream.Collectors.counting()
@@ -66,6 +66,8 @@ class EmbeddedClientResourcesTest {
     void guiPngsRetainTransparencyAndButtonsContainPartialAlpha() throws IOException {
         Path guiRoot = asset("tacticaltablet/textures/gui");
         List<Path> guiPngs = pngs(guiRoot);
+        Path mainMenuRoot = guiRoot.resolve("main_menu");
+        guiPngs.removeIf(path -> path.startsWith(mainMenuRoot));
         guiPngs.add(asset("minecraft/textures/gui/container/inventory.png"));
         guiPngs.add(asset("minecraft/textures/gui/recipe_button.png"));
         guiPngs.add(asset("curios/textures/gui/inventory.png"));
@@ -80,6 +82,23 @@ class EmbeddedClientResourcesTest {
         for (Path button : pngs(guiRoot.resolve("buttons"))) {
             assertTrue(hasPartiallyTransparentPixel(readImage(button)), relative(button));
         }
+    }
+
+    @Test
+    void fullScreenMenuBackgroundsRemainOpaqueAndDimensionallyMatched() throws IOException {
+        BufferedImage background = readImage(asset(
+                "tacticaltablet/textures/gui/main_menu/background.png"
+        ));
+        BufferedImage blurred = readImage(asset(
+                "tacticaltablet/textures/gui/main_menu/background_blurred.png"
+        ));
+
+        assertEquals(1672, background.getWidth());
+        assertEquals(941, background.getHeight());
+        assertEquals(background.getWidth(), blurred.getWidth());
+        assertEquals(background.getHeight(), blurred.getHeight());
+        assertFalse(background.getColorModel().hasAlpha());
+        assertFalse(blurred.getColorModel().hasAlpha());
     }
 
     @Test

@@ -53,5 +53,18 @@
   "hud.tacticaltablet.spectator.combat_stats": "Kills: %s  Deaths: %s  K/D: %s",
   "hud.tacticaltablet.spectator.match_stats": "Wins: %s  Matches: %s",
   "screen.tacticaltablet.class.vip_competitive_unavailable": "Unavailable in competitive mode",
-  "message.tacticaltablet.competitive_vip_unavailable": "[WAR] VIP classes are unavailable in competitive mode."
+  "message.tacticaltablet.competitive_vip_unavailable": "[WAR] VIP classes are unavailable in competitive mode.",
+  "screen.tacticaltablet.main_menu.title": "DeluxeWarfare",
+  "screen.tacticaltablet.main_menu.play": "Play",
+  "screen.tacticaltablet.main_menu.rules": "Rules",
+  "screen.tacticaltablet.main_menu.guide": "Guide",
+  "screen.tacticaltablet.main_menu.settings": "Settings",
+  "screen.tacticaltablet.main_menu.quit": "Quit",
+  "screen.tacticaltablet.rules.title": "Rules",
+  "screen.tacticaltablet.guide.title": "Guide",
+  "screen.tacticaltablet.settings.title": "Settings",
+  "screen.tacticaltablet.settings.graphics": "Graphics",
+  "screen.tacticaltablet.settings.controls": "Key Bindings",
+  "screen.tacticaltablet.common.back": "Back",
+  "screen.tacticaltablet.common.coming_soon": "coming soon..."
 }
