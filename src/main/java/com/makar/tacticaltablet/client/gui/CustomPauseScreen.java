@@ -7,12 +7,8 @@ import com.makar.tacticaltablet.tablet.client.ui.UiFrameClock;
 import com.makar.tacticaltablet.tablet.client.ui.UiFrameContext;
 import com.makar.tacticaltablet.tablet.client.ui.animation.AnimatedFloat;
 import net.minecraft.Util;
-import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.screens.ConnectScreen;
 import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.client.multiplayer.ServerData;
-import net.minecraft.client.multiplayer.resolver.ServerAddress;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.Mth;
@@ -20,12 +16,9 @@ import net.minecraft.util.Mth;
 import java.util.ArrayList;
 import java.util.List;
 
-public final class CustomMainMenu extends Screen {
+public final class CustomPauseScreen extends Screen {
 
-    static final String SERVER_ADDRESS = "zuma.sos-al.net";
-
-    private static final String SERVER_NAME = "DeluxeWarfare Test";
-    private static final float ENTRANCE_DURATION_SECONDS = 0.34F;
+    private static final float ENTRANCE_DURATION_SECONDS = 0.30F;
     private static final float BUTTON_STAGGER = 0.08F;
 
     private final UiFrameClock frameClock = new UiFrameClock();
@@ -33,36 +26,36 @@ public final class CustomMainMenu extends Screen {
     private final List<TextureMenuButton> menuButtons = new ArrayList<>();
     private TabletMenuLayout menuLayout;
 
-    public CustomMainMenu() {
+    public CustomPauseScreen() {
         super(Component.translatable("screen.tacticaltablet.main_menu.title"));
     }
 
     @Override
     protected void init() {
-        menuLayout = TabletMenuLayout.calculateMain(width, height);
+        menuLayout = TabletMenuLayout.calculatePause(width, height);
         menuButtons.clear();
         entrance.snapTo(0.0F);
         entrance.setTarget(1.0F);
 
         addMenuButton(
-                MenuTextureSet.JOIN,
-                "screen.tacticaltablet.main_menu.play",
-                this::connectToServer
+                MenuTextureSet.CONTINUE,
+                "screen.tacticaltablet.pause.resume",
+                this::resumeGame
         );
         addMenuButton(
                 MenuTextureSet.INFO,
                 "screen.tacticaltablet.main_menu.guide",
-                () -> Minecraft.getInstance().setScreen(new GuideScreen(this))
+                () -> minecraft.setScreen(new GuideScreen(this))
         );
         addMenuButton(
                 MenuTextureSet.SETTINGS,
                 "screen.tacticaltablet.main_menu.settings",
-                () -> Minecraft.getInstance().setScreen(new CustomSettingsScreen(this))
+                () -> minecraft.setScreen(new CustomSettingsScreen(this))
         );
         addMenuButton(
                 MenuTextureSet.EXIT,
-                "screen.tacticaltablet.main_menu.quit",
-                () -> Minecraft.getInstance().stop()
+                "screen.tacticaltablet.pause.quit",
+                this::disconnectToMenu
         );
 
         updateButtonAnimation(0.0F);
@@ -86,16 +79,22 @@ public final class CustomMainMenu extends Screen {
         menuButtons.add(button);
     }
 
-    private void connectToServer() {
-        Minecraft minecraft = Minecraft.getInstance();
-        ServerData serverData = new ServerData(SERVER_NAME, SERVER_ADDRESS, false);
-        ConnectScreen.startConnecting(
-                this,
-                minecraft,
-                ServerAddress.parseString(SERVER_ADDRESS),
-                serverData,
-                false
-        );
+    private void resumeGame() {
+        minecraft.setScreen(null);
+        minecraft.mouseHandler.grabMouse();
+    }
+
+    private void disconnectToMenu() {
+        if (minecraft.level != null) {
+            minecraft.level.disconnect();
+            minecraft.clearLevel();
+        }
+        minecraft.setScreen(new CustomMainMenu());
+    }
+
+    @Override
+    public void onClose() {
+        resumeGame();
     }
 
     @Override
@@ -103,36 +102,14 @@ public final class CustomMainMenu extends Screen {
         UiFrameContext frame = frameClock.nextFrame(Util.getMillis(), reducedMotion());
         try (TacticalUi.FrameScope ignored = TacticalUi.openFrame(frame)) {
             updateEntrance(frame);
-            renderBackground(graphics);
-            TabletMenuRenderer.render(graphics, menuLayout, MenuTextureSet.TABLET, entrance.value());
+            TabletMenuRenderer.render(
+                    graphics,
+                    menuLayout,
+                    MenuTextureSet.PAUSE_TABLET,
+                    entrance.value()
+            );
             super.render(graphics, mouseX, mouseY, partialTick);
         }
-    }
-
-    @Override
-    public void renderBackground(GuiGraphics graphics) {
-        float coverScale = Math.max(
-                width / (float) MenuTextureSet.BACKGROUND_WIDTH,
-                height / (float) MenuTextureSet.BACKGROUND_HEIGHT
-        );
-        int drawWidth = Math.max(1, (int) Math.ceil(MenuTextureSet.BACKGROUND_WIDTH * coverScale));
-        int drawHeight = Math.max(1, (int) Math.ceil(MenuTextureSet.BACKGROUND_HEIGHT * coverScale));
-        int drawX = (width - drawWidth) / 2;
-        int drawY = (height - drawHeight) / 2;
-
-        graphics.blit(
-                MenuTextureSet.BACKGROUND,
-                drawX,
-                drawY,
-                drawWidth,
-                drawHeight,
-                0.0F,
-                0.0F,
-                MenuTextureSet.BACKGROUND_WIDTH,
-                MenuTextureSet.BACKGROUND_HEIGHT,
-                MenuTextureSet.BACKGROUND_WIDTH,
-                MenuTextureSet.BACKGROUND_HEIGHT
-        );
     }
 
     private void updateEntrance(UiFrameContext frame) {
@@ -157,12 +134,7 @@ public final class CustomMainMenu extends Screen {
     }
 
     @Override
-    public boolean shouldCloseOnEsc() {
-        return false;
-    }
-
-    @Override
     public boolean isPauseScreen() {
-        return false;
+        return true;
     }
 }

@@ -37,11 +37,11 @@ class EmbeddedClientResourcesTest {
     void everyMigratedRuntimeAssetMatchesTheRepositoryManifest() throws Exception {
         List<ManifestEntry> entries = manifest();
 
-        assertEquals(151, entries.size());
+        assertEquals(157, entries.size());
         assertEquals(Map.of(
                 "curios", 2L,
                 "minecraft", 10L,
-                "tacticaltablet", 139L
+                "tacticaltablet", 145L
         ), entries.stream().collect(java.util.stream.Collectors.groupingBy(
                 entry -> entry.path().substring(0, entry.path().indexOf('/')),
                 java.util.stream.Collectors.counting()
@@ -85,20 +85,36 @@ class EmbeddedClientResourcesTest {
     }
 
     @Test
-    void fullScreenMenuBackgroundsRemainOpaqueAndDimensionallyMatched() throws IOException {
-        BufferedImage background = readImage(asset(
-                "tacticaltablet/textures/gui/main_menu/background.png"
+    void texturedMainMenuAssetsRetainExpectedDimensionsAndTransparency() throws IOException {
+        BufferedImage menu = readImage(asset(
+                "tacticaltablet/textures/gui/main_menu/menu.png"
         ));
-        BufferedImage blurred = readImage(asset(
-                "tacticaltablet/textures/gui/main_menu/background_blurred.png"
+        BufferedImage tablet = readImage(asset(
+                "tacticaltablet/textures/gui/main_menu/tablet.png"
+        ));
+        BufferedImage pauseTablet = readImage(asset(
+                "tacticaltablet/textures/gui/main_menu/tablet_pause.png"
         ));
 
-        assertEquals(1672, background.getWidth());
-        assertEquals(941, background.getHeight());
-        assertEquals(background.getWidth(), blurred.getWidth());
-        assertEquals(background.getHeight(), blurred.getHeight());
-        assertFalse(background.getColorModel().hasAlpha());
-        assertFalse(blurred.getColorModel().hasAlpha());
+        assertEquals(1920, menu.getWidth());
+        assertEquals(1080, menu.getHeight());
+        assertEquals(1060, tablet.getWidth());
+        assertEquals(545, tablet.getHeight());
+        assertEquals(tablet.getWidth(), pauseTablet.getWidth());
+        assertEquals(tablet.getHeight(), pauseTablet.getHeight());
+        assertTrue(tablet.getColorModel().hasAlpha());
+        assertTrue(pauseTablet.getColorModel().hasAlpha());
+        assertTrue(hasTransparentPixel(tablet));
+        assertTrue(hasTransparentPixel(pauseTablet));
+
+        for (String name : List.of("join", "continue", "info", "settings", "exit")) {
+            BufferedImage button = readImage(asset(
+                    "tacticaltablet/textures/gui/main_menu/button_" + name + ".png"
+            ));
+            assertEquals(849, button.getWidth(), name);
+            assertEquals(71, button.getHeight(), name);
+            assertTrue(hasPartiallyTransparentPixel(button), name);
+        }
     }
 
     @Test
