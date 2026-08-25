@@ -26,6 +26,8 @@ import java.util.UUID;
 public final class MatchAdmissionManager {
     private static final String DATA_LATE_NOTIFICATION_MATCH =
             "tacticaltablet.late_admission_notification_match";
+    private static final String DATA_LATE_SPECTATOR_MATCH =
+            "tacticaltablet.late_spectator_match";
     private static final Component LATE_JOIN_TITLE = Component.literal("ПОЗДНЕЕ ПОДКЛЮЧЕНИЕ");
     private static final Component LATE_JOIN_SUBTITLE =
             Component.literal("Возрождение — только в следующей игре!");
@@ -165,6 +167,7 @@ public final class MatchAdmissionManager {
                 .matchId()
                 .map(UUID::toString)
                 .orElse("no-active-match");
+        player.getPersistentData().putString(DATA_LATE_SPECTATOR_MATCH, matchKey);
         String notifiedMatch = player.getPersistentData().getString(DATA_LATE_NOTIFICATION_MATCH);
         if (showNotification && !matchKey.equals(notifiedMatch)) {
             player.connection.send(new ClientboundSetTitlesAnimationPacket(10, 580, 10));
@@ -172,6 +175,15 @@ public final class MatchAdmissionManager {
             player.connection.send(new ClientboundSetSubtitleTextPacket(LATE_JOIN_SUBTITLE));
             player.getPersistentData().putString(DATA_LATE_NOTIFICATION_MATCH, matchKey);
         }
+        return true;
+    }
+
+    /** Releases only spectators that this manager forced for a completed or aborted match. */
+    public static boolean releaseLateSpectatorAfterMatch(ServerPlayer player) {
+        if (player == null || GameStateManager.isRunning(player.server)) return false;
+        if (!player.getPersistentData().contains(DATA_LATE_SPECTATOR_MATCH)) return false;
+
+        player.getPersistentData().remove(DATA_LATE_SPECTATOR_MATCH);
         return true;
     }
 }

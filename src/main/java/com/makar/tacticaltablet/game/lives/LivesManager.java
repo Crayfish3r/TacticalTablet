@@ -2,6 +2,7 @@ package com.makar.tacticaltablet.game.lives;
 
 import com.makar.tacticaltablet.clan.ClanManager;
 import com.makar.tacticaltablet.game.GameStateManager;
+import com.makar.tacticaltablet.game.MatchScoreboard;
 import com.makar.tacticaltablet.game.MapSetManager;
 import com.makar.tacticaltablet.game.MatchAdmissionManager;
 import com.makar.tacticaltablet.game.SpectatorCameraManager;
@@ -19,7 +20,6 @@ import com.makar.tacticaltablet.tablet.PlayerTabletState;
 import com.makar.tacticaltablet.voice.VoiceChatTeamManager;
 
 import net.minecraft.core.BlockPos;
-import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -32,7 +32,7 @@ import java.util.UUID;
 
 public class LivesManager {
 
-    public static final String OBJECTIVE = "lives";
+    public static final String OBJECTIVE = MatchScoreboard.LIVES_OBJECTIVE;
     public static final int MAX_LIVES = 3;
 
     private static final String TAG_LIVES_INIT = "war.lives_init";
@@ -277,7 +277,7 @@ public class LivesManager {
             if (!clanId.equals(ClanManager.getClanIdForPlayer(player))) continue;
             if (player.isDeadOrDying()) continue;
             ClanWarManager.preparePlayerForRegroup(player);
-            LobbyManager.moveToLobby(player);
+            LobbyManager.moveRespawningPlayerToLobby(player);
             ClassXPManager.sync(player);
         }
     }
@@ -382,19 +382,7 @@ public class LivesManager {
     }
 
     private static Objective getOrCreateLivesObjective(ServerPlayer player) {
-        Scoreboard scoreboard = player.getScoreboard();
-        Objective objective = scoreboard.getObjective(OBJECTIVE);
-        if (objective != null) return objective;
-
-        CommandSourceStack source = player.server.createCommandSourceStack()
-                .withSuppressedOutput()
-                .withPermission(4);
-        player.server.getCommands().performPrefixedCommand(
-                source,
-                "scoreboard objectives add " + OBJECTIVE + " dummy"
-        );
-
-        return scoreboard.getObjective(OBJECTIVE);
+        return MatchScoreboard.getOrCreateDummy(player.getScoreboard(), OBJECTIVE);
     }
 }
 

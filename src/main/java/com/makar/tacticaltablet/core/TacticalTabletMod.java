@@ -8,6 +8,7 @@ import com.makar.tacticaltablet.command.DebugXPCommand;
 import com.makar.tacticaltablet.command.ExtractionPointCommand;
 import com.makar.tacticaltablet.command.GiveClassCommand;
 import com.makar.tacticaltablet.command.IntegrationCheckCommand;
+import com.makar.tacticaltablet.command.LobbyCommand;
 import com.makar.tacticaltablet.command.KillsDiscordCommand;
 import com.makar.tacticaltablet.command.MapRotationCommand;
 import com.makar.tacticaltablet.command.OnlineWebhookCommand;
@@ -101,6 +102,7 @@ public class TacticalTabletMod {
         ExtractionPointCommand.register(event.getDispatcher());
         CorpseTestCommand.register(event.getDispatcher());
         IntegrationCheckCommand.register(event.getDispatcher());
+        LobbyCommand.register(event.getDispatcher());
         GiveClassCommand.register(event.getDispatcher());
         XpBoostCommand.register(event.getDispatcher());
         SadTromboneCommand.register(event.getDispatcher());

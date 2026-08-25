@@ -12,6 +12,7 @@ import com.makar.tacticaltablet.game.extraction.ExtractionPointManager;
 import com.makar.tacticaltablet.game.lives.LivesManager;
 import com.makar.tacticaltablet.game.lifecycle.PlayerLifecycleSanitizer;
 import com.makar.tacticaltablet.game.lobby.LobbyManager;
+import com.makar.tacticaltablet.game.lobby.LobbyBootstrapManager;
 import com.makar.tacticaltablet.game.respawn.RtpTimerManager;
 import com.makar.tacticaltablet.game.respawn.DeathTransitionManager;
 import com.makar.tacticaltablet.game.chaos.ChaosSetManager;
@@ -45,21 +46,33 @@ import com.makar.tacticaltablet.tablet.net.PacketHandler;
 import com.makar.tacticaltablet.tablet.net.TabletPacket;
 import com.makar.tacticaltablet.voice.VoiceChatTeamManager;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.level.LevelAccessor;
 import net.minecraft.server.players.UserBanListEntry;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.decoration.ArmorStand;
+import net.minecraft.world.entity.decoration.HangingEntity;
+import net.minecraft.world.entity.decoration.Painting;
 import net.minecraft.world.entity.projectile.Projectile;
-import net.minecraft.world.level.GameRules;
 import net.minecraft.world.level.GameType;
 import net.minecraftforge.event.TickEvent;
+import net.minecraftforge.event.entity.EntityMobGriefingEvent;
+import net.minecraftforge.event.entity.EntityJoinLevelEvent;
+import net.minecraftforge.event.entity.ProjectileImpactEvent;
 import net.minecraftforge.event.entity.living.LivingAttackEvent;
 import net.minecraftforge.event.entity.living.LivingDamageEvent;
 import net.minecraftforge.event.entity.living.LivingDeathEvent;
 import net.minecraftforge.event.entity.living.LivingDropsEvent;
 import net.minecraftforge.event.entity.living.LivingHurtEvent;
 import net.minecraftforge.event.entity.living.MobEffectEvent;
+import net.minecraftforge.event.entity.player.AttackEntityEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
+import net.minecraftforge.event.entity.player.PlayerInteractEvent;
+import net.minecraftforge.event.level.BlockEvent;
+import net.minecraftforge.event.level.ExplosionEvent;
+import net.minecraftforge.event.level.PistonEvent;
 import net.minecraftforge.event.ServerChatEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.eventbus.api.EventPriority;
@@ -76,6 +89,7 @@ public class ServerEvents {
 
     private static final int TEAM_KILL_BAN_THRESHOLD = 3;
     private static final long TEAM_KILL_BAN_MILLIS = 15L * 60L * 1000L;
+    private static final String LOBBY_PAINTING_POSITION_NORMALIZED = "TacticalTabletLobbyPaintingPositionNormalizedV2";
     private static int utilityTickCounter = 0;
 
     @SubscribeEvent
@@ -91,6 +105,7 @@ public class ServerEvents {
                 return;
             }
 
+            LobbyManager.showWelcomeOnJoin(player);
             PlayerProgressManager.loadPlayer(player);
             PrefixManager.updateLastKnownName(player.getUUID(), player.getGameProfile().getName());
             TeamMatchManager.rememberPlayer(player);
@@ -231,7 +246,7 @@ public class ServerEvents {
                 return;
             }
 
-            LobbyManager.moveToLobby(player);
+            LobbyManager.moveRespawningPlayerToLobby(player);
             ExtractionPointManager.onPlayerRespawn(player);
             VoiceChatTeamManager.assignPlayerToVoiceGroup(player);
             ClassXPManager.sync(player);
@@ -281,14 +296,123 @@ public class ServerEvents {
     }
 
     @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public static void onLobbyPaintingJoin(EntityJoinLevelEvent event) {
+        if (!(event.getEntity() instanceof Painting painting) || !isLobbyLevel(event.getLevel())) return;
+
+        // Lobby paintings can intentionally be pass-through doors backed by signs.
+        // Do not let their periodic support check remove them after template loading.
+        if (painting.getHeight() == 32 && !painting.getPersistentData().getBoolean(LOBBY_PAINTING_POSITION_NORMALIZED)) {
+            painting.setPos(painting.getX(), painting.getPos().getY() - 1.0D, painting.getZ());
+            painting.getPersistentData().putBoolean(LOBBY_PAINTING_POSITION_NORMALIZED, true);
+            TacticalTabletMod.LOGGER.info("Corrected two-block-tall lobby painting vertical position once");
+        }
+
+        painting.canUpdate(false);
+        painting.setInvulnerable(true);
+    }
+
+
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public static void onLobbyBlockBreak(BlockEvent.BreakEvent event) {
+        if (isLobbyLevel(event.getLevel())) event.setCanceled(true);
+    }
+
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public static void onLobbyPlayerBlockPlace(BlockEvent.EntityPlaceEvent event) {
+        if (event.getEntity() instanceof ServerPlayer && isLobbyLevel(event.getLevel())) {
+            event.setCanceled(true);
+        }
+    }
+
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public static void onLobbyBlockToolModification(BlockEvent.BlockToolModificationEvent event) {
+        if (event.getPlayer() != null && isLobbyLevel(event.getLevel())) event.setCanceled(true);
+    }
+
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public static void onLobbyFarmlandTrample(BlockEvent.FarmlandTrampleEvent event) {
+        if (isLobbyLevel(event.getLevel())) event.setCanceled(true);
+    }
+
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public static void onLobbyFluidBlockChange(BlockEvent.FluidPlaceBlockEvent event) {
+        if (isLobbyLevel(event.getLevel())) event.setCanceled(true);
+    }
+
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public static void onLobbyPortalSpawn(BlockEvent.PortalSpawnEvent event) {
+        if (isLobbyLevel(event.getLevel())) event.setCanceled(true);
+    }
+
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public static void onLobbyFluidSource(BlockEvent.CreateFluidSourceEvent event) {
+        if (isLobbyLevel(event.getLevel())) event.setResult(Event.Result.DENY);
+    }
+
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public static void onLobbyPiston(PistonEvent.Pre event) {
+        if (isLobbyLevel(event.getLevel())) event.setCanceled(true);
+    }
+
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public static void onLobbyExplosion(ExplosionEvent.Start event) {
+        if (isLobbyLevel(event.getLevel())) event.setCanceled(true);
+    }
+
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public static void onLobbyMobGriefing(EntityMobGriefingEvent event) {
+        if (event.getEntity() != null && isLobbyLevel(event.getEntity().level())) {
+            event.setResult(Event.Result.DENY);
+        }
+    }
+
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public static void onLobbyEntityAttack(AttackEntityEvent event) {
+        Entity target = event.getTarget();
+        if (target != null && isLobbyLevel(target.level())) event.setCanceled(true);
+    }
+
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public static void onLobbyProjectileImpact(ProjectileImpactEvent event) {
+        if (!isLobbyLevel(event.getProjectile().level())) return;
+        event.setCanceled(true);
+        event.getProjectile().discard();
+    }
+
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public static void onLobbyDecorationInteract(PlayerInteractEvent.EntityInteract event) {
+        if (isProtectedLobbyDecoration(event.getTarget())) event.setCanceled(true);
+    }
+
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public static void onLobbyDecorationInteractSpecific(PlayerInteractEvent.EntityInteractSpecific event) {
+        if (isProtectedLobbyDecoration(event.getTarget())) event.setCanceled(true);
+    }
+
+    private static boolean isProtectedLobbyDecoration(Entity entity) {
+        return entity != null
+                && isLobbyLevel(entity.level())
+                && (entity instanceof HangingEntity || entity instanceof ArmorStand);
+    }
+
+    private static boolean isLobbyLevel(LevelAccessor level) {
+        return level instanceof ServerLevel serverLevel
+                && serverLevel.dimension().equals(GameStateManager.LOBBY_DIMENSION);
+    }
+
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
     public static void onPostRtpAttack(LivingAttackEvent event) {
+        if (isLobbyLevel(event.getEntity().level())) {
+            event.setCanceled(true);
+            if (event.getEntity() instanceof ServerPlayer player) {
+                CombatAttributionLedger.clear(player.getUUID());
+            }
+            return;
+        }
         if (!(event.getEntity() instanceof ServerPlayer player)) return;
         if (!GameStateManager.isInLobby(player) && !PostRtpProtectionManager.isProtected(player)) return;
 
         event.setCanceled(true);
-        if (GameStateManager.isInLobby(player)) {
-            CombatAttributionLedger.clear(player.getUUID());
-        }
     }
 
     @SubscribeEvent(priority = EventPriority.HIGHEST)
@@ -437,6 +561,7 @@ public class ServerEvents {
         ExtractionPointManager.tick(event.getServer());
         DeathTransitionManager.tick(event.getServer());
         SpectatorCameraManager.onServerTick(event.getServer());
+        LobbyManager.tick(event.getServer());
         GameStateManager.onServerTick(event.getServer());
         InventoryGuard.tick(event.getServer());
 
@@ -495,12 +620,15 @@ public class ServerEvents {
 
     @SubscribeEvent(priority = EventPriority.HIGHEST, receiveCanceled = true)
     public static void onLobbyDeath(LivingDeathEvent event) {
-        if (!(event.getEntity() instanceof ServerPlayer player)) return;
-        if (!GameStateManager.isInLobby(player)) return;
+        if (!isLobbyLevel(event.getEntity().level())) return;
 
         event.setCanceled(true);
-        PlayerLifecycleSanitizer.restoreLobbySafety(player);
-        CombatAttributionLedger.clear(player.getUUID());
+        if (event.getEntity() instanceof ServerPlayer player) {
+            PlayerLifecycleSanitizer.restoreLobbySafety(player);
+            CombatAttributionLedger.clear(player.getUUID());
+        } else {
+            event.getEntity().setHealth(Math.max(1.0F, event.getEntity().getMaxHealth()));
+        }
     }
 
     @SubscribeEvent
@@ -658,11 +786,12 @@ public class ServerEvents {
     @SubscribeEvent
     public static void onServerStarted(ServerStartedEvent event) {
         PlayerProgressManager.onServerStarted(event.getServer());
-        event.getServer().getGameRules().getRule(GameRules.RULE_ANNOUNCE_ADVANCEMENTS).set(false, event.getServer());
-        event.getServer().getGameRules().getRule(GameRules.RULE_DO_IMMEDIATE_RESPAWN).set(true, event.getServer());
-        DropControlManager.enforceGameRules(event.getServer());
+        MatchScoreboard.ensureObjectives(event.getServer());
+        MatchGameRules.apply(event.getServer());
         GameStateManager.resetRuntime(event.getServer());
         GameStateManager.validateRuntimeRequirements(event.getServer());
+        LobbyBootstrapManager.bootstrap(event.getServer());
+        LobbyBootstrapManager.repairMissingFragileBlocks(event.getServer());
         MapRotationManager.onServerStarted(event.getServer());
         KitRotationManager.onServerStarted(event.getServer());
         MapSetManager.onServerStarted(event.getServer());

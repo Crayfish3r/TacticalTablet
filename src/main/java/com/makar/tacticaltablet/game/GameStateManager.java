@@ -17,6 +17,7 @@ import com.makar.tacticaltablet.game.lifecycle.MatchStartRequest;
 import com.makar.tacticaltablet.game.lifecycle.MatchStartStep;
 import com.makar.tacticaltablet.game.lifecycle.MatchState;
 import com.makar.tacticaltablet.game.lifecycle.integration.MatchStartCoordinator;
+import com.makar.tacticaltablet.game.lifecycle.integration.MatchStartRecoveryPolicy;
 import com.makar.tacticaltablet.game.lifecycle.integration.MatchStartGateway;
 import com.makar.tacticaltablet.game.lifecycle.integration.MatchStartPreflightResult;
 import com.makar.tacticaltablet.game.lifecycle.integration.MatchStartRejectionReason;
@@ -45,7 +46,6 @@ import com.makar.tacticaltablet.progression.PassiveClassXPManager;
 import com.makar.tacticaltablet.progression.PlayerProgressManager;
 import com.makar.tacticaltablet.voice.VoiceChatTeamManager;
 
-import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
@@ -82,9 +82,6 @@ public class GameStateManager {
     private static final int START_DELAY_SECONDS = 10;
     private static final int POST_GAME_DELAY_SECONDS = 3;
     private static final int WIN_XP_ALL_CLASSES = 10;
-    private static final String GAME_STATE_OBJECTIVE = "gameState";
-    private static final ResourceLocation START_GAME_FUNCTION = new ResourceLocation("war", "start_game");
-    private static final ResourceLocation RESET_GAME_FUNCTION = new ResourceLocation("war", "reset");
     private static final SetReportDispatchCoordinator SET_REPORT_DISPATCH =
             new SetReportDispatchCoordinator();
 
@@ -124,19 +121,7 @@ public class GameStateManager {
     }
 
     private static Objective getOrCreateGameStateObjective(MinecraftServer server) {
-        Scoreboard scoreboard = server.getScoreboard();
-        Objective objective = scoreboard.getObjective(GAME_STATE_OBJECTIVE);
-        if (objective != null) return objective;
-
-        CommandSourceStack source = server.createCommandSourceStack()
-                .withSuppressedOutput()
-                .withPermission(4);
-        server.getCommands().performPrefixedCommand(
-                source,
-                "scoreboard objectives add " + GAME_STATE_OBJECTIVE + " dummy"
-        );
-
-        return scoreboard.getObjective(GAME_STATE_OBJECTIVE);
+        return MatchScoreboard.getOrCreateDummy(server.getScoreboard(), MatchScoreboard.GAME_STATE_OBJECTIVE);
     }
 
     public static boolean isRunning(MinecraftServer server) {
@@ -200,6 +185,15 @@ public class GameStateManager {
 
     public static int onlinePlayers(MinecraftServer server) {
         return server == null ? 0 : server.getPlayerList().getPlayerCount();
+    }
+
+    private static int matchParticipantCandidates(MinecraftServer server) {
+        if (server == null) return 0;
+        int count = 0;
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            if (LobbyManager.isMatchParticipantCandidate(player)) count++;
+        }
+        return count;
     }
 
     public static int playingPlayers(MinecraftServer server) {
@@ -304,7 +298,33 @@ public class GameStateManager {
 
     public static void startGame(MinecraftServer server) {
         if (server == null) return;
-        handleStartResult(server, MATCH_START_COORDINATOR.start(server));
+        MatchStartResult result = MATCH_START_COORDINATOR.start(server);
+        handleStartResult(server, result);
+        if (MatchStartRecoveryPolicy.shouldRecover(result.status())) {
+            recoverAfterFailedStart(server, result.status());
+        }
+    }
+
+    private static void recoverAfterFailedStart(MinecraftServer server, MatchStartStatus status) {
+        TacticalTabletMod.LOGGER.warn("Recovering legacy match phase after unsuccessful start: {}", status);
+        if (status == MatchStartStatus.FAILED_REQUIRES_CLEANUP
+                || status == MatchStartStatus.BLOCKED_REQUIRES_CLEANUP) {
+            cleanupMatchRuntime(server);
+        }
+
+        MatchAdmissionManager.clearAdmissionWindow();
+        matchHadEnoughPlayers = false;
+        matchStartingParticipants = 0;
+        startTransitionPlayerSetup = false;
+        startCountdown = -1;
+        postGameDelay = 0;
+        matchPhase = MatchPhase.WAITING;
+        currentMode = MatchMode.SOLO;
+        VoteManager.reset();
+        TeamMatchManager.reset(server);
+        ClanWarManager.resetRuntime();
+        setGameState(server, WAITING);
+        ClassXPManager.syncAll(server);
     }
 
     private static void handleStartResult(MinecraftServer server, MatchStartResult result) {
@@ -520,6 +540,7 @@ public class GameStateManager {
     private static void cleanupMatchRuntime(MinecraftServer server) {
         if (server == null) return;
 
+        Set<UUID> completedParticipantIds = getLifecycleSnapshot().participantIds();
         MatchAdmissionManager.clearAdmissionWindow();
         setGameState(server, WAITING);
         SpectatorCameraManager.onMatchEnd(server);
@@ -541,8 +562,6 @@ public class GameStateManager {
 
         WorldCleanupManager.clearDroppedItems(server);
 
-        CommandSourceStack source = server.createCommandSourceStack().withSuppressedOutput();
-        server.getCommands().performPrefixedCommand(source, "function " + RESET_GAME_FUNCTION);
         DropControlManager.enforceGameRules(server);
 
         LivesManager.resetAll(server);
@@ -550,6 +569,7 @@ public class GameStateManager {
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
             player.removeTag("war.playing");
             player.removeTag("in_lobby");
+            LobbyManager.normalizeAfterMatch(player, completedParticipantIds.contains(player.getUUID()));
             LobbyManager.moveToLobby(player);
             ClassXPManager.sync(player);
         }
@@ -572,43 +592,34 @@ public class GameStateManager {
             TacticalTabletMod.LOGGER.error("Tactical Tablet setup error: lobby:lobby dimension is unavailable.");
             valid = false;
         }
-        if (!hasFunction(server, START_GAME_FUNCTION)) {
-            TacticalTabletMod.LOGGER.error("Tactical Tablet setup error: datapack function {} is missing.", START_GAME_FUNCTION);
-            valid = false;
-        }
-        if (!hasFunction(server, RESET_GAME_FUNCTION)) {
-            TacticalTabletMod.LOGGER.error("Tactical Tablet setup error: datapack function {} is missing.", RESET_GAME_FUNCTION);
-            valid = false;
-        }
-
-        getOrCreateGameStateObjective(server);
+        MatchScoreboard.ensureObjectives(server);
         return valid;
     }
 
-    private static boolean hasFunction(MinecraftServer server, ResourceLocation id) {
-        return server.getFunctions().get(id).isPresent();
-    }
 
     private static boolean validateStartRuntimeRequirements(MinecraftServer server) {
         if (server == null) return false;
 
         boolean valid = true;
-        if (getOverworld(server) == null) {
+        ServerLevel overworld = getOverworld(server);
+        if (overworld == null) {
             TacticalTabletMod.LOGGER.error("Tactical Tablet setup error: overworld dimension is unavailable.");
             valid = false;
+        } else {
+            ZoneManager.RtpValidation rtpValidation = ZoneManager.validateConfiguredRtpSettings(server);
+            if (!rtpValidation.valid()) {
+                TacticalTabletMod.LOGGER.error(
+                        "Tactical Tablet setup error: invalid RTP configuration: {}",
+                        rtpValidation.reason()
+                );
+                valid = false;
+            }
         }
         if (getLobbyLevel(server) == null) {
             TacticalTabletMod.LOGGER.error("Tactical Tablet setup error: lobby:lobby dimension is unavailable.");
             valid = false;
         }
-        if (!hasFunction(server, START_GAME_FUNCTION)) {
-            TacticalTabletMod.LOGGER.error("Tactical Tablet setup error: datapack function {} is missing.", START_GAME_FUNCTION);
-            valid = false;
-        }
-        if (!hasFunction(server, RESET_GAME_FUNCTION)) {
-            TacticalTabletMod.LOGGER.error("Tactical Tablet setup error: datapack function {} is missing.", RESET_GAME_FUNCTION);
-            valid = false;
-        }
+        MatchScoreboard.ensureObjectives(server);
         return valid;
     }
 
@@ -653,11 +664,24 @@ public class GameStateManager {
     }
 
     public static boolean forceStartClanWar(MinecraftServer server, boolean skipPreStartWait) {
+        return forceStartClanWar(server, skipPreStartWait, false);
+    }
+
+    public static boolean forceStartClanWarDebug(MinecraftServer server, boolean skipPreStartWait) {
+        return forceStartClanWar(server, skipPreStartWait, true);
+    }
+
+    private static boolean forceStartClanWar(
+            MinecraftServer server,
+            boolean skipPreStartWait,
+            boolean soloDebug
+    ) {
         if (server == null || isRunning(server) || hasPendingSetReward()) return false;
 
         postGameDelay = 0;
         startCountdown = -1;
         cleanupMatchRuntime(server);
+        ClanWarManager.setSoloDebugEnabled(soloDebug);
         currentMode = MatchMode.SQUADS;
         matchPhase = MatchPhase.WAITING;
 
@@ -725,8 +749,9 @@ public class GameStateManager {
 
         int requiredPlayers = TestModeManager.getRequiredPlayers(MIN_PLAYERS);
 
-        if (onlinePlayers(server) < requiredPlayers) {
+        if (matchParticipantCandidates(server) < requiredPlayers) {
             if (MapSetManager.isClanWarSet()) {
+                ClanWarManager.resetPreStartWait();
                 giveLobbyTabletsAndSync(server);
             }
             startCountdown = -1;
@@ -734,6 +759,12 @@ public class GameStateManager {
         }
 
         if (MapSetManager.isClanWarSet()) {
+            if (!ClanWarManager.isSoloDebugEnabled()
+                    && ClanWarManager.getParticipantCandidateClanCount(server) < 2) {
+                ClanWarManager.resetPreStartWait();
+                startCountdown = -1;
+                return;
+            }
             giveLobbyTabletsAndSync(server);
             if (ClanWarManager.tickPreStartWait(server)) {
                 return;
@@ -764,7 +795,7 @@ public class GameStateManager {
     private static void handleStartingTick(MinecraftServer server) {
         int requiredPlayers = TestModeManager.getRequiredPlayers(MIN_PLAYERS);
 
-        if (onlinePlayers(server) < requiredPlayers) {
+        if (matchParticipantCandidates(server) < requiredPlayers) {
             matchPhase = MatchPhase.WAITING;
             startCountdown = -1;
             return;
@@ -831,12 +862,12 @@ public class GameStateManager {
     }
 
     private static boolean canStartVoting(MinecraftServer server) {
-        return onlinePlayers(server) >= MatchMode.DUO.minPlayers()
+        return matchParticipantCandidates(server) >= MatchMode.DUO.minPlayers()
                 || TestModeManager.canBypassTeamModeMinimums();
     }
 
     private static boolean hasEnoughPlayersForMode(MinecraftServer server, MatchMode mode) {
-        return onlinePlayers(server) >= mode.minPlayers()
+        return matchParticipantCandidates(server) >= mode.minPlayers()
                 || TestModeManager.canBypassTeamModeMinimums();
     }
 
@@ -965,7 +996,7 @@ public class GameStateManager {
     }
 
     private static String describeVoteModes(MinecraftServer server) {
-        int online = onlinePlayers(server);
+        int online = matchParticipantCandidates(server);
         return MatchMode.selectableModes(online, TestModeManager.canBypassTeamModeMinimums())
                 .stream()
                 .map(MatchMode::displayName)
@@ -994,10 +1025,18 @@ public class GameStateManager {
                         "current mode is null"
                 );
             }
-            if (onlinePlayers(server) < TestModeManager.getRequiredPlayers(MIN_PLAYERS)) {
+            if (matchParticipantCandidates(server) < TestModeManager.getRequiredPlayers(MIN_PLAYERS)) {
                 return MatchStartPreflightResult.rejected(
                         MatchStartRejectionReason.INSUFFICIENT_PLAYERS,
                         "not enough players"
+                );
+            }
+            if (MapSetManager.isClanWarSet()
+                    && !ClanWarManager.isSoloDebugEnabled()
+                    && ClanWarManager.getParticipantCandidateClanCount(server) < 2) {
+                return MatchStartPreflightResult.rejected(
+                        MatchStartRejectionReason.INSUFFICIENT_PLAYERS,
+                        "clan war requires at least two participating clans"
                 );
             }
             if (!validateStartRuntimeRequirements(server)) {
@@ -1014,7 +1053,9 @@ public class GameStateManager {
             Set<UUID> participants = new LinkedHashSet<>();
             if (server != null) {
                 for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-                    participants.add(player.getUUID());
+                    if (LobbyManager.isMatchParticipantCandidate(player)) {
+                        participants.add(player.getUUID());
+                    }
                 }
             }
             ResourceLocation mapId = server == null || getOverworld(server) == null
@@ -1066,10 +1107,8 @@ public class GameStateManager {
                     matchHadEnoughPlayers = false;
                     matchStartingParticipants = 0;
                 }
+                // Compatibility enum value retained for serialized lifecycle diagnostics.
                 case EXECUTE_START_DATAPACK -> {
-                    CommandSourceStack source = server.createCommandSourceStack().withSuppressedOutput();
-                    int result = server.getCommands().performPrefixedCommand(source, "function " + START_GAME_FUNCTION);
-                    requireDatapackCommandSuccess(START_GAME_FUNCTION, result);
                 }
                 case ANNOUNCE_MAP_START -> MapSetManager.announceGameStart(server);
                 case ENFORCE_GAME_RULES -> DropControlManager.enforceGameRules(server);
@@ -1119,9 +1158,6 @@ public class GameStateManager {
                 case ANNOUNCE_MAP_START -> {
                 }
                 case EXECUTE_START_DATAPACK -> {
-                    CommandSourceStack source = server.createCommandSourceStack().withSuppressedOutput();
-                    int result = server.getCommands().performPrefixedCommand(source, "function " + RESET_GAME_FUNCTION);
-                    requireDatapackCommandSuccess(RESET_GAME_FUNCTION, result);
                 }
                 case RESET_MATCH_COUNTERS -> {
                     matchStartingParticipants = 0;
@@ -1166,6 +1202,7 @@ public class GameStateManager {
             startTransitionPlayerSetup = true;
             try {
                 for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+                    if (!MatchAdmissionManager.isCurrentMatchParticipant(player.getUUID())) continue;
                     LivesManager.ensureStarted(player);
                     player.removeTag("war.eliminated");
                     player.removeTag("war.playing");
@@ -1191,7 +1228,9 @@ public class GameStateManager {
 
         private void rollbackPlayers(MinecraftServer server) {
             startTransitionPlayerSetup = false;
+            Set<UUID> participantIds = getLifecycleSnapshot().participantIds();
             for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+                if (!participantIds.contains(player.getUUID())) continue;
                 player.removeTag("war.playing");
                 player.removeTag("in_lobby");
                 LobbyManager.moveToLobby(player);
@@ -1211,11 +1250,6 @@ public class GameStateManager {
             }
         }
 
-        private void requireDatapackCommandSuccess(ResourceLocation functionId, int result) {
-            if (result <= 0) {
-                throw new IllegalStateException("datapack function " + functionId + " returned " + result);
-            }
-        }
     }
 }
 

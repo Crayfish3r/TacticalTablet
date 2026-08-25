@@ -82,6 +82,10 @@ public final class ZoneManager {
         FINAL_REVEAL_SCHEDULER.reset();
         ZoneSettings settings = loadSettings(server);
         activateRtpSettings(settings.rtpSettings);
+        RtpValidation rtpValidation = validateActiveRtpSettings(GameStateManager.getOverworld(server));
+        if (!rtpValidation.valid()) {
+            throw new IllegalStateException("Invalid RTP configuration: " + rtpValidation.reason());
+        }
         applyConfiguredCenter(server, settings, true);
         int playerCount = GameStateManager.onlinePlayers(server);
         int initialPhaseIndex = ZonePacingPolicy.initialPhaseIndex(playerCount, SMALL_MATCH_INITIAL_PHASE_INDEX);
@@ -343,7 +347,16 @@ public final class ZoneManager {
     }
 
     public static RtpValidation validateActiveRtpSettings(ServerLevel level) {
-        RtpSettings settings = activeRtpSettings;
+        return validateRtpSettings(activeRtpSettings, level);
+    }
+
+    public static RtpValidation validateConfiguredRtpSettings(MinecraftServer server) {
+        if (server == null) return new RtpValidation(false, "server is unavailable");
+        ZoneSettings settings = loadSettings(server);
+        return validateRtpSettings(settings.rtpSettings, GameStateManager.getOverworld(server));
+    }
+
+    private static RtpValidation validateRtpSettings(RtpSettings settings, ServerLevel level) {
         if (!settings.valid()) return new RtpValidation(false, settings.validationError());
         if (settings.mode() != RtpPlacementMode.FIXED_Y_BOX) return RtpValidation.success();
         if (level == null) return new RtpValidation(false, "overworld is unavailable");

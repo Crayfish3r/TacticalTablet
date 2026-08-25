@@ -66,6 +66,9 @@
   "screen.tacticaltablet.settings.graphics": "Графика",
   "screen.tacticaltablet.settings.sounds": "Звуки",
   "screen.tacticaltablet.settings.controls": "Управление",
+  "screen.tacticaltablet.settings.mods": "Моды",
+  "screen.tacticaltablet.settings.weapon_display": "Отображение оружия",
+  "screen.tacticaltablet.settings.weapon_display_unavailable": "Viewmodel Tuner не установлен или не предоставляет экран настроек",
   "screen.tacticaltablet.settings.fov_value": "Поле зрения: %s°",
   "screen.tacticaltablet.settings.sound_value": "%s: %s%%",
   "screen.tacticaltablet.controls.title": "Управление",
@@ -93,5 +96,8 @@
   "screen.tacticaltablet.keybind.description.spectator": "Переключение наблюдаемого игрока в соревновательном режиме.",
   "screen.tacticaltablet.keybind.description.thermal": "Переключить тепловизор. Рекомендуется: X.",
   "screen.tacticaltablet.common.back": "Назад",
-  "screen.tacticaltablet.common.coming_soon": "coming soon..."
+  "screen.tacticaltablet.common.coming_soon": "coming soon...",
+  "message.tacticaltablet.lobby.dimension_missing": "[WAR] Измерение lobby:lobby недоступно. Проверьте установленную версию мода.",
+  "message.tacticaltablet.lobby.welcome.title": "ДОБРО ПОЖАЛОВАТЬ",
+  "message.tacticaltablet.lobby.welcome.subtitle": "Лобби Battle Royale"
 }

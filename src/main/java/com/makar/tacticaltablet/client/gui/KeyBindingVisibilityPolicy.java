@@ -16,8 +16,7 @@ public final class KeyBindingVisibilityPolicy {
             "key.parcool.Vault",
             "key.parcool.Enable",
             "key.parcool.QuickTurn",
-            "key.parcool.Flipping",
-            "key.parcool.FastRun"
+            "key.parcool.Flipping"
     );
 
     private KeyBindingVisibilityPolicy() {
@@ -96,7 +95,7 @@ public final class KeyBindingVisibilityPolicy {
             case "key.parcool.WallSlide" -> "wall_slide";
             case "key.parcool.Dodge" -> "dodge";
             case "key.parcool.Breakfall" -> "breakfall";
-            case "key.parcool.ClimbPoles", "key.parcool.HangDown" -> null;
+            case "key.parcool.ClimbPoles", "key.parcool.HangDown", "key.parcool.FastRun" -> null;
             default -> "__hidden__";
         };
         if ("__hidden__".equals(suffix)) return Optional.empty();

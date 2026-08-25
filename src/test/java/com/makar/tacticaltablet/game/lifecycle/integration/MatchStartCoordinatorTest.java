@@ -72,6 +72,14 @@ class MatchStartCoordinatorTest {
     }
 
     @Test
+    void runningStateIsCommittedBeforeClientTabletSynchronization() {
+        List<MatchStartStep> steps = MatchStartCoordinator.startSteps();
+
+        assertTrue(steps.indexOf(MatchStartStep.SET_LEGACY_RUNNING)
+                < steps.indexOf(MatchStartStep.SYNC_CLASS_XP));
+    }
+
+    @Test
     void duplicateStartDoesNotApplySideEffectsAgain() {
         MatchLifecycleService lifecycle = lifecycle(MATCH_ID);
         FakeGateway gateway = new FakeGateway();

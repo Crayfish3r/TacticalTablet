@@ -20,6 +20,11 @@ class SettingsScreenArchitectureTest {
         assertTrue(settings.contains("GraphicsSettingsScreenFactory.create(this"));
         assertTrue(settings.contains("new CustomSoundSettingsScreen(this"));
         assertTrue(settings.contains("new CustomControlsScreen(this"));
+        assertTrue(settings.contains("new ModListScreen(this)"));
+        assertTrue(settings.contains("VIEWMODEL_TUNER_MOD_ID = \"viewmodel_tuner\""));
+        assertTrue(settings.contains("ForgeModConfigScreenFactory.create("));
+        String modConfigFactory = read("ForgeModConfigScreenFactory.java");
+        assertTrue(modConfigFactory.contains("ConfigScreenHandler.getScreenFactoryFor"));
         assertTrue(settings.contains("new TacticalSlider("));
         assertTrue(settings.contains("TacticalUi.drawPanel("));
     }

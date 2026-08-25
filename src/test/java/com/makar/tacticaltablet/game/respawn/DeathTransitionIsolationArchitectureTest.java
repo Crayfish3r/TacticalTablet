@@ -26,7 +26,7 @@ class DeathTransitionIsolationArchitectureTest {
         assertTrue(ordinaryDeath.contains("victim.addTag(\"in_lobby\")"));
         assertFalse(ordinaryDeath.contains("for (ServerPlayer"));
         assertFalse(transition.contains("getOnlineTeamMembers"));
-        assertTrue(transition.contains("LobbyManager.moveToLobby(player)"));
+        assertTrue(transition.contains("LobbyManager.moveRespawningPlayerToLobby(player)"));
         assertTrue(transition.contains("no teammates are transitioned"));
     }
 
@@ -38,7 +38,7 @@ class DeathTransitionIsolationArchitectureTest {
         String regroup = lives.substring(regroupStart, regroupEnd);
 
         assertTrue(regroup.contains("for (ServerPlayer player"));
-        assertTrue(regroup.contains("LobbyManager.moveToLobby(player)"));
+        assertTrue(regroup.contains("LobbyManager.moveRespawningPlayerToLobby(player)"));
         assertTrue(lives.indexOf("private static int handleClanWarDeath") < regroupStart);
     }
 }
