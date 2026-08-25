@@ -327,9 +327,37 @@ tasks.register('verifyJarEmbeddedClientResources') {
     }
 }
 
+tasks.register('verifyJarEmbeddedServerData') {
+    dependsOn tasks.named('jar')
+    def archiveFile = tasks.named('jar', Jar).flatMap { it.archiveFile }
+    inputs.file(archiveFile)
+    doLast {
+        def expected = [
+                'data/lobby/dimension/lobby.json'     : 'f20b614fc6cac9923215b3891e8932f90035a3c2dae479a147b1008c7494ad89',
+                'data/lobby/dimension_type/lobby.json': 'd1f4abba76943bcd681a9fdb1c0e558a75e4f91306586bf628967e51cb9240a5',
+                'data/lobby/structures/spawn.nbt'      : '79d016ede06362fd268df626712297895af578a931cc1973ec1688db40b646a5'
+        ]
+        def archive = new java.util.zip.ZipFile(archiveFile.get().asFile)
+        try {
+            expected.each { path, expectedSha256 ->
+                def entry = archive.getEntry(path)
+                if (entry == null) {
+                    throw new GradleException("JAR is missing embedded server-data resource: ${path}")
+                }
+                byte[] bytes = archive.getInputStream(entry).bytes
+                if (sha256(bytes) != expectedSha256) {
+                    throw new GradleException("JAR server-data resource differs from approved embedded source: ${path}")
+                }
+            }
+        } finally {
+            archive.close()
+        }
+    }
+}
 tasks.named('check') {
     dependsOn tasks.named('verifyProcessedModsToml')
     dependsOn tasks.named('verifyJarModsToml')
     dependsOn tasks.named('verifyEmbeddedClientResourceSources')
     dependsOn tasks.named('verifyJarEmbeddedClientResources')
+    dependsOn tasks.named('verifyJarEmbeddedServerData')
 }

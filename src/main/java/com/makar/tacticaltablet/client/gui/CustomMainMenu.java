@@ -22,9 +22,9 @@ import java.util.List;
 
 public final class CustomMainMenu extends Screen {
 
-    static final String SERVER_ADDRESS = "zuma.sos-al.net";
+    static final String SERVER_ADDRESS = "deluxewarfare.sosal.today";
 
-    private static final String SERVER_NAME = "DeluxeWarfare Test";
+    private static final String SERVER_NAME = "DeluxeWarfare";
     private static final float ENTRANCE_DURATION_SECONDS = 0.34F;
     private static final float BUTTON_STAGGER = 0.08F;
 

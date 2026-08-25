@@ -3,6 +3,7 @@ package com.makar.tacticaltablet.game.clanwar;
 import com.makar.tacticaltablet.clan.ClanManager;
 import com.makar.tacticaltablet.game.SpectatorCameraManager;
 import com.makar.tacticaltablet.game.lives.LivesManager;
+import com.makar.tacticaltablet.game.lobby.LobbyManager;
 import com.makar.tacticaltablet.tablet.PlayerTabletState;
 
 import net.minecraft.network.chat.Component;
@@ -34,8 +35,17 @@ public final class ClanWarManager {
     }
 
     public static void resetRuntime() {
+        resetMatchRuntime();
+        soloDebug = false;
+    }
+
+    private static void resetMatchRuntime() {
         clanLives.clear();
         eliminatedClans.clear();
+        preStartWaitLeft = -1;
+    }
+
+    public static void resetPreStartWait() {
         preStartWaitLeft = -1;
     }
 
@@ -60,7 +70,7 @@ public final class ClanWarManager {
     }
 
     public static void startMatch(MinecraftServer server) {
-        resetRuntime();
+        resetMatchRuntime();
         if (server == null) return;
 
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
@@ -168,6 +178,18 @@ public final class ClanWarManager {
         }
         return aliveClans.size() + aliveSoloPlayers;
     }
+
+    public static int getParticipantCandidateClanCount(MinecraftServer server) {
+        if (server == null) return 0;
+        Set<String> candidateClans = new HashSet<>();
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            if (!LobbyManager.isMatchParticipantCandidate(player)) continue;
+            String clanId = ClanManager.getClanIdForPlayer(player);
+            if (!clanId.isBlank()) candidateClans.add(clanId);
+        }
+        return candidateClans.size();
+    }
+
 
     public static ServerPlayer findWinningUnitRepresentative(MinecraftServer server) {
         if (server == null) return null;

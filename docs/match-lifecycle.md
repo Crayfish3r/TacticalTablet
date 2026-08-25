@@ -60,7 +60,7 @@ Main call-site groups:
 `startGame(server)` currently performs these steps synchronously on the server
 thread:
 
-1. Validate overworld, lobby dimension, `war:start_game`, and `war:reset`.
+1. Validate overworld and `lobby:lobby`, then ensure Java-owned scoreboard objectives.
 2. Clear RTP timers, passive XP, respawn control, and lives.
 3. Set scoreboard state to `RUNNING`.
 4. Set `matchPhase = MatchPhase.RUNNING`.
@@ -69,7 +69,7 @@ thread:
 7. Start Discord match tracking.
 8. Start contracts.
 9. Reset match counters.
-10. Execute datapack function `war:start_game`.
+10. Pass the retained `EXECUTE_START_DATAPACK` compatibility step without executing a function.
 11. Announce game start through `MapSetManager`.
 12. Enforce game rules.
 13. Start zone management.
@@ -82,9 +82,8 @@ thread:
 19. Sync all class XP.
 20. Broadcast match-start message.
 
-Important current behavior: scoreboard and phase become `RUNNING` before the
-datapack function and player/subsystem steps complete. Phase 1 does not change
-that order.
+Scoreboard and phase become `RUNNING` only at `SET_LEGACY_RUNNING`, after all
+commit-critical Java player and subsystem steps complete.
 
 ### Current end and cleanup order
 
@@ -114,7 +113,7 @@ Actual cleanup is delayed. On a later tick, `cleanupMatchRuntime`:
 6. Resets zone, respawn control, passive XP, RTP timers, safe teleport pool, and
    clan-war runtime.
 7. Clears dropped items through `WorldCleanupManager`.
-8. Executes datapack function `war:reset`.
+8. Clears Java-owned match tags and compatibility state.
 9. Enforces game rules.
 10. Resets lives.
 11. For each online player: removes match tags, moves to lobby, syncs class XP.
@@ -128,7 +127,7 @@ Actual cleanup is delayed. On a later tick, `cleanupMatchRuntime`:
 
 | Area | Side effects |
 |---|---|
-| Datapack | Executes `function war:start_game` and `function war:reset`. Command execution result is not currently modeled as a typed transition result. |
+| Embedded server data | The mod JAR supplies `lobby:lobby`, its dimension type, and `lobby:spawn`; no runtime functions are executed. |
 | Scoreboard | Creates/updates `gameState/#state`; team scoreboard setup and cleanup through `TeamMatchManager`. |
 | Players | Tags, lobby teleports, lives, inventory/tablet state, class XP sync, titles, chat, selected-class cooldowns, progression rewards. |
 | Match subsystems | Lives, teams, vote, clan war, zone, respawn, RTP, safe teleport, passive/class XP. |
@@ -229,8 +228,7 @@ unit tests.
 These interfaces should be introduced when production orchestration starts
 moving out of `GameStateManager`:
 
-- `DatapackGateway`: validate and execute `war:start_game` / `war:reset` with a
-  typed result.
+- `MatchResourcePreflight`: validate required dimensions and Java-owned objectives.
 - `ScoreboardGateway`: create/update `gameState` and manage match scoreboard
   effects.
 - `MatchPlayerService`: apply player tags, lives, lobby movement, inventory and
@@ -269,7 +267,7 @@ public method names.
 | Airdrop scheduler | `AirdropManager.resetAutoScheduler` and cancel active airdrop in overworld. |
 | Discord match start | Reset current match/leaderboard state if start fails before running. |
 | Contracts start | `ContractManager.reset`. |
-| Datapack `war:start_game` | Execute `war:reset`; if reset fails, remain `FAILED` with diagnostics. |
+| Compatibility start step | No-op in both apply and rollback; enum name is retained for serialized diagnostics. |
 | Zone start | `ZoneManager.reset`. |
 | Safe teleport pool | `SafeTeleport.clearPool`. |
 | Per-player tags/lives/lobby movement | Cleanup removes tags, resets lives, moves players to lobby, syncs XP. |
@@ -301,7 +299,7 @@ Further characterization tests before moving side effects:
 - cleanup continues through independent subsystem failures;
 - server start/stopping reset behavior;
 - disconnect during `STARTING` and `RUNNING`;
-- missing datapack function handling.
+- missing embedded lobby dimension/resource handling.
 
 ## 10. Failure matrix
 
@@ -310,7 +308,7 @@ Further characterization tests before moving side effects:
 | Before context creation | No explicit context; operation can simply return. | Stay `IDLE`; no side effects. |
 | After `PREPARING` | Not represented today. | Context can be discarded or moved to `CLEANING`; no player-visible success. |
 | After scoreboard `RUNNING` | Match may appear running even if later start step fails. | Scoreboard changes become a recorded start step with compensation. |
-| During datapack `war:start_game` | Command result is not typed in lifecycle. | Failure records `FAILED`, executes cleanup/reset, returns diagnostic. |
+| During Java-owned start steps | A typed step failure records `FAILED`, runs reverse compensation, and returns diagnostics. |
 | During player setup | Partial tags/lives/teleports possible if exception escapes. | Completed player step tracked; cleanup removes/normalizes state. |
 | After `RUNNING` | Normal gameplay. | Same, but with match id and revision. |
 | During `endGame` rewards | Some rewards/progress may be applied before later end step failure. | End steps produce typed results; partial failures are reported and cleanup still runs. |
@@ -352,7 +350,7 @@ The existing `endGame`, post-game delay, winner processing, and
 | 4 | `START_DISCORD_TRACKING` | Initialize in-memory Discord match stats. | Best-effort reversible |
 | 5 | `START_CONTRACTS` | Initialize contract selection runtime. | Reversible |
 | 6 | `RESET_MATCH_COUNTERS` | Clear match counters. | Reversible |
-| 7 | `EXECUTE_START_DATAPACK` | Execute `function war:start_game`. | Commit-critical |
+| 7 | `EXECUTE_START_DATAPACK` | Compatibility no-op; the serialized step name is retained. | Idempotent |
 | 8 | `ANNOUNCE_MAP_START` | Send map-set title announcement. | Notification; rollback is no-op |
 | 9 | `ENFORCE_GAME_RULES` | Apply game rules. | Idempotent |
 | 10 | `START_ZONE` | Start zone manager. | Reversible |
@@ -377,7 +375,7 @@ checks:
 - current mode is valid;
 - required player count is available according to `TestModeManager`;
 - overworld and lobby dimensions exist;
-- `war:start_game` and `war:reset` functions exist.
+- Java-owned `gameState` and `lives` objectives can be ensured without deleting existing data.
 
 Rejected preflight leaves lifecycle `IDLE`, does not apply gateway steps, and
 does not increment lifecycle revision.
@@ -399,7 +397,7 @@ not recorded as completed and is not rolled back by the coordinator.
 | `START_ZONE` | `ZoneManager.reset`. |
 | `ENFORCE_GAME_RULES` | Re-apply game rules; idempotent. |
 | `ANNOUNCE_MAP_START` | No-op; title/chat notification cannot be withdrawn. |
-| `EXECUTE_START_DATAPACK` | Execute `function war:reset`. |
+| `EXECUTE_START_DATAPACK` | No-op compatibility compensation. |
 | `RESET_MATCH_COUNTERS` | Clear counters. |
 | `START_CONTRACTS` | `ContractManager.reset`. |
 | `START_DISCORD_TRACKING` | `DiscordLeaderboardService.resetMatch`. |
@@ -440,7 +438,7 @@ Maximum three production patches after Phase 1:
    transitions and diagnostics while preserving existing start/end/cleanup
    order.
 2. **Start transition migration.**
-   Introduce `DatapackGateway`, `ScoreboardGateway`, `MatchPlayerService`, and
+   Introduce `ScoreboardGateway`, `MatchPlayerService`, and
    `MatchSubsystemCoordinator`; move `startGame` orchestration behind typed
    steps and compensation.
 3. **End/cleanup migration and old-state removal.**

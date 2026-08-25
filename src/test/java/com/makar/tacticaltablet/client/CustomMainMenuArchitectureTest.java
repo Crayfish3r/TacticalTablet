@@ -33,7 +33,8 @@ class CustomMainMenuArchitectureTest {
     void playConnectsDirectlyToTheOnlyServerAndUsesTheMenuAsParent() throws IOException {
         String menu = read(CLIENT_GUI.resolve("CustomMainMenu.java"));
 
-        assertTrue(menu.contains("zuma.sos-al.net"));
+        assertTrue(menu.contains("deluxewarfare.sosal.today"));
+        assertFalse(menu.contains("zuma.sos-al.net"));
         assertTrue(menu.contains("ConnectScreen.startConnecting(\n                this,"));
         assertTrue(menu.contains("ServerAddress.parseString(SERVER_ADDRESS)"));
         assertFalse(menu.contains("JoinMultiplayerScreen"));

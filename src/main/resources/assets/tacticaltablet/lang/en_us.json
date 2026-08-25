@@ -71,6 +71,9 @@
   "screen.tacticaltablet.settings.graphics": "Graphics",
   "screen.tacticaltablet.settings.sounds": "Sounds",
   "screen.tacticaltablet.settings.controls": "Controls",
+  "screen.tacticaltablet.settings.mods": "Mods",
+  "screen.tacticaltablet.settings.weapon_display": "Weapon Display",
+  "screen.tacticaltablet.settings.weapon_display_unavailable": "Viewmodel Tuner is missing or does not provide a settings screen",
   "screen.tacticaltablet.settings.fov_value": "Field of View: %s°",
   "screen.tacticaltablet.settings.sound_value": "%s: %s%%",
   "screen.tacticaltablet.controls.title": "Controls",
@@ -98,5 +101,8 @@
   "screen.tacticaltablet.keybind.description.spectator": "Switch the observed player in competitive mode.",
   "screen.tacticaltablet.keybind.description.thermal": "Toggle thermal vision. Recommended: X.",
   "screen.tacticaltablet.common.back": "Back",
-  "screen.tacticaltablet.common.coming_soon": "coming soon..."
+  "screen.tacticaltablet.common.coming_soon": "coming soon...",
+  "message.tacticaltablet.lobby.dimension_missing": "[WAR] The lobby:lobby dimension is unavailable. Check the installed mod version.",
+  "message.tacticaltablet.lobby.welcome.title": "WELCOME",
+  "message.tacticaltablet.lobby.welcome.subtitle": "Battle Royale lobby"
 }

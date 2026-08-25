@@ -224,10 +224,9 @@ public class TestModeCommand {
     private static int startClanWarDebug(CommandSourceStack source, boolean skipWait) {
         TestModeManager.setSoloStartEnabled(true);
         TestModeManager.setLowPlayerTeamTestsEnabled(true);
-        ClanWarManager.setSoloDebugEnabled(true);
         MapSetManager.setDebugClanWarSet(source.getServer(), true);
 
-        boolean started = GameStateManager.forceStartClanWar(source.getServer(), skipWait);
+        boolean started = GameStateManager.forceStartClanWarDebug(source.getServer(), skipWait);
         source.sendSuccess(
                 () -> Component.literal(started
                         ? "[WAR] Clan-war debug started. solo=true, lowplayers=true, skipWait=" + skipWait + "."

@@ -11,6 +11,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class RtpRequestPolicyTest {
 
     @Test
+    void requestCanBeScheduledDuringControlledStartTransition() {
+        assertTrue(RtpTimerManager.canStartRequest(false, true));
+        assertTrue(RtpTimerManager.canStartRequest(true, false));
+        assertFalse(RtpTimerManager.canStartRequest(false, false));
+    }
+    @Test
     void runningParticipantInLobbyIsReadyRegardlessOfStartupPlayerMinimum() {
         assertEquals(RtpTimerManager.RtpEligibilityResult.READY,
                 RtpTimerManager.classifyEligibility(true, true, true, true,

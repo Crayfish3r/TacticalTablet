@@ -150,7 +150,7 @@ public final class DeathTransitionManager {
         if (MapSetManager.isClanWarSet()) {
             if (ClanWarManager.shouldMoveToLobbyAfterDeath(player)) {
                 ClanWarManager.preparePlayerForRegroup(player);
-                LobbyManager.moveToLobby(player);
+                LobbyManager.moveRespawningPlayerToLobby(player);
                 ExtractionPointManager.onPlayerRespawn(player);
                 ClassXPManager.sync(player);
                 return;
@@ -165,7 +165,7 @@ public final class DeathTransitionManager {
         TacticalTabletMod.LOGGER.debug(
                 "Completing individual death respawn for victim {} on team {}; no teammates are transitioned",
                 player.getGameProfile().getName(), TeamMatchManager.getTeam(player));
-        LobbyManager.moveToLobby(player);
+        LobbyManager.moveRespawningPlayerToLobby(player);
         ExtractionPointManager.onPlayerRespawn(player);
         VoiceChatTeamManager.assignPlayerToVoiceGroup(player);
         ClassXPManager.sync(player);

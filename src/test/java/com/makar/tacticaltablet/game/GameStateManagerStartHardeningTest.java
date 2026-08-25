@@ -1,5 +1,7 @@
 package com.makar.tacticaltablet.game;
 
+import com.makar.tacticaltablet.game.lifecycle.integration.MatchStartRecoveryPolicy;
+import com.makar.tacticaltablet.game.lifecycle.integration.MatchStartStatus;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -19,7 +21,9 @@ class GameStateManagerStartHardeningTest {
         String source = readSource();
 
         assertFalse(source.contains("startGameThroughCoordinator"));
-        assertTrue(source.contains("handleStartResult(server, MATCH_START_COORDINATOR.start(server));"));
+        assertTrue(source.contains("MatchStartResult result = MATCH_START_COORDINATOR.start(server);"));
+        assertTrue(source.contains("handleStartResult(server, result);"));
+        assertTrue(source.contains("recoverAfterFailedStart(server, result.status())"));
         assertFalse(facadeBlock(source).contains("Р"));
     }
 
@@ -41,15 +45,43 @@ class GameStateManagerStartHardeningTest {
     }
 
     @Test
-    void criticalStartStepsCheckActualCommandAndLegacyStateResults() throws IOException {
+    void criticalStartStepsUseJavaOwnedStateWithoutDatapackCommands() throws IOException {
         String source = readSource();
 
-        assertTrue(source.contains("requireDatapackCommandSuccess(START_GAME_FUNCTION, result)"));
-        assertTrue(source.contains("requireDatapackCommandSuccess(RESET_GAME_FUNCTION, result)"));
+        assertFalse(source.contains("war:start_game"));
+        assertFalse(source.contains("war:reset"));
+        assertFalse(source.contains("performPrefixedCommand"));
+        assertTrue(source.contains("MatchScoreboard.ensureObjectives(server)"));
         assertTrue(source.contains("legacy scoreboard did not commit RUNNING state"));
         assertTrue(source.contains("legacy scoreboard did not rollback to WAITING state"));
     }
 
+
+    @Test
+    void unsuccessfulTerminalStartsRecoverTheLegacyWaitingPhase() {
+        assertTrue(MatchStartRecoveryPolicy.shouldRecover(MatchStartStatus.REJECTED));
+        assertTrue(MatchStartRecoveryPolicy.shouldRecover(MatchStartStatus.FAILED_ROLLED_BACK));
+        assertTrue(MatchStartRecoveryPolicy.shouldRecover(MatchStartStatus.FAILED_REQUIRES_CLEANUP));
+        assertTrue(MatchStartRecoveryPolicy.shouldRecover(MatchStartStatus.BLOCKED_REQUIRES_CLEANUP));
+        assertFalse(MatchStartRecoveryPolicy.shouldRecover(MatchStartStatus.STARTED));
+        assertFalse(MatchStartRecoveryPolicy.shouldRecover(MatchStartStatus.ALREADY_STARTING));
+        assertFalse(MatchStartRecoveryPolicy.shouldRecover(MatchStartStatus.ALREADY_RUNNING));
+        assertFalse(MatchStartRecoveryPolicy.shouldRecover(MatchStartStatus.STALE_OPERATION));
+    }
+
+    @Test
+    void highRiskStartGuardsRemainWiredIntoProductionPaths() throws IOException {
+        String source = readSource();
+        String zone = Files.readString(Path.of("src/main/java/com/makar/tacticaltablet/game/zone/ZoneManager.java"));
+        String clan = Files.readString(Path.of("src/main/java/com/makar/tacticaltablet/game/clanwar/ClanWarManager.java"));
+        String command = Files.readString(Path.of("src/main/java/com/makar/tacticaltablet/command/TestModeCommand.java"));
+
+        assertTrue(source.contains("ZoneManager.validateConfiguredRtpSettings(server)"));
+        assertTrue(zone.contains("throw new IllegalStateException(\"Invalid RTP configuration: \""));
+        assertTrue(source.contains("ClanWarManager.getParticipantCandidateClanCount(server) < 2"));
+        assertTrue(clan.contains("soloDebug = false;"));
+        assertTrue(command.contains("GameStateManager.forceStartClanWarDebug"));
+    }
     private static String readSource() throws IOException {
         return Files.readString(SOURCE);
     }

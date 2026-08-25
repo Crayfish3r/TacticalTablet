@@ -36,8 +36,8 @@ public final class MatchStartCoordinator {
             MatchStartStep.START_VOICE_MATCH,
             MatchStartStep.CAPTURE_PARTICIPANTS,
             MatchStartStep.START_EXTRACTION,
-            MatchStartStep.SYNC_CLASS_XP,
-            MatchStartStep.SET_LEGACY_RUNNING
+            MatchStartStep.SET_LEGACY_RUNNING,
+            MatchStartStep.SYNC_CLASS_XP
     );
 
     private final MatchLifecycleService lifecycleService;

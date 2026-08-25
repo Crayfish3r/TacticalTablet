@@ -27,6 +27,7 @@ class KeyBindingVisibilityPolicyTest {
     @Test
     void appliesRequestedModAllowlist() {
         assertVisible("key.parcool.WallSlide", "key.categories.parcool");
+        assertVisible("key.parcool.FastRun", "key.categories.parcool");
         assertVisible("key.pingwheel.ping_location", "key.category.pingwheel.name");
         assertVisible("key.tacz.reload.desc", "key.category.tacz");
         assertVisible("key.disable_voice_chat", "key.categories.voicechat");

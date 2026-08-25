@@ -76,7 +76,8 @@ public class RtpTimerManager {
 
     public static void start(ServerPlayer player) {
         if (player == null) return;
-        if (!GameStateManager.isRunning(player.server)) return;
+        if (!canStartRequest(GameStateManager.isRunning(player.server),
+                GameStateManager.isStartTransitionPlayerSetup())) return;
         if (MatchAdmissionManager.isLateSpectator(player)) return;
         if (PlayerTabletState.isRtpUsed(player)) return;
         if (!LivesManager.canContinueMatch(player)) return;
@@ -99,6 +100,10 @@ public class RtpTimerManager {
         requestMatchIds.put(uuid, matchId);
         lastFailureReasons.remove(uuid);
         LobbyManager.sync(player);
+    }
+
+    static boolean canStartRequest(boolean matchRunning, boolean startTransitionPlayerSetup) {
+        return matchRunning || startTransitionPlayerSetup;
     }
 
     public static void cancel(ServerPlayer player) {
