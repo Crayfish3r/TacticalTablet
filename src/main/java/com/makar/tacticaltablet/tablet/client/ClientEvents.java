@@ -7,6 +7,7 @@ import com.makar.tacticaltablet.core.TacticalTabletMod;
 import com.makar.tacticaltablet.game.GameStateManager;
 import com.makar.tacticaltablet.game.MatchPhase;
 import com.makar.tacticaltablet.prefix.PrefixClientState;
+import com.makar.tacticaltablet.integration.moderndamage.client.ModernDamageClientState;
 import com.makar.tacticaltablet.tablet.TacticalTabletItem;
 
 import net.minecraft.client.Minecraft;
@@ -14,6 +15,7 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.GameType;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
 import net.minecraftforge.client.event.InputEvent;
@@ -34,6 +36,7 @@ public class ClientEvents {
 
         if (player == null) return;
         if (DeathScreenOverlay.isActive()) return;
+        if (ChaosClientState.isActive() && !isChaosLobbyReady(mc)) return;
 
         if (hasTabletInHand(player)) {
             mc.setScreen(createScreenForCurrentPhase());
@@ -49,10 +52,16 @@ public class ClientEvents {
 
         Screen current = mc.screen;
         boolean deathOverlayActive = DeathScreenOverlay.isActive();
+        boolean chaosLobbyReady = isChaosLobbyReady(mc);
+        if (ChaosClientState.isActive() && current instanceof TabletScreen && !chaosLobbyReady) {
+            mc.setScreen(null);
+            return;
+        }
         if (ChaosAutoOpenPolicy.shouldOpen(
                 ChaosClientState.requiresSelection(),
                 deathOverlayActive,
                 mc.player.level().dimension().equals(GameStateManager.LOBBY_DIMENSION),
+                mc.gameMode != null && mc.gameMode.getPlayerMode() == GameType.SURVIVAL,
                 hasTabletInInventory(mc.player),
                 current instanceof TabletScreen)) {
             mc.setScreen(new TabletScreen());
@@ -96,12 +105,21 @@ public class ClientEvents {
         PrefixClientState.clear();
         SpectatorCameraClientState.clear();
         SpectatorHudClientState.clear();
+        ModernDamageClientState.clear();
     }
 
     private static boolean hasTabletInHand(Player player) {
         if (player == null) return false;
         return isTablet(player.getItemInHand(InteractionHand.MAIN_HAND))
                 || isTablet(player.getItemInHand(InteractionHand.OFF_HAND));
+    }
+
+    private static boolean isChaosLobbyReady(Minecraft minecraft) {
+        return minecraft != null
+                && minecraft.player != null
+                && minecraft.gameMode != null
+                && minecraft.player.level().dimension().equals(GameStateManager.LOBBY_DIMENSION)
+                && minecraft.gameMode.getPlayerMode() == GameType.SURVIVAL;
     }
 
     private static boolean hasTabletInInventory(Player player) {

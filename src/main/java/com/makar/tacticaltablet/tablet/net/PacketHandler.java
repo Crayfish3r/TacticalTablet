@@ -4,6 +4,9 @@ import com.makar.tacticaltablet.airdrop.net.AirdropNoticePacket;
 import com.makar.tacticaltablet.airdrop.net.AirdropSmokeStatePacket;
 import com.makar.tacticaltablet.clan.*;
 import com.makar.tacticaltablet.prefix.PrefixListPacket;
+import com.makar.tacticaltablet.integration.moderndamage.net.MdcBalanceRequestPacket;
+import com.makar.tacticaltablet.integration.moderndamage.net.MdcBalanceStatePacket;
+import com.makar.tacticaltablet.integration.moderndamage.net.MdcBalanceUpdatePacket;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
@@ -22,9 +25,9 @@ import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
-/** Tactical Tablet protocol registry. Protocol 39 adds competitive spectator HUD snapshots. */
+/** Tactical Tablet protocol registry. Protocol 40 adds the allow-listed MDC admin exchange. */
 public final class PacketHandler {
-    public static final String VERSION = "39";
+    public static final String VERSION = "40";
 
     public static final int TABLET = 0, TABLET_STATE = 1, VOTE_MODE = 2, JOIN_TEAM = 3, VOTE_MAP = 4,
             MAP_VOTE_STATE = 5, SET_COMPETITIVE = 6, SET_CLAN_WAR = 7, CONTRACT_SELECTION_STATE = 8,
@@ -34,7 +37,8 @@ public final class PacketHandler {
             CLAN_CREATE = 19, CLAN_JOIN_REQUEST = 20, CLAN_ACCEPT_JOIN = 21, CLAN_LEAVE = 22,
             CLAN_DISBAND = 23, CLAN_REJECT_JOIN = 24, CLAN_KICK_MEMBER = 25,
             CLAN_CHANGE_COLOR = 26, PREFIX_LIST = 27, KILL_FEED = 28, VOTE_SET_MODE = 29, CHAOS_STATE = 30,
-            TABLET_MATCH_SETUP_STATE = 31, CONTRACT_SELECTION_TIMER = 32, SPECTATOR_HUD_STATE = 33;
+            TABLET_MATCH_SETUP_STATE = 31, CONTRACT_SELECTION_TIMER = 32, SPECTATOR_HUD_STATE = 33,
+            MDC_BALANCE_REQUEST = 34, MDC_BALANCE_STATE = 35, MDC_BALANCE_UPDATE = 36;
 
     public static final SimpleChannel INSTANCE = NetworkRegistry.newSimpleChannel(
             new ResourceLocation("tacticaltablet", "main"), () -> VERSION, VERSION::equals, VERSION::equals);
@@ -46,7 +50,8 @@ public final class PacketHandler {
     public enum C2SAction {
         TABLET(3, 2_000_000_000L), VOTE(6, 1_000_000_000L), CLAN_MUTATION(4, 2_000_000_000L),
         CONTRACT_SELECT(3, 2_000_000_000L), TRACKER(8, 1_000_000_000L),
-        SPECTATOR(8, 1_000_000_000L), ADMIN_MAP(3, 2_000_000_000L);
+        SPECTATOR(8, 1_000_000_000L), ADMIN_MAP(3, 2_000_000_000L),
+        ADMIN_MDC(3, 2_000_000_000L);
         private final C2SRateLimiter.Budget budget;
         C2SAction(int count, long windowNanos) { this.budget = new C2SRateLimiter.Budget(count, windowNanos); }
     }
@@ -91,6 +96,9 @@ public final class PacketHandler {
         register(TABLET_MATCH_SETUP_STATE, TabletMatchSetupStatePacket.class, TabletMatchSetupStatePacket::encode, TabletMatchSetupStatePacket::new, TabletMatchSetupStatePacket::handle, NetworkDirection.PLAY_TO_CLIENT);
         register(CONTRACT_SELECTION_TIMER, ContractSelectionTimerPacket.class, ContractSelectionTimerPacket::encode, ContractSelectionTimerPacket::new, ContractSelectionTimerPacket::handle, NetworkDirection.PLAY_TO_CLIENT);
         register(SPECTATOR_HUD_STATE, SpectatorHudStatePacket.class, SpectatorHudStatePacket::encode, SpectatorHudStatePacket::new, SpectatorHudStatePacket::handle, NetworkDirection.PLAY_TO_CLIENT);
+        register(MDC_BALANCE_REQUEST, MdcBalanceRequestPacket.class, MdcBalanceRequestPacket::encode, MdcBalanceRequestPacket::new, MdcBalanceRequestPacket::handle, NetworkDirection.PLAY_TO_SERVER);
+        register(MDC_BALANCE_STATE, MdcBalanceStatePacket.class, MdcBalanceStatePacket::encode, MdcBalanceStatePacket::new, MdcBalanceStatePacket::handle, NetworkDirection.PLAY_TO_CLIENT);
+        register(MDC_BALANCE_UPDATE, MdcBalanceUpdatePacket.class, MdcBalanceUpdatePacket::encode, MdcBalanceUpdatePacket::new, MdcBalanceUpdatePacket::handle, NetworkDirection.PLAY_TO_SERVER);
         verifyUniqueIds();
         registered = true;
     }

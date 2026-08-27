@@ -11,7 +11,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class P0PerformanceArchitectureTest {
     private static String source(String relative) throws IOException {
-        return Files.readString(Path.of("src/main/java/com/makar/tacticaltablet").resolve(relative));
+        return Files.readString(Path.of("src/main/java/com/makar/tacticaltablet").resolve(relative))
+                .replace("\r\n", "\n");
     }
 
     @Test

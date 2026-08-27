@@ -19,6 +19,7 @@ import com.makar.tacticaltablet.command.SadTromboneCommand;
 import com.makar.tacticaltablet.command.TestModeCommand;
 import com.makar.tacticaltablet.command.XpBoostCommand;
 import com.makar.tacticaltablet.game.ServerEvents;
+import com.makar.tacticaltablet.integration.moderndamage.ModernDamageIntegration;
 import com.makar.tacticaltablet.moderation.ModerationCommand;
 import com.makar.tacticaltablet.prefix.PrefixCommand;
 import com.makar.tacticaltablet.tablet.net.PacketHandler;
@@ -57,6 +58,10 @@ public class TacticalTabletMod {
                 ModConfig.Type.SERVER,
                 TacticalTabletServerConfig.SPEC
         );
+        ModLoadingContext.get().registerConfig(
+                ModConfig.Type.CLIENT,
+                TacticalTabletClientConfig.SPEC
+        );
 
         modEventBus.addListener(this::setup);
         modEventBus.addListener(this::addCreative);
@@ -68,7 +73,10 @@ public class TacticalTabletMod {
     }
 
     private void setup(final FMLCommonSetupEvent event) {
-        event.enqueueWork(PacketHandler::register);
+        event.enqueueWork(() -> {
+            PacketHandler.register();
+            ModernDamageIntegration.initialize();
+        });
     }
 
     private void addCreative(BuildCreativeModeTabContentsEvent event) {

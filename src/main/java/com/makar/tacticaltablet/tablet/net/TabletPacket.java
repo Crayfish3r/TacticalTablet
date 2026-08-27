@@ -5,6 +5,7 @@ import com.makar.tacticaltablet.core.TacticalTabletMod;
 import com.makar.tacticaltablet.game.GameStateManager;
 import com.makar.tacticaltablet.game.MatchAdmissionManager;
 import com.makar.tacticaltablet.game.MapSetManager;
+import com.makar.tacticaltablet.game.chaos.ChaosSelectionAdmission;
 import com.makar.tacticaltablet.game.chaos.ChaosSetManager;
 import com.makar.tacticaltablet.game.clanwar.ClanWarManager;
 import com.makar.tacticaltablet.game.lives.LivesManager;
@@ -22,6 +23,7 @@ import com.makar.tacticaltablet.tablet.PlayerTabletState;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.level.GameType;
 import net.minecraftforge.network.NetworkEvent;
 
 import java.util.Map;
@@ -342,8 +344,13 @@ public class TabletPacket {
     }
 
     private void handleChaosKit(ServerPlayer player, String kit) {
-        if (!GameStateManager.isRunning(player.server) || !LivesManager.canContinueMatch(player)
-                || (!GameStateManager.isInLobby(player) && !player.getTags().contains("in_lobby"))) {
+        boolean selectionReady = ChaosSelectionAdmission.canSelect(
+                GameStateManager.isRunning(player.server),
+                LivesManager.canContinueMatch(player),
+                GameStateManager.isInLobby(player),
+                player.gameMode.getGameModeForPlayer() == GameType.SURVIVAL
+        );
+        if (!selectionReady) {
             LobbyManager.sync(player);
             return;
         }

@@ -7,6 +7,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 class ChaosIntegrationArchitectureTest {
     private static String source(String relative) throws IOException {
@@ -72,6 +73,22 @@ class ChaosIntegrationArchitectureTest {
         assertTrue(!rtp.substring(deployment, playing).contains("CuriosInventoryBridge.clear"));
         assertTrue(!inventoryGuard.contains("CuriosInventoryBridge"));
         assertTrue(!inventoryGuard.contains("PlayerLifecycleSanitizer"));
+    }
+
+    @Test
+    void chaosSelectionRejectsTheTemporarySpectatorLobbyRaceBeforeIssuingTheKit() throws IOException {
+        String packet = source("tablet/net/TabletPacket.java");
+        String client = source("tablet/client/ClientEvents.java");
+        int admission = packet.indexOf("ChaosSelectionAdmission.canSelect(");
+        int giveKit = packet.indexOf("KitManager.giveKit(player, kit, ChaosSetManager.tierFor(player, kit))");
+
+        assertTrue(admission >= 0 && admission < giveKit);
+        assertTrue(packet.contains("GameStateManager.isInLobby(player)"));
+        assertTrue(packet.contains("getGameModeForPlayer() == GameType.SURVIVAL"));
+        assertFalse(packet.substring(admission, giveKit).contains("getTags().contains(\"in_lobby\")"));
+        assertTrue(client.contains("isChaosLobbyReady(mc)"));
+        assertTrue(client.contains("getPlayerMode() == GameType.SURVIVAL"));
+        assertTrue(client.contains("current instanceof TabletScreen && !chaosLobbyReady"));
     }
 
     @Test

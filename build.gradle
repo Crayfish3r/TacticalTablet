@@ -40,13 +40,15 @@ repositories {
     }
 }
 
+def gameRunDirectory = providers.gradleProperty('gameRunDirectory').orElse('run')
+
 minecraft {
     // Standard mappings for 1.20.1
     mappings channel: mapping_channel, version: mapping_version
 
     runs {
         client {
-            workingDirectory project.file('run')
+            workingDirectory project.file(gameRunDirectory.get())
             property 'forge.logging.markers', 'REGISTRIES'
             property 'forge.logging.console.level', 'debug'
             property 'tacticaltablet.verifyEmbeddedResources', 'true'
@@ -57,7 +59,7 @@ minecraft {
             }
         }
         server {
-            workingDirectory project.file('run')
+            workingDirectory project.file(gameRunDirectory.get())
             property 'forge.logging.markers', 'REGISTRIES'
             property 'forge.logging.console.level', 'debug'
             mods {
@@ -79,6 +81,20 @@ dependencies {
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
     annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
     compileOnly fg.deobf("top.theillusivec4.curios:curios-forge:${curios_version}")
+    compileOnly fg.deobf("maven.modrinth:modern-damage-control:${moderndamage_version}")
+    compileOnly fg.deobf("maven.modrinth:cloth-config:${cloth_config_version}")
+    if (providers.gradleProperty('mdcSmokeVersion').isPresent()) {
+        def smokeVersion = providers.gradleProperty('mdcSmokeVersion').get()
+        def smokeVersionId = smokeVersion == '1.0.32' ? 'Eigsnbil'
+                : smokeVersion == '1.0.3' ? 'Jf7VZY0d' : null
+        if (smokeVersionId == null) {
+            throw new GradleException("Unsupported mdcSmokeVersion ${smokeVersion}; use 1.0.32 or 1.0.3")
+        }
+        // Project-id coordinates keep the smoke runtime independent of the exact compile-only API module.
+        runtimeOnly fg.deobf("maven.modrinth:P7GACeRj:${smokeVersionId}")
+        runtimeOnly fg.deobf("maven.modrinth:cloth-config:${cloth_config_version}")
+        runtimeOnly fg.deobf('maven.modrinth:timeless-and-classics-zero:1.1.7')
+    }
     implementation "de.maxhenkel.voicechat:voicechat-api:${voicechat_api_version}"
     runtimeOnly fg.deobf("maven.modrinth:simple-voice-chat:forge-${voicechat_version}")
     testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
@@ -100,6 +116,7 @@ def modMetadataProperties = [
         loader_version_range   : loader_version_range,
         voicechat_api_version  : voicechat_api_version,
         curios_version_range   : curios_version_range,
+        moderndamage_version   : moderndamage_version,
         mod_id                 : mod_id,
         mod_name               : mod_name,
         mod_license            : mod_license,
@@ -114,6 +131,24 @@ tasks.withType(ProcessResources).configureEach {
     inputs.properties(modMetadataProperties)
     filesMatching('META-INF/mods.toml') {
         expand(modMetadataProperties)
+    }
+
+    doLast {
+        [
+                'data/lobby/dimension/lobby.json'     : '\n',
+                'data/lobby/dimension_type/lobby.json': '\r\n'
+        ].each { relativePath, lineEnding ->
+            def output = new File(destinationDir, relativePath)
+            if (output.isFile()) {
+                def normalized = output.getText('UTF-8')
+                        .replace('\r\n', '\n')
+                        .replace('\r', '\n')
+                if (lineEnding == '\r\n') {
+                    normalized = normalized.replace('\n', '\r\n')
+                }
+                output.setText(normalized, 'UTF-8')
+            }
+        }
     }
 }
 
@@ -335,7 +370,7 @@ tasks.register('verifyJarEmbeddedServerData') {
         def expected = [
                 'data/lobby/dimension/lobby.json'     : 'f20b614fc6cac9923215b3891e8932f90035a3c2dae479a147b1008c7494ad89',
                 'data/lobby/dimension_type/lobby.json': 'd1f4abba76943bcd681a9fdb1c0e558a75e4f91306586bf628967e51cb9240a5',
-                'data/lobby/structures/spawn.nbt'      : '79d016ede06362fd268df626712297895af578a931cc1973ec1688db40b646a5'
+                'data/lobby/structures/spawn.nbt'      : '75ed60c6143ef7ebf5fad70d5e942a09177002b4014f4b6a55c38ddcf506c61e'
         ]
         def archive = new java.util.zip.ZipFile(archiveFile.get().asFile)
         try {
@@ -354,10 +389,51 @@ tasks.register('verifyJarEmbeddedServerData') {
         }
     }
 }
+
+tasks.register('verifyModernDamageRussianLocalization') {
+    inputs.file(layout.projectDirectory.file(
+            'src/main/resources/resourcepacks/tacticaltablet_overrides/assets/moderndamage/lang/ru_ru.json'))
+    doLast {
+        def reference = configurations.detachedConfiguration(
+                dependencies.create("maven.modrinth:modern-damage-control:${moderndamage_version}"))
+                .singleFile
+        def archive = new java.util.zip.ZipFile(reference)
+        try {
+            def entry = archive.getEntry('assets/moderndamage/lang/en_us.json')
+            if (entry == null) throw new GradleException("MDC ${moderndamage_version} has no en_us.json")
+            String english = archive.getInputStream(entry).getText('UTF-8')
+            String russian = layout.projectDirectory.file(
+                    'src/main/resources/resourcepacks/tacticaltablet_overrides/assets/moderndamage/lang/ru_ru.json')
+                    .asFile.getText('UTF-8')
+            new groovy.json.JsonSlurper().parseText(english)
+            new groovy.json.JsonSlurper().parseText(russian)
+            def keyPattern = ~/(?m)^\s*"([^"]+)"\s*:/
+            def englishKeys = (english =~ keyPattern).collect { it[1] }
+            def russianKeys = (russian =~ keyPattern).collect { it[1] }
+            if (englishKeys.size() != englishKeys.toSet().size()) {
+                throw new GradleException("MDC ${moderndamage_version} en_us.json contains duplicate keys")
+            }
+            if (russianKeys.size() != russianKeys.toSet().size()) {
+                throw new GradleException('TacticalTablet MDC ru_ru.json contains duplicate keys')
+            }
+            def missing = englishKeys.toSet() - russianKeys.toSet()
+            def extra = russianKeys.toSet() - englishKeys.toSet()
+            if (!missing.isEmpty() || !extra.isEmpty()) {
+                throw new GradleException("MDC ${moderndamage_version} localization mismatch; missing=${missing}, extra=${extra}")
+            }
+            if (englishKeys.size() != 180) {
+                throw new GradleException("Expected 180 MDC ${moderndamage_version} keys, got ${englishKeys.size()}")
+            }
+        } finally {
+            archive.close()
+        }
+    }
+}
 tasks.named('check') {
     dependsOn tasks.named('verifyProcessedModsToml')
     dependsOn tasks.named('verifyJarModsToml')
     dependsOn tasks.named('verifyEmbeddedClientResourceSources')
     dependsOn tasks.named('verifyJarEmbeddedClientResources')
     dependsOn tasks.named('verifyJarEmbeddedServerData')
+    dependsOn tasks.named('verifyModernDamageRussianLocalization')
 }

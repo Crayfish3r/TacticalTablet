@@ -27,7 +27,7 @@ class CombatAttributionIntegrationArchitectureTest {
     @Test
     void deathRespawnAndMatchLifecycleClearAllPreviousLifeAttribution() throws IOException {
         String events = Files.readString(MAIN.resolve("game/ServerEvents.java"));
-        String gameState = Files.readString(MAIN.resolve("game/GameStateManager.java"));
+        String gameState = normalizedSource("game/GameStateManager.java");
         String runtime = Files.readString(MAIN.resolve("game/set/SetMatchRuntime.java"));
 
         assertTrue(events.contains("onPlayerClone(PlayerEvent.Clone event)"));
@@ -36,6 +36,10 @@ class CombatAttributionIntegrationArchitectureTest {
         assertTrue(events.contains("onServerStopping(ServerStoppingEvent event)"));
         assertTrue(gameState.contains("matchPhase = MatchPhase.POST_GAME;\n        CombatAttributionLedger.reset();"));
         assertTrue(runtime.contains("CombatAttributionLedger.reset()"));
+    }
+
+    private static String normalizedSource(String relativePath) throws IOException {
+        return Files.readString(MAIN.resolve(relativePath)).replace("\r\n", "\n");
     }
 
     @Test

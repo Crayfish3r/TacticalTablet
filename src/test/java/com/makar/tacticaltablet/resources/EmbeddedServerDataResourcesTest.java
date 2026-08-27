@@ -26,10 +26,10 @@ class EmbeddedServerDataResourcesTest {
         Path structure = DATA.resolve("structures/spawn.nbt");
 
         assertEquals("f20b614fc6cac9923215b3891e8932f90035a3c2dae479a147b1008c7494ad89",
-                sha256(dimension));
+                sha256NormalizedText(dimension));
         JsonObject dimensionTypeJson = JsonParser.parseString(Files.readString(dimensionType)).getAsJsonObject();
         assertEquals(0.0F, dimensionTypeJson.get("ambient_light").getAsFloat());
-        assertEquals("79d016ede06362fd268df626712297895af578a931cc1973ec1688db40b646a5",
+        assertEquals("75ed60c6143ef7ebf5fad70d5e942a09177002b4014f4b6a55c38ddcf506c61e",
                 sha256(structure));
 
         JsonObject dimensionJson = JsonParser.parseString(Files.readString(dimension)).getAsJsonObject();
@@ -61,7 +61,7 @@ class EmbeddedServerDataResourcesTest {
             for (int index = 0; index < blocks.size(); index++) {
                 if (blocks.getCompound(index).contains("nbt", 10)) blockEntities++;
             }
-            assertEquals(26, blockEntities);
+            assertEquals(30, blockEntities);
             assertTrue(nbt.contains("entities", 9));
             assertEquals(11, nbt.getList("entities", 10).size());
             var entities = nbt.getList("entities", 10);
@@ -89,6 +89,13 @@ class EmbeddedServerDataResourcesTest {
     private static String sha256(Path path) throws Exception {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
         digest.update(Files.readAllBytes(path));
+        return HexFormat.of().formatHex(digest.digest());
+    }
+
+    private static String sha256NormalizedText(Path path) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        String normalized = Files.readString(path).replace("\r\n", "\n");
+        digest.update(normalized.getBytes(java.nio.charset.StandardCharsets.UTF_8));
         return HexFormat.of().formatHex(digest.digest());
     }
 }

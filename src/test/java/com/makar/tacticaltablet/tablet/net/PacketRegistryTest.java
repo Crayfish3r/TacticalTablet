@@ -17,14 +17,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class PacketRegistryTest {
 
     @Test
-    void registryPreservesAllProtocol39IdsAndDirections() {
+    void registryPreservesAllProtocol40IdsAndDirections() {
         var entries = PacketProtocol.entries();
         Map<Class<?>, PacketProtocol.Entry> map = entries.stream()
                 .collect(java.util.stream.Collectors.toMap(PacketProtocol.Entry::packetClass, entry -> entry));
 
-        assertEquals(34, entries.size());
-        assertEquals(34, new HashSet<>(entries.stream().map(PacketProtocol.Entry::id).toList()).size());
-        assertEquals(IntStream.range(0, 34).boxed().toList(), entries.stream().map(PacketProtocol.Entry::id).toList());
+        assertEquals(37, entries.size());
+        assertEquals(37, new HashSet<>(entries.stream().map(PacketProtocol.Entry::id).toList()).size());
+        assertEquals(IntStream.range(0, 37).boxed().toList(), entries.stream().map(PacketProtocol.Entry::id).toList());
         assertEquals(List.of(
                 TabletPacket.class, TabletStatePacket.class, VoteModePacket.class, JoinTeamPacket.class, VoteMapPacket.class,
                 MapVoteStatePacket.class, SetCompetitivePacket.class, SetClanWarPacket.class, ContractSelectionStatePacket.class,
@@ -37,7 +37,10 @@ class PacketRegistryTest {
                 com.makar.tacticaltablet.clan.ClanRejectJoinPacket.class, com.makar.tacticaltablet.clan.ClanKickMemberPacket.class,
                 com.makar.tacticaltablet.clan.ClanChangeColorPacket.class, com.makar.tacticaltablet.prefix.PrefixListPacket.class,
                 KillFeedPacket.class, VoteSetModePacket.class, ChaosStatePacket.class, TabletMatchSetupStatePacket.class,
-                ContractSelectionTimerPacket.class, SpectatorHudStatePacket.class
+                ContractSelectionTimerPacket.class, SpectatorHudStatePacket.class,
+                com.makar.tacticaltablet.integration.moderndamage.net.MdcBalanceRequestPacket.class,
+                com.makar.tacticaltablet.integration.moderndamage.net.MdcBalanceStatePacket.class,
+                com.makar.tacticaltablet.integration.moderndamage.net.MdcBalanceUpdatePacket.class
         ), entries.stream().map(PacketProtocol.Entry::packetClass).toList());
         assertEquals(19, map.get(com.makar.tacticaltablet.clan.ClanCreatePacket.class).id());
         assertEquals(18, map.get(com.makar.tacticaltablet.clan.ClanListPacket.class).id());
@@ -61,7 +64,9 @@ class PacketRegistryTest {
                 NetworkDirection.PLAY_TO_SERVER, NetworkDirection.PLAY_TO_SERVER, NetworkDirection.PLAY_TO_SERVER,
                 NetworkDirection.PLAY_TO_CLIENT, NetworkDirection.PLAY_TO_CLIENT,
                 NetworkDirection.PLAY_TO_SERVER, NetworkDirection.PLAY_TO_CLIENT, NetworkDirection.PLAY_TO_CLIENT,
-                NetworkDirection.PLAY_TO_CLIENT, NetworkDirection.PLAY_TO_CLIENT
+                NetworkDirection.PLAY_TO_CLIENT, NetworkDirection.PLAY_TO_CLIENT,
+                NetworkDirection.PLAY_TO_SERVER, NetworkDirection.PLAY_TO_CLIENT,
+                NetworkDirection.PLAY_TO_SERVER
         ), entries.stream().map(PacketProtocol.Entry::direction).toList());
         PacketProtocol.verify();
     }
@@ -80,7 +85,8 @@ class PacketRegistryTest {
                 PacketHandler.CLAN_KICK_MEMBER, PacketHandler.CLAN_CHANGE_COLOR, PacketHandler.PREFIX_LIST,
                 PacketHandler.KILL_FEED, PacketHandler.VOTE_SET_MODE, PacketHandler.CHAOS_STATE,
                 PacketHandler.TABLET_MATCH_SETUP_STATE, PacketHandler.CONTRACT_SELECTION_TIMER,
-                PacketHandler.SPECTATOR_HUD_STATE
+                PacketHandler.SPECTATOR_HUD_STATE, PacketHandler.MDC_BALANCE_REQUEST,
+                PacketHandler.MDC_BALANCE_STATE, PacketHandler.MDC_BALANCE_UPDATE
         );
 
         assertEquals(PacketProtocol.entries().stream().map(PacketProtocol.Entry::id).toList(), constants);

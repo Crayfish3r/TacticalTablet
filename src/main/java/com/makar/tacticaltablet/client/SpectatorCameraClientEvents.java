@@ -119,9 +119,9 @@ public final class SpectatorCameraClientEvents {
                     minecraft.font.lineHeight + paddingY * 2);
 
             TacticalUi.drawCutCornerBorder(graphics, anchor.x(), anchor.y(), anchor.width(), anchor.height(),
-                    2, 1, TacticalTheme.BORDER, 0xB812181D);
+                    2, 1, ExternalUiTheme.BORDER, TacticalUi.withAlpha(ExternalUiTheme.SURFACE, 0xD0));
             graphics.drawCenteredString(minecraft.font, lockHint,
-                    anchor.x() + anchor.width() / 2, anchor.y() + paddingY, TacticalTheme.TEXT_PRIMARY);
+                    anchor.x() + anchor.width() / 2, anchor.y() + paddingY, ExternalUiTheme.TEXT_PRIMARY);
 
             if (TabletClientState.isCompetitiveSet()) {
                 SpectatorHudClientState.snapshot().ifPresent(snapshot ->
@@ -158,17 +158,17 @@ public final class SpectatorCameraClientEvents {
 
         TacticalUi.drawCutCornerBorder(graphics, panel.x(), panel.y(), panel.width(), panel.height(),
                 TacticalTheme.CORNER_CUT, TacticalTheme.BORDER_WIDTH,
-                TacticalTheme.ACCENT_MUTED, 0xC412181D);
+                ExternalUiTheme.SECONDARY, TacticalUi.withAlpha(ExternalUiTheme.SURFACE, 0xE0));
         int textX = panel.x() + 8;
         int textY = panel.y() + 3;
         graphics.drawString(minecraft.font, snapshot.playerName(), textX, textY,
-                TacticalTheme.ACCENT, false);
+                ExternalUiTheme.ACCENT, false);
         graphics.drawString(minecraft.font, classLine, textX, textY + minecraft.font.lineHeight,
-                TacticalTheme.TEXT_SECONDARY, false);
+                ExternalUiTheme.TEXT_SECONDARY, false);
         graphics.drawString(minecraft.font, combatLine, textX, textY + minecraft.font.lineHeight * 2,
-                TacticalTheme.TEXT_PRIMARY, false);
+                ExternalUiTheme.TEXT_PRIMARY, false);
         graphics.drawString(minecraft.font, matchLine, textX, textY + minecraft.font.lineHeight * 3,
-                TacticalTheme.TEXT_PRIMARY, false);
+                ExternalUiTheme.TEXT_PRIMARY, false);
     }
 
     private static boolean isLockedGameplay() {

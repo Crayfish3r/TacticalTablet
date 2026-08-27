@@ -24,11 +24,11 @@ class MainMenuLayoutTest {
     void fullHdLayoutMatchesTheProvidedReferenceGeometry() {
         TabletMenuLayout layout = TabletMenuLayout.calculateMain(1920, 1080);
 
-        assertTrue(Math.abs(layout.frameX() - 432) <= 1);
+        assertTrue(Math.abs(layout.frameX() - 564) <= 1);
         assertTrue(Math.abs(layout.frameY() - 427) <= 1);
-        assertTrue(Math.abs(layout.frameWidth() - 1056) <= 1);
-        assertTrue(Math.abs(layout.buttonX() - 537) <= 1);
-        assertTrue(Math.abs(layout.firstButtonY() - 497) <= 1);
+        assertTrue(Math.abs(layout.frameWidth() - 792) <= 1);
+        assertTrue(Math.abs(layout.buttonX() - 643) <= 1);
+        assertTrue(Math.abs(layout.firstButtonY() - 480) <= 1);
     }
 
     @Test

@@ -16,7 +16,7 @@ import org.lwjgl.glfw.GLFW;
 import java.util.ArrayList;
 import java.util.List;
 
-public final class GuideScreen extends Screen {
+public final class GuideScreen extends Screen implements com.makar.tacticaltablet.tablet.client.ui.UiPaletteProvider {
 
     private static final int MAX_PANEL_WIDTH = 760;
     private static final int MAX_PANEL_HEIGHT = 500;
@@ -116,11 +116,11 @@ public final class GuideScreen extends Screen {
 
     private static BlockMetrics metrics(InformationContent.BlockStyle style) {
         return switch (style) {
-            case TITLE -> new BlockMetrics(TacticalTheme.ACCENT, 0, 5, 2, true);
-            case HEADING -> new BlockMetrics(TacticalTheme.INFO, 8, 2, 1, false);
-            case BODY -> new BlockMetrics(TacticalTheme.TEXT_PRIMARY, 1, 5, 1, false);
-            case BULLET -> new BlockMetrics(TacticalTheme.TEXT_SECONDARY, 0, 3, 1, false);
-            case WARNING -> new BlockMetrics(TacticalTheme.WARNING, 4, 6, 1, false);
+            case TITLE -> new BlockMetrics(TacticalUi.currentPalette().accent(), 0, 5, 2, true);
+            case HEADING -> new BlockMetrics(TacticalUi.currentPalette().info(), 8, 2, 1, false);
+            case BODY -> new BlockMetrics(TacticalUi.currentPalette().textPrimary(), 1, 5, 1, false);
+            case BULLET -> new BlockMetrics(TacticalUi.currentPalette().textSecondary(), 0, 3, 1, false);
+            case WARNING -> new BlockMetrics(TacticalUi.currentPalette().warning(), 4, 6, 1, false);
         };
     }
 
@@ -132,7 +132,8 @@ public final class GuideScreen extends Screen {
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         UiFrameContext frame = frameClock.nextFrame(Util.getMillis(), reducedMotion());
-        try (TacticalUi.FrameScope ignored = TacticalUi.openFrame(frame)) {
+        try (TacticalUi.FrameScope ignored = TacticalUi.openFrame(frame,
+                com.makar.tacticaltablet.client.ExternalUiTheme.PALETTE)) {
             renderBackdrop(graphics);
             TacticalUi.drawPanel(
                     graphics,
@@ -146,7 +147,7 @@ public final class GuideScreen extends Screen {
                     title,
                     width / 2,
                     layout.titleY(),
-                    TacticalTheme.TEXT_PRIMARY
+                    TacticalUi.currentPalette().textPrimary()
             );
             TacticalUi.drawDivider(
                     graphics,
@@ -222,8 +223,8 @@ public final class GuideScreen extends Screen {
                 + Math.round(travel * (scrollOffset / (float) maxScroll));
 
         graphics.fill(trackX, layout.viewportY(), trackX + 2,
-                layout.viewportY() + trackHeight, TacticalTheme.BORDER_DISABLED);
-        graphics.fill(trackX, thumbY, trackX + 2, thumbY + thumbHeight, TacticalTheme.ACCENT_MUTED);
+                layout.viewportY() + trackHeight, TacticalUi.currentPalette().borderDisabled());
+        graphics.fill(trackX, thumbY, trackX + 2, thumbY + thumbHeight, TacticalUi.currentPalette().accentMuted());
     }
 
     @Override
@@ -288,6 +289,11 @@ public final class GuideScreen extends Screen {
             int lineSpacing,
             boolean centered
     ) {
+    }
+
+    @Override
+    public com.makar.tacticaltablet.tablet.client.ui.UiPalette uiPalette() {
+        return com.makar.tacticaltablet.client.ExternalUiTheme.PALETTE;
     }
 
     private record Layout(

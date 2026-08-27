@@ -53,15 +53,15 @@ public final class TacticalSlider extends AbstractSliderButton {
                 active, hovered, isFocused(), false, false
         );
         TacticalUi.drawButton(graphics, getX(), getY(), width, height, state,
-                hoverAnimation.value(), 0.0F, TacticalTheme.ACCENT);
+                hoverAnimation.value(), 0.0F, TacticalUi.currentPalette().accent());
 
         int trackX = getX() + TacticalTheme.SPACING_LARGE;
         int trackWidth = Math.max(1, width - TacticalTheme.SPACING_LARGE * 2);
         int trackY = getY() + height - 5;
         TacticalUi.drawProgressBar(graphics, trackX, trackY, trackWidth, 2,
-                (float) value, TacticalTheme.ACCENT);
+                (float) value, TacticalUi.currentPalette().accent());
 
-        int color = active ? TacticalTheme.TEXT_PRIMARY : TacticalTheme.TEXT_DISABLED;
+        int color = active ? TacticalUi.currentPalette().textPrimary() : TacticalUi.currentPalette().textDisabled();
         graphics.drawCenteredString(
                 Minecraft.getInstance().font,
                 getMessage(),

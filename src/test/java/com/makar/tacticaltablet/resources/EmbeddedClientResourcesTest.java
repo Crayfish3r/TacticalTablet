@@ -37,10 +37,11 @@ class EmbeddedClientResourcesTest {
     void everyMigratedRuntimeAssetMatchesTheRepositoryManifest() throws Exception {
         List<ManifestEntry> entries = manifest();
 
-        assertEquals(157, entries.size());
+        assertEquals(158, entries.size());
         assertEquals(Map.of(
                 "curios", 2L,
                 "minecraft", 10L,
+                "moderndamage", 1L,
                 "tacticaltablet", 145L
         ), entries.stream().collect(java.util.stream.Collectors.groupingBy(
                 entry -> entry.path().substring(0, entry.path().indexOf('/')),

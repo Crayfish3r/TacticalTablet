@@ -1,6 +1,9 @@
 package com.makar.tacticaltablet.client.gui;
 
 import com.makar.tacticaltablet.client.gui.component.TacticalSlider;
+import com.makar.tacticaltablet.integration.moderndamage.ModernDamageIntegration;
+import com.makar.tacticaltablet.integration.moderndamage.client.ModernDamageSettingsScreen;
+import com.makar.tacticaltablet.integration.replaymod.client.ReplayModClientAdapter;
 import com.makar.tacticaltablet.tablet.client.ui.TacticalTheme;
 import com.makar.tacticaltablet.tablet.client.ui.TacticalUi;
 import com.makar.tacticaltablet.tablet.client.ui.UiFrameClock;
@@ -13,11 +16,11 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraftforge.client.gui.ModListScreen;
 
-public final class CustomSettingsScreen extends Screen {
+public final class CustomSettingsScreen extends Screen implements com.makar.tacticaltablet.tablet.client.ui.UiPaletteProvider {
 
     private static final String VIEWMODEL_TUNER_MOD_ID = "viewmodel_tuner";
     private static final int PANEL_WIDTH = 520;
-    private static final int PANEL_HEIGHT = 230;
+    private static final int PANEL_HEIGHT = 260;
     private static final int PANEL_MARGIN = 10;
     private static final int CONTENT_WIDTH = 430;
     private static final int COLUMN_GAP = 8;
@@ -76,8 +79,24 @@ public final class CustomSettingsScreen extends Screen {
         }
 
         y += TacticalTheme.CONTROL_HEIGHT + ROW_GAP;
-        addButton(layout.contentX(), y, layout.contentWidth(),
-                "screen.tacticaltablet.common.back", this::onClose);
+        TacticalButton mdcButton = addButton(layout.contentX(), y, layout.contentWidth(),
+                "screen.tacticaltablet.settings.mdc", () -> minecraft.setScreen(new ModernDamageSettingsScreen(this)));
+        ModernDamageIntegration.Status mdcStatus = ModernDamageIntegration.status();
+        mdcButton.active = mdcStatus.supported();
+        if (!mdcButton.active) {
+            mdcButton.withTooltip(Component.literal(mdcStatus.details()));
+        }
+
+        y += TacticalTheme.CONTROL_HEIGHT + ROW_GAP;
+        if (ReplayModClientAdapter.isInstalled()) {
+            addButton(layout.contentX(), y, layout.columnWidth(),
+                    "screen.tacticaltablet.settings.replays", this::openReplayViewer);
+            addButton(layout.rightColumnX(), y, layout.columnWidth(),
+                    "screen.tacticaltablet.common.back", this::onClose);
+        } else {
+            addButton(layout.contentX(), y, layout.contentWidth(),
+                    "screen.tacticaltablet.common.back", this::onClose);
+        }
     }
 
     private TacticalButton addButton(int x, int y, int buttonWidth,
@@ -119,6 +138,17 @@ public final class CustomSettingsScreen extends Screen {
                 .ifPresent(minecraft::setScreen);
     }
 
+    private void openReplayViewer() {
+        if (ReplayModClientAdapter.openViewer()) return;
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft.player != null) {
+            minecraft.player.displayClientMessage(
+                    Component.translatable("screen.tacticaltablet.settings.replays_open_failed"),
+                    false
+            );
+        }
+    }
+
     @Override
     public void removed() {
         Minecraft.getInstance().options.save();
@@ -132,12 +162,12 @@ public final class CustomSettingsScreen extends Screen {
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         UiFrameContext frame = frameClock.nextFrame(Util.getMillis(), reducedMotion());
-        try (TacticalUi.FrameScope ignored = TacticalUi.openFrame(frame)) {
+        try (TacticalUi.FrameScope ignored = TacticalUi.openFrame(frame, com.makar.tacticaltablet.client.ExternalUiTheme.PALETTE)) {
             TacticalScreenBackground.render(graphics, minecraft, width, height);
             TacticalUi.drawPanel(graphics, layout.panelX(), layout.panelY(),
                     layout.panelWidth(), layout.panelHeight());
             graphics.drawCenteredString(font, title, width / 2, layout.titleY(),
-                    TacticalTheme.TEXT_PRIMARY);
+                    TacticalUi.currentPalette().textPrimary());
             TacticalUi.drawDivider(graphics, layout.contentX(), layout.dividerY(),
                     layout.contentWidth(), false);
             super.render(graphics, mouseX, mouseY, partialTick);
@@ -151,6 +181,11 @@ public final class CustomSettingsScreen extends Screen {
     @Override
     public boolean isPauseScreen() {
         return false;
+    }
+
+    @Override
+    public com.makar.tacticaltablet.tablet.client.ui.UiPalette uiPalette() {
+        return com.makar.tacticaltablet.client.ExternalUiTheme.PALETTE;
     }
 
     private record Layout(int panelX, int panelY, int panelWidth, int panelHeight,

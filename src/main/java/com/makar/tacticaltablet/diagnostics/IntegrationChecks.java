@@ -7,6 +7,7 @@ import com.makar.tacticaltablet.game.MatchPhase;
 import com.makar.tacticaltablet.game.team.TeamId;
 import com.makar.tacticaltablet.game.teleport.SafeTeleport;
 import com.makar.tacticaltablet.tablet.net.PacketHandler;
+import com.makar.tacticaltablet.integration.moderndamage.ModernDamageIntegration;
 
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.scores.PlayerTeam;
@@ -28,6 +29,17 @@ public final class IntegrationChecks {
                 PacketHandler.isRegistered()
                         ? "сетевой канал зарегистрирован с явными направлениями пакетов"
                         : "сетевой канал ещё не зарегистрирован"
+        ));
+
+        ModernDamageIntegration.Status mdc = ModernDamageIntegration.status();
+        boolean mdcHealthy = mdc.state() == ModernDamageIntegration.State.MISSING
+                || mdc.state() == ModernDamageIntegration.State.SUPPORTED;
+        results.add(new Result(
+                "Modern Damage Control",
+                mdcHealthy,
+                "состояние=" + mdc.state() + ", версия="
+                        + (mdc.detectedVersion().isBlank() ? "не установлена" : mdc.detectedVersion())
+                        + ", " + mdc.details()
         ));
 
         boolean runtimeValid = GameStateManager.validateRuntimeRequirements(server);

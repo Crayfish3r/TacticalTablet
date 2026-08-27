@@ -18,7 +18,7 @@ import net.minecraft.sounds.SoundSource;
 import java.util.ArrayList;
 import java.util.List;
 
-public final class CustomSoundSettingsScreen extends Screen {
+public final class CustomSoundSettingsScreen extends Screen implements com.makar.tacticaltablet.tablet.client.ui.UiPaletteProvider {
 
     private static final int PANEL_WIDTH = 650;
     private static final int PANEL_HEIGHT = 310;
@@ -154,12 +154,13 @@ public final class CustomSoundSettingsScreen extends Screen {
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         UiFrameContext frame = frameClock.nextFrame(Util.getMillis(), reducedMotion());
-        try (TacticalUi.FrameScope ignored = TacticalUi.openFrame(frame)) {
+        try (TacticalUi.FrameScope ignored = TacticalUi.openFrame(frame,
+                com.makar.tacticaltablet.client.ExternalUiTheme.PALETTE)) {
             TacticalScreenBackground.render(graphics, minecraft, width, height);
             TacticalUi.drawPanel(graphics, layout.panelX(), layout.panelY(),
                     layout.panelWidth(), layout.panelHeight());
             graphics.drawCenteredString(font, title, width / 2, layout.titleY(),
-                    TacticalTheme.TEXT_PRIMARY);
+                    TacticalUi.currentPalette().textPrimary());
             TacticalUi.drawDivider(graphics, layout.contentX(), layout.dividerY(),
                     layout.contentWidth(), false);
             super.render(graphics, mouseX, mouseY, partialTick);
@@ -173,6 +174,11 @@ public final class CustomSoundSettingsScreen extends Screen {
     @Override
     public boolean isPauseScreen() {
         return false;
+    }
+
+    @Override
+    public com.makar.tacticaltablet.tablet.client.ui.UiPalette uiPalette() {
+        return com.makar.tacticaltablet.client.ExternalUiTheme.PALETTE;
     }
 
     private record Layout(int panelX, int panelY, int panelWidth, int panelHeight,

@@ -28,6 +28,7 @@ import com.makar.tacticaltablet.integration.discord.DiscordLeaderboardService;
 import com.makar.tacticaltablet.integration.discord.DiscordWebhookClient;
 import com.makar.tacticaltablet.integration.discord.LeaderboardScheduler;
 import com.makar.tacticaltablet.integration.online.OnlineWebhookService;
+import com.makar.tacticaltablet.integration.moderndamage.net.MdcBalanceStatePacket;
 import com.makar.tacticaltablet.inventory.InventoryGuard;
 import com.makar.tacticaltablet.inventory.InventoryManager;
 import com.makar.tacticaltablet.inventory.InventoryLockEvents;
@@ -104,6 +105,9 @@ public class ServerEvents {
                 ));
                 return;
             }
+
+            PacketHandler.sendToPlayer(player, MdcBalanceStatePacket.forPlayer(
+                    player, MdcBalanceStatePacket.Result.NONE));
 
             LobbyManager.showWelcomeOnJoin(player);
             PlayerProgressManager.loadPlayer(player);

@@ -25,7 +25,7 @@ public class TacticalButton extends Button implements FocusKeyProvider {
     private BooleanSupplier selected = () -> false;
     private boolean pressed;
     private boolean accentBar;
-    private int accentColor = TacticalTheme.ACCENT;
+    private Integer accentColor;
     private Runnable hoverAction = () -> { };
     private boolean wasHovered;
     private Component cachedMessage = Component.empty();
@@ -133,10 +133,11 @@ public class TacticalButton extends Button implements FocusKeyProvider {
         }
 
         TacticalUi.ControlVisualState state = resolveState(hovered, isSelected);
+        int resolvedAccent = accentColor == null ? TacticalUi.currentPalette().accent() : accentColor;
         TacticalUi.drawButton(graphics, getX(), getY(), width, height, state,
-                hoverAnimation.value(), selectedAnimation.value(), accentColor);
+                hoverAnimation.value(), selectedAnimation.value(), resolvedAccent);
         if (accentBar && active) {
-            TacticalUi.drawAccentBar(graphics, getX() + 2, getY() + 4, Math.max(0, height - 8), accentColor);
+            TacticalUi.drawAccentBar(graphics, getX() + 2, getY() + 4, Math.max(0, height - 8), resolvedAccent);
         }
         renderContent(graphics, mouseX, mouseY, partialTick);
     }
@@ -145,7 +146,7 @@ public class TacticalButton extends Button implements FocusKeyProvider {
         Font font = Minecraft.getInstance().font;
         int availableWidth = Math.max(0, width - TacticalTheme.SPACING_LARGE * 2 - (accentBar ? 3 : 0));
         Component displayMessage = displayMessage(font, availableWidth);
-        int color = active ? TacticalTheme.TEXT_PRIMARY : TacticalTheme.TEXT_DISABLED;
+        int color = active ? TacticalUi.currentPalette().textPrimary() : TacticalUi.currentPalette().textDisabled();
         graphics.drawCenteredString(font, displayMessage, getX() + width / 2,
                 getY() + (height - font.lineHeight) / 2 + 1, color);
     }

@@ -4,10 +4,12 @@ final class ChaosAutoOpenPolicy {
     private ChaosAutoOpenPolicy() { }
 
     static boolean shouldOpen(boolean requiresSelection, boolean deathOverlayActive,
-                              boolean inLobby, boolean hasTablet, boolean tabletAlreadyOpen) {
+                              boolean inLobby, boolean survivalMode,
+                              boolean hasTablet, boolean tabletAlreadyOpen) {
         return requiresSelection
                 && !deathOverlayActive
                 && inLobby
+                && survivalMode
                 && hasTablet
                 && !tabletAlreadyOpen;
     }

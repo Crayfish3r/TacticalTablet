@@ -2,6 +2,7 @@ package com.makar.tacticaltablet.client.gui;
 
 import com.makar.tacticaltablet.client.gui.component.TextureMenuButton;
 import com.makar.tacticaltablet.client.gui.render.TabletMenuRenderer;
+import com.makar.tacticaltablet.client.ExternalUiTheme;
 import com.makar.tacticaltablet.tablet.client.ui.TacticalUi;
 import com.makar.tacticaltablet.tablet.client.ui.UiFrameClock;
 import com.makar.tacticaltablet.tablet.client.ui.UiFrameContext;
@@ -20,7 +21,7 @@ import net.minecraft.util.Mth;
 import java.util.ArrayList;
 import java.util.List;
 
-public final class CustomMainMenu extends Screen {
+public final class CustomMainMenu extends Screen implements com.makar.tacticaltablet.tablet.client.ui.UiPaletteProvider {
 
     static final String SERVER_ADDRESS = "deluxewarfare.sosal.today";
 
@@ -101,7 +102,7 @@ public final class CustomMainMenu extends Screen {
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         UiFrameContext frame = frameClock.nextFrame(Util.getMillis(), reducedMotion());
-        try (TacticalUi.FrameScope ignored = TacticalUi.openFrame(frame)) {
+        try (TacticalUi.FrameScope ignored = TacticalUi.openFrame(frame, ExternalUiTheme.PALETTE)) {
             updateEntrance(frame);
             renderBackground(graphics);
             TabletMenuRenderer.render(graphics, menuLayout, MenuTextureSet.TABLET, entrance.value());
@@ -164,5 +165,10 @@ public final class CustomMainMenu extends Screen {
     @Override
     public boolean isPauseScreen() {
         return false;
+    }
+
+    @Override
+    public com.makar.tacticaltablet.tablet.client.ui.UiPalette uiPalette() {
+        return ExternalUiTheme.PALETTE;
     }
 }

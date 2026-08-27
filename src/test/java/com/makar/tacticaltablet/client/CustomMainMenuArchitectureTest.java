@@ -35,6 +35,8 @@ class CustomMainMenuArchitectureTest {
 
         assertTrue(menu.contains("deluxewarfare.sosal.today"));
         assertFalse(menu.contains("zuma.sos-al.net"));
+        assertFalse(menu.contains("http://"));
+        assertFalse(menu.contains("https://"));
         assertTrue(menu.contains("ConnectScreen.startConnecting(\n                this,"));
         assertTrue(menu.contains("ServerAddress.parseString(SERVER_ADDRESS)"));
         assertFalse(menu.contains("JoinMultiplayerScreen"));
@@ -85,8 +87,13 @@ class CustomMainMenuArchitectureTest {
         assertTrue(textureButton.contains("class TextureMenuButton extends Button"));
         assertTrue(textureButton.contains("GuiTextureRenderer.blitRegionWithAlpha"));
         assertTrue(textureButton.contains("HOVER_DURATION_SECONDS = 0.14F"));
+        assertFalse(textureButton.contains("ExternalUiTheme"));
+        assertTrue(textureButton.contains("brightness"));
         assertTrue(tabletRenderer.contains("START_SCALE = 0.92F"));
         assertTrue(tabletRenderer.contains("GuiTextureRenderer.blitRegionWithAlpha"));
+        assertFalse(tabletRenderer.contains("ExternalUiTheme"));
+        assertTrue(tabletRenderer.contains("1.0F,\n                1.0F,\n                1.0F,"));
+        assertTrue(menu.contains("graphics.blit(\n                MenuTextureSet.BACKGROUND"));
     }
 
     @Test

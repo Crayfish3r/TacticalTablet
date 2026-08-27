@@ -57,8 +57,8 @@ public final class AirdropNoticeOverlay {
         float alpha = AirdropNoticeClientState.alpha();
         int accent = HudColorPolicy.readableAccent(AirdropNoticeClientState.color());
         int borderColor = withAlpha(accent, alpha);
-        int backgroundColor = withAlpha(TacticalTheme.SURFACE, alpha * 0.94F);
-        int textColor = withAlpha(TacticalTheme.TEXT_PRIMARY, alpha);
+        int backgroundColor = withAlpha(ExternalUiTheme.SURFACE, alpha * 0.94F);
+        int textColor = withAlpha(ExternalUiTheme.TEXT_PRIMARY, alpha);
 
         TacticalUi.drawCutCornerBorder(graphics, anchor.x(), anchor.y(), anchor.width(), anchor.height(),
                 TacticalTheme.CORNER_CUT, 1, borderColor, backgroundColor);

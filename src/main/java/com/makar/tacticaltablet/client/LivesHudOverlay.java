@@ -83,7 +83,7 @@ public final class LivesHudOverlay {
                 livesText,
                 x + TEXT_OFFSET_X,
                 y + TEXT_OFFSET_Y,
-                0xFFFFFFFF,
+                ExternalUiTheme.TEXT_PRIMARY,
                 true
         );
 
@@ -107,9 +107,10 @@ public final class LivesHudOverlay {
                 playersText,
                 playersX + TEXT_OFFSET_X,
                 y + TEXT_OFFSET_Y,
-                0xFFFFFFFF,
+                ExternalUiTheme.TEXT_PRIMARY,
                 true
         );
     }
+
 }
 

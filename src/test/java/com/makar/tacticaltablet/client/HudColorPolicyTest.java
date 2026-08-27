@@ -1,6 +1,5 @@
 package com.makar.tacticaltablet.client;
 
-import com.makar.tacticaltablet.tablet.client.ui.TacticalTheme;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -9,7 +8,7 @@ class HudColorPolicyTest {
 
     @Test
     void replacesUnreadablyDarkPacketColor() {
-        assertEquals(TacticalTheme.INFO, HudColorPolicy.readableAccent(0xFF020304));
+        assertEquals(ExternalUiTheme.INFO, HudColorPolicy.readableAccent(0xFF020304));
     }
 
     @Test

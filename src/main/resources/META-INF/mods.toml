@@ -36,3 +36,12 @@ description="${mod_description}"
     versionRange="${curios_version_range}"
     ordering="AFTER"
     side="BOTH"
+
+# Runtime compatibility is checked by the isolated adapter. Keep this range broad so an
+# unsupported optional MDC build cannot prevent TacticalTablet itself from starting.
+[[dependencies.${mod_id}]]
+    modId="moderndamage"
+    mandatory=false
+    versionRange="[0,)"
+    ordering="AFTER"
+    side="BOTH"

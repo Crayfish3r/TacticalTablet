@@ -58,13 +58,13 @@ public final class KillFeedOverlay {
             int y = 8 + Math.round(entry.visualOffset());
             float alpha = entry.alpha();
             TacticalUi.drawCutCornerBorder(graphics, x, y, width, height,
-                    TacticalTheme.CORNER_CUT, 1, withAlpha(TacticalTheme.ACCENT, alpha),
-                    withAlpha(TacticalTheme.SURFACE, alpha * 0.90F));
+                    TacticalTheme.CORNER_CUT, 1, withAlpha(ExternalUiTheme.ACCENT, alpha),
+                    withAlpha(ExternalUiTheme.SURFACE, alpha * 0.90F));
             graphics.drawString(minecraft.font, format(packet, minecraft.font, width - PAD_X * 2),
-                    x + PAD_X, y + 5, withAlpha(TacticalTheme.TEXT_PRIMARY, alpha), false);
+                    x + PAD_X, y + 5, withAlpha(ExternalUiTheme.TEXT_PRIMARY, alpha), false);
             if (hasReward(packet)) {
                 graphics.drawString(minecraft.font, ellipsize(minecraft.font, rewardText(packet), width - PAD_X * 2), x + PAD_X,
-                        y + 5 + minecraft.font.lineHeight, withAlpha(TacticalTheme.WARNING, alpha), false);
+                        y + 5 + minecraft.font.lineHeight, withAlpha(ExternalUiTheme.WARNING, alpha), false);
             }
         }
     }
@@ -79,13 +79,13 @@ public final class KillFeedOverlay {
 
         MutableComponent result = Component.empty();
         if (packet.killerUuid() != null) {
-            result.append(colored(ellipsize(font, packet.killerName(), killerWidth), packet.killerColor(), TacticalTheme.ACCENT));
-            result.append(Component.literal(" → ").withStyle(Style.EMPTY.withColor(TacticalTheme.TEXT_SECONDARY & 0x00FFFFFF)));
+            result.append(colored(ellipsize(font, packet.killerName(), killerWidth), packet.killerColor(), ExternalUiTheme.ACCENT));
+            result.append(Component.literal(" → ").withStyle(Style.EMPTY.withColor(ExternalUiTheme.TEXT_SECONDARY & 0x00FFFFFF)));
         }
-        result.append(colored(ellipsize(font, packet.victimName(), victimWidth), packet.victimColor(), TacticalTheme.TEXT_PRIMARY));
+        result.append(colored(ellipsize(font, packet.victimName(), victimWidth), packet.victimColor(), ExternalUiTheme.TEXT_PRIMARY));
         if (!suffix.isBlank()) {
             result.append(Component.literal("  " + suffix)
-                    .withStyle(Style.EMPTY.withColor(TacticalTheme.TEXT_SECONDARY & 0x00FFFFFF)));
+                    .withStyle(Style.EMPTY.withColor(ExternalUiTheme.TEXT_SECONDARY & 0x00FFFFFF)));
         }
         return result;
     }

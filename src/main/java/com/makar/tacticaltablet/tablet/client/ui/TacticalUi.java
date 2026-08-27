@@ -13,6 +13,9 @@ import java.util.Objects;
 public final class TacticalUi {
     private static final ThreadLocal<Deque<UiFrameContext>> FRAME_CONTEXTS =
             ThreadLocal.withInitial(ArrayDeque::new);
+    private static final ThreadLocal<Deque<UiPalette>> PALETTE_CONTEXTS =
+            ThreadLocal.withInitial(ArrayDeque::new);
+    private static final UiPalette DEFAULT_PALETTE = UiPalette.tabletDefault();
     private static final ThreadLocal<UiFrameClock> LEGACY_CLOCK =
             ThreadLocal.withInitial(UiFrameClock::new);
     private static final ThreadLocal<UiFrameContext> LEGACY_CONTEXT = new ThreadLocal<>();
@@ -42,11 +45,20 @@ public final class TacticalUi {
 
     /** Opens a frame scope; nested tactical renderers reuse the outer context. */
     public static FrameScope openFrame(UiFrameContext requestedContext) {
+        return openFrame(requestedContext, DEFAULT_PALETTE);
+    }
+
+    /** Opens a frame with a color palette; nested renderers inherit the outer palette. */
+    public static FrameScope openFrame(UiFrameContext requestedContext, UiPalette requestedPalette) {
         Objects.requireNonNull(requestedContext, "requestedContext");
+        Objects.requireNonNull(requestedPalette, "requestedPalette");
         Deque<UiFrameContext> contexts = FRAME_CONTEXTS.get();
+        Deque<UiPalette> palettes = PALETTE_CONTEXTS.get();
         UiFrameContext effectiveContext = contexts.isEmpty() ? requestedContext : contexts.peek();
+        UiPalette effectivePalette = palettes.isEmpty() ? requestedPalette : palettes.peek();
         contexts.push(effectiveContext);
-        return new FrameScope(contexts);
+        palettes.push(effectivePalette);
+        return new FrameScope(contexts, palettes);
     }
 
     public static UiFrameContext currentFrame() {
@@ -56,9 +68,15 @@ public final class TacticalUi {
         return legacy == null ? UiFrameContext.INITIAL : legacy;
     }
 
+    public static UiPalette currentPalette() {
+        Deque<UiPalette> palettes = PALETTE_CONTEXTS.get();
+        return palettes.isEmpty() ? DEFAULT_PALETTE : palettes.peek();
+    }
+
     public static void drawBackdrop(GuiGraphics graphics, int width, int height) {
         if (width <= 0 || height <= 0) return;
-        graphics.fillGradient(0, 0, width, height, 0xE3070C12, TacticalTheme.BACKDROP);
+        graphics.fillGradient(0, 0, width, height, withAlpha(currentPalette().surface(), 0xE3),
+                currentPalette().backdrop());
     }
 
     public static void fillCutCornerRect(GuiGraphics graphics, int x, int y, int width, int height,
@@ -87,19 +105,21 @@ public final class TacticalUi {
     public static void drawPanel(GuiGraphics graphics, int x, int y, int width, int height) {
         if (width <= 0 || height <= 0) return;
         drawSoftShadow(graphics, x, y, width, height);
+        UiPalette palette = currentPalette();
         drawCutCornerBorder(graphics, x, y, width, height, TacticalTheme.CORNER_CUT,
-                TacticalTheme.BORDER_WIDTH, TacticalTheme.BORDER, TacticalTheme.SURFACE);
+                TacticalTheme.BORDER_WIDTH, palette.border(), palette.surface());
     }
 
     public static void drawCard(GuiGraphics graphics, int x, int y, int width, int height,
                                 ControlVisualState state, int accent, float transition) {
         if (width <= 0 || height <= 0) return;
         float amount = clamp01(transition);
-        int base = !state.enabled() ? TacticalTheme.SURFACE_DISABLED : TacticalTheme.SURFACE_RAISED;
-        int target = state.selected() ? TacticalTheme.SURFACE_SELECTED : TacticalTheme.SURFACE_HOVER;
+        UiPalette palette = currentPalette();
+        int base = !state.enabled() ? palette.surfaceDisabled() : palette.surfaceRaised();
+        int target = state.selected() ? palette.surfaceSelected() : palette.surfaceHover();
         int fill = !state.emphasized() ? base : lerpArgb(base, target, amount);
-        int border = !state.enabled() ? TacticalTheme.BORDER_DISABLED
-                : lerpArgb(TacticalTheme.BORDER, accent, amount);
+        int border = !state.enabled() ? palette.borderDisabled()
+                : lerpArgb(palette.border(), accent, amount);
         drawCutCornerBorder(graphics, x, y, width, height, TacticalTheme.CORNER_CUT,
                 TacticalTheme.BORDER_WIDTH, border, fill);
         if (state.focused() && state.enabled()) drawFocusRing(graphics, x, y, width, height, accent);
@@ -115,16 +135,17 @@ public final class TacticalUi {
                                   ControlVisualState state, float hover, float selected, int accent) {
         if (width <= 0 || height <= 0) return;
         float emphasis = Math.max(clamp01(hover), clamp01(selected));
+        UiPalette palette = currentPalette();
         int fill;
         int border;
         if (!state.enabled()) {
-            fill = TacticalTheme.SURFACE_DISABLED;
-            border = TacticalTheme.BORDER_DISABLED;
+            fill = palette.surfaceDisabled();
+            border = palette.borderDisabled();
         } else {
-            int target = state.pressed() ? TacticalTheme.ACCENT_DARK
-                    : state.selected() ? TacticalTheme.SURFACE_SELECTED : TacticalTheme.SURFACE_HOVER;
-            fill = lerpArgb(TacticalTheme.SURFACE_RAISED, target, emphasis);
-            border = lerpArgb(TacticalTheme.BORDER, accent, emphasis);
+            int target = state.pressed() ? palette.accentDark()
+                    : state.selected() ? palette.surfaceSelected() : palette.surfaceHover();
+            fill = lerpArgb(palette.surfaceRaised(), target, emphasis);
+            border = lerpArgb(palette.border(), accent, emphasis);
         }
         drawCutCornerBorder(graphics, x, y, width, height, TacticalTheme.CORNER_CUT,
                 TacticalTheme.BORDER_WIDTH, border, fill);
@@ -139,8 +160,8 @@ public final class TacticalUi {
 
     public static void drawDivider(GuiGraphics graphics, int x, int y, int length, boolean vertical) {
         if (length <= 0) return;
-        if (vertical) graphics.fill(x, y, x + 1, y + length, TacticalTheme.BORDER);
-        else graphics.fill(x, y, x + length, y + 1, TacticalTheme.BORDER);
+        if (vertical) graphics.fill(x, y, x + 1, y + length, currentPalette().border());
+        else graphics.fill(x, y, x + length, y + 1, currentPalette().border());
     }
 
     public static void drawBadge(GuiGraphics graphics, int x, int y, int width, int height, int color) {
@@ -152,7 +173,8 @@ public final class TacticalUi {
     public static void drawProgressBar(GuiGraphics graphics, int x, int y, int width, int height,
                                        float progress, int color) {
         if (width <= 0 || height <= 0) return;
-        fillCutCornerRect(graphics, x, y, width, height, Math.min(2, height / 2), TacticalTheme.SURFACE_DISABLED);
+        fillCutCornerRect(graphics, x, y, width, height, Math.min(2, height / 2),
+                currentPalette().surfaceDisabled());
         int filled = Math.round(width * clamp01(progress));
         if (filled > 0) fillCutCornerRect(graphics, x, y, filled, height,
                 Math.min(2, Math.min(filled, height) / 2), color);
@@ -165,9 +187,9 @@ public final class TacticalUi {
     public static void drawSoftShadow(GuiGraphics graphics, int x, int y, int width, int height) {
         if (width <= 0 || height <= 0) return;
         fillCutCornerRect(graphics, x + 3, y + 4, width, height, TacticalTheme.CORNER_CUT,
-                withAlpha(TacticalTheme.SHADOW, 0x28));
+                withAlpha(currentPalette().shadow(), 0x28));
         fillCutCornerRect(graphics, x + 2, y + 2, width, height, TacticalTheme.CORNER_CUT,
-                withAlpha(TacticalTheme.SHADOW, 0x38));
+                withAlpha(currentPalette().shadow(), 0x38));
     }
 
     public static void drawFocusRing(GuiGraphics graphics, int x, int y, int width, int height, int color) {
@@ -242,10 +264,12 @@ public final class TacticalUi {
 
     public static final class FrameScope implements AutoCloseable {
         private final Deque<UiFrameContext> contexts;
+        private final Deque<UiPalette> palettes;
         private boolean closed;
 
-        private FrameScope(Deque<UiFrameContext> contexts) {
+        private FrameScope(Deque<UiFrameContext> contexts, Deque<UiPalette> palettes) {
             this.contexts = contexts;
+            this.palettes = palettes;
         }
 
         @Override
@@ -253,8 +277,11 @@ public final class TacticalUi {
             if (closed) return;
             closed = true;
             if (contexts.isEmpty()) throw new IllegalStateException("Unbalanced UI frame scope");
+            if (palettes.isEmpty()) throw new IllegalStateException("Unbalanced UI palette scope");
             contexts.pop();
+            palettes.pop();
             if (contexts.isEmpty()) FRAME_CONTEXTS.remove();
+            if (palettes.isEmpty()) PALETTE_CONTEXTS.remove();
         }
     }
 }

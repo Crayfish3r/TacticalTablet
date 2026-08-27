@@ -22,7 +22,7 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 
-public final class FilteredKeyBindsScreen extends Screen {
+public final class FilteredKeyBindsScreen extends Screen implements com.makar.tacticaltablet.tablet.client.ui.UiPaletteProvider {
 
     private static final int MAX_PANEL_WIDTH = 820;
     private static final int MAX_PANEL_HEIGHT = 540;
@@ -68,7 +68,7 @@ public final class FilteredKeyBindsScreen extends Screen {
                         Component.translatable("controls.resetAll"),
                         ignored -> resetAllVisible()
                 )
-                .withAccentColor(TacticalTheme.WARNING)
+                .withAccentColor(com.makar.tacticaltablet.client.ExternalUiTheme.WARNING)
                 .withFocusKey("keybinds.reset_all");
         addRenderableWidget(resetAllButton);
         addRenderableWidget(TacticalButton.compact(
@@ -131,12 +131,13 @@ public final class FilteredKeyBindsScreen extends Screen {
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         UiFrameContext frame = frameClock.nextFrame(Util.getMillis(), reducedMotion());
-        try (TacticalUi.FrameScope ignored = TacticalUi.openFrame(frame)) {
+        try (TacticalUi.FrameScope ignored = TacticalUi.openFrame(frame,
+                com.makar.tacticaltablet.client.ExternalUiTheme.PALETTE)) {
             TacticalScreenBackground.render(graphics, minecraft, width, height);
             TacticalUi.drawPanel(graphics, layout.panelX(), layout.panelY(),
                     layout.panelWidth(), layout.panelHeight());
             graphics.drawCenteredString(font, title, width / 2, layout.titleY(),
-                    TacticalTheme.TEXT_PRIMARY);
+                    TacticalUi.currentPalette().textPrimary());
             TacticalUi.drawDivider(graphics, layout.contentX(), layout.dividerY(),
                     layout.contentWidth(), false);
             renderRows(graphics, mouseX, mouseY);
@@ -155,7 +156,7 @@ public final class FilteredKeyBindsScreen extends Screen {
                                 || y > layout.viewportY() + layout.viewportHeight()) continue;
                         if (row.categoryTitle() != null) {
                             graphics.drawString(font, row.categoryTitle(), layout.contentX() + 4,
-                                    y + 7, TacticalTheme.ACCENT, false);
+                                    y + 7, TacticalUi.currentPalette().accent(), false);
                             TacticalUi.drawDivider(graphics, layout.contentX() + 4,
                                     y + CATEGORY_HEIGHT - 2, layout.contentWidth() - 8, false);
                         } else {
@@ -172,8 +173,8 @@ public final class FilteredKeyBindsScreen extends Screen {
         boolean rowHovered = inside(mouseX, mouseY, rowX, y, rowWidth, row.height());
         TacticalUi.drawCutCornerBorder(graphics, rowX, y, rowWidth, row.height(),
                 TacticalTheme.CORNER_CUT, 1,
-                rowHovered ? TacticalTheme.BORDER_HOVER : TacticalTheme.BORDER,
-                rowHovered ? TacticalTheme.SURFACE_HOVER : TacticalTheme.SURFACE_RAISED);
+                rowHovered ? TacticalUi.currentPalette().borderHover() : TacticalUi.currentPalette().border(),
+                rowHovered ? TacticalUi.currentPalette().surfaceHover() : TacticalUi.currentPalette().surfaceRaised());
 
         int actionY = y + 3;
         int actionHeight = TacticalTheme.CONTROL_HEIGHT_COMPACT;
@@ -181,11 +182,11 @@ public final class FilteredKeyBindsScreen extends Screen {
         int bindingX = resetX - ACTION_GAP - BINDING_WIDTH;
         int labelX = rowX + 8;
         graphics.drawString(font, binding.name(), labelX, y + 6,
-                TacticalTheme.TEXT_PRIMARY, false);
+                TacticalUi.currentPalette().textPrimary(), false);
         int descriptionY = y + 6 + font.lineHeight + 2;
         for (FormattedCharSequence line : row.descriptionLines()) {
             graphics.drawString(font, line, labelX, descriptionY,
-                    TacticalTheme.TEXT_SECONDARY, false);
+                    TacticalUi.currentPalette().textSecondary(), false);
             descriptionY += font.lineHeight + DESCRIPTION_LINE_SPACING;
         }
 
@@ -197,22 +198,22 @@ public final class FilteredKeyBindsScreen extends Screen {
         boolean conflict = hasConflict(binding.mapping());
 
         drawAction(graphics, bindingX, actionY, BINDING_WIDTH, actionHeight,
-                bindingHovered, selected, conflict ? TacticalTheme.DANGER : TacticalTheme.ACCENT);
+                bindingHovered, selected, conflict ? TacticalUi.currentPalette().danger() : TacticalUi.currentPalette().accent());
         Component keyMessage = selected
                 ? Component.translatable("screen.tacticaltablet.keybind.press_key")
                 : binding.mapping().getTranslatedKeyMessage();
         graphics.drawCenteredString(font, keyMessage, bindingX + BINDING_WIDTH / 2,
                 actionY + (actionHeight - font.lineHeight) / 2 + 1,
-                conflict ? TacticalTheme.DANGER : TacticalTheme.TEXT_PRIMARY);
+                conflict ? TacticalUi.currentPalette().danger() : TacticalUi.currentPalette().textPrimary());
 
         int resetAccent = binding.mapping().isDefault()
-                ? TacticalTheme.BORDER_DISABLED : TacticalTheme.WARNING;
+                ? TacticalUi.currentPalette().borderDisabled() : TacticalUi.currentPalette().warning();
         drawAction(graphics, resetX, actionY, RESET_WIDTH, actionHeight,
                 resetHovered, false, resetAccent);
         graphics.drawCenteredString(font, Component.translatable("controls.reset"),
                 resetX + RESET_WIDTH / 2,
                 actionY + (actionHeight - font.lineHeight) / 2 + 1,
-                binding.mapping().isDefault() ? TacticalTheme.TEXT_DISABLED : TacticalTheme.TEXT_PRIMARY);
+                binding.mapping().isDefault() ? TacticalUi.currentPalette().textDisabled() : TacticalUi.currentPalette().textPrimary());
     }
 
     private static void drawAction(GuiGraphics graphics, int x, int y, int width, int height,
@@ -241,9 +242,9 @@ public final class FilteredKeyBindsScreen extends Screen {
         int travel = Math.max(0, trackHeight - thumbHeight);
         int thumbY = layout.viewportY() + Math.round(travel * (scrollOffset / (float) maxScroll));
         graphics.fill(trackX, layout.viewportY(), trackX + 2,
-                layout.viewportY() + trackHeight, TacticalTheme.BORDER_DISABLED);
+                layout.viewportY() + trackHeight, TacticalUi.currentPalette().borderDisabled());
         graphics.fill(trackX, thumbY, trackX + 2, thumbY + thumbHeight,
-                TacticalTheme.ACCENT_MUTED);
+                TacticalUi.currentPalette().accentMuted());
     }
 
     @Override
@@ -379,6 +380,11 @@ public final class FilteredKeyBindsScreen extends Screen {
                                    List<FormattedCharSequence> descriptionLines) {
             return new Row(y, height, null, binding, List.copyOf(descriptionLines));
         }
+    }
+
+    @Override
+    public com.makar.tacticaltablet.tablet.client.ui.UiPalette uiPalette() {
+        return com.makar.tacticaltablet.client.ExternalUiTheme.PALETTE;
     }
 
     private record Layout(int panelX, int panelY, int panelWidth, int panelHeight,

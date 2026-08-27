@@ -16,7 +16,7 @@ import java.util.List;
 
 public final class DeathScreenOverlay extends Screen {
 
-    private static final int TEXT_COLOR = 0xFFFF3333;
+    private static final int TEXT_COLOR = ExternalUiTheme.DANGER;
     private static final long FADE_IN_MS = 350L;
     private static final ResourceLocation SAD_THROMBONE = new ResourceLocation(TacticalTabletMod.MODID, "sad_thrombone");
 

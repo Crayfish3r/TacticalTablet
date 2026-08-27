@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import java.util.List;
 
 class HudAnchorManagerTest {
 
@@ -49,6 +50,23 @@ class HudAnchorManagerTest {
             assertInside(panel, viewport[0], viewport[1]);
             assertFalse(panel.intersects(hint));
             assertTrue(panel.y() + panel.height() < hint.y());
+        }
+    }
+
+    @Test
+    void staminaBarsAvoidVanillaAndTacticalReservationsAcrossGuiScaledViewports() {
+        for (int[] viewport : new int[][]{{320, 180}, {426, 240}, {640, 360}, {960, 540}}) {
+            int width = viewport[0];
+            int height = viewport[1];
+            HudAnchorManager.Rect vanilla = new HudAnchorManager.Rect(
+                    Math.max(0, width / 2 - 101), Math.max(0, height - 70), Math.min(202, width), 70);
+            HudAnchorManager.Rect killFeed = new HudAnchorManager.Rect(Math.max(0, width - 230), 4,
+                    Math.min(230, width), 112);
+            HudAnchorManager.Rect stamina = HudAnchorManager.staminaBars(width, height, 84, 33,
+                    HudAnchorManager.Side.AUTO, 0, 0, List.of(vanilla, killFeed));
+            assertInside(stamina, width, height);
+            assertFalse(stamina.intersects(vanilla));
+            assertFalse(stamina.intersects(killFeed));
         }
     }
 

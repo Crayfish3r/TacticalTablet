@@ -4,6 +4,9 @@ import com.makar.tacticaltablet.airdrop.net.AirdropNoticePacket;
 import com.makar.tacticaltablet.airdrop.net.AirdropSmokeStatePacket;
 import com.makar.tacticaltablet.clan.*;
 import com.makar.tacticaltablet.prefix.PrefixListPacket;
+import com.makar.tacticaltablet.integration.moderndamage.net.MdcBalanceRequestPacket;
+import com.makar.tacticaltablet.integration.moderndamage.net.MdcBalanceStatePacket;
+import com.makar.tacticaltablet.integration.moderndamage.net.MdcBalanceUpdatePacket;
 import net.minecraftforge.network.NetworkDirection;
 
 import java.util.HashSet;
@@ -34,7 +37,10 @@ public final class PacketProtocol {
             entry(30, ChaosStatePacket.class, NetworkDirection.PLAY_TO_CLIENT),
             entry(31, TabletMatchSetupStatePacket.class, NetworkDirection.PLAY_TO_CLIENT),
             entry(32, ContractSelectionTimerPacket.class, NetworkDirection.PLAY_TO_CLIENT),
-            entry(33, SpectatorHudStatePacket.class, NetworkDirection.PLAY_TO_CLIENT)
+            entry(33, SpectatorHudStatePacket.class, NetworkDirection.PLAY_TO_CLIENT),
+            entry(34, MdcBalanceRequestPacket.class, NetworkDirection.PLAY_TO_SERVER),
+            entry(35, MdcBalanceStatePacket.class, NetworkDirection.PLAY_TO_CLIENT),
+            entry(36, MdcBalanceUpdatePacket.class, NetworkDirection.PLAY_TO_SERVER)
     );
 
     private PacketProtocol() { }

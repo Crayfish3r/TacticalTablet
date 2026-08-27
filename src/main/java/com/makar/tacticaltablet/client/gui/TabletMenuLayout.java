@@ -16,11 +16,11 @@ public record TabletMenuLayout(
 
     public static final int BUTTON_COUNT = 4;
 
-    private static final float MAIN_WIDTH_RATIO = 0.55F;
-    private static final float MAIN_HEIGHT_RATIO = 0.52F;
+    private static final float MAIN_WIDTH_RATIO = 0.4125F;
+    private static final float MAIN_HEIGHT_RATIO = 0.39F;
     private static final float MAIN_TOP_RATIO = 0.395F;
-    private static final float PAUSE_WIDTH_RATIO = 0.62F;
-    private static final float PAUSE_HEIGHT_RATIO = 0.72F;
+    private static final float PAUSE_WIDTH_RATIO = 0.465F;
+    private static final float PAUSE_HEIGHT_RATIO = 0.54F;
     private static final int SCREEN_MARGIN = 8;
     private static final int FIRST_BUTTON_TEXTURE_Y = 70;
     private static final int BUTTON_TEXTURE_STEP = 95;

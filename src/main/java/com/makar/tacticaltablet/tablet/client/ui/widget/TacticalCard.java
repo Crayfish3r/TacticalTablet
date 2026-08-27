@@ -23,7 +23,7 @@ public final class TacticalCard extends Button implements FocusKeyProvider {
             new AnimatedFloat(0.0F, TacticalTheme.HOVER_DURATION_SECONDS);
     private BooleanSupplier selected = () -> false;
     private TacticalIconButton.IconRegion icon;
-    private int accentColor = TacticalTheme.ACCENT;
+    private Integer accentColor;
     private boolean pressed;
     private String focusKey = "";
 
@@ -105,8 +105,9 @@ public final class TacticalCard extends Button implements FocusKeyProvider {
         TacticalUi.ControlVisualState state = new TacticalUi.ControlVisualState(
                 active, hovered, isFocused(), pressed && (hovered || isFocused()), isSelected);
         int visualY = getY() - (hovered && active ? Math.round(emphasis.value()) : 0);
-        TacticalUi.drawCard(graphics, getX(), visualY, width, height, state, accentColor, emphasis.value());
-        TacticalUi.drawAccentBar(graphics, getX() + 2, visualY + 4, Math.max(0, height - 8), accentColor);
+        int resolvedAccent = accentColor == null ? TacticalUi.currentPalette().accent() : accentColor;
+        TacticalUi.drawCard(graphics, getX(), visualY, width, height, state, resolvedAccent, emphasis.value());
+        TacticalUi.drawAccentBar(graphics, getX() + 2, visualY + 4, Math.max(0, height - 8), resolvedAccent);
 
         int contentX = getX() + TacticalTheme.SPACING_LARGE;
         if (icon != null) {
@@ -125,9 +126,9 @@ public final class TacticalCard extends Button implements FocusKeyProvider {
         try (ScissorScope ignored = ScissorScope.open(
                 graphics, contentX, visualY + 1, textWidth, Math.max(1, height - 2))) {
             graphics.drawString(font, title, textX, titleY,
-                    active ? TacticalTheme.TEXT_PRIMARY : TacticalTheme.TEXT_DISABLED, false);
+                    active ? TacticalUi.currentPalette().textPrimary() : TacticalUi.currentPalette().textDisabled(), false);
             graphics.drawString(font, subtitle, textX, titleY + font.lineHeight + 2,
-                    active ? TacticalTheme.TEXT_SECONDARY : TacticalTheme.TEXT_DISABLED, false);
+                    active ? TacticalUi.currentPalette().textSecondary() : TacticalUi.currentPalette().textDisabled(), false);
         }
     }
 }

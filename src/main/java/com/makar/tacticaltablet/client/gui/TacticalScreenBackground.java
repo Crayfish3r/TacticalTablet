@@ -4,12 +4,18 @@ import com.makar.tacticaltablet.tablet.client.ui.TacticalUi;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 
-final class TacticalScreenBackground {
+public final class TacticalScreenBackground {
 
     private TacticalScreenBackground() {
     }
 
-    static void render(GuiGraphics graphics, Minecraft minecraft, int width, int height) {
+    public static void render(GuiGraphics graphics, Minecraft minecraft, int width, int height) {
+        renderBase(graphics, minecraft, width, height);
+        TacticalUi.drawBackdrop(graphics, width, height);
+    }
+
+    /** Draws only the unchanged menu background; in-world screens remain transparent. */
+    public static void renderBase(GuiGraphics graphics, Minecraft minecraft, int width, int height) {
         if (minecraft.level == null) {
             float coverScale = Math.max(
                     width / (float) MenuTextureSet.BACKGROUND_WIDTH,
@@ -31,6 +37,5 @@ final class TacticalScreenBackground {
                     MenuTextureSet.BACKGROUND_HEIGHT
             );
         }
-        TacticalUi.drawBackdrop(graphics, width, height);
     }
 }

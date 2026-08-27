@@ -2,6 +2,7 @@ package com.makar.tacticaltablet.client.gui;
 
 import com.makar.tacticaltablet.client.gui.component.TextureMenuButton;
 import com.makar.tacticaltablet.client.gui.render.TabletMenuRenderer;
+import com.makar.tacticaltablet.client.ExternalUiTheme;
 import com.makar.tacticaltablet.tablet.client.ui.TacticalUi;
 import com.makar.tacticaltablet.tablet.client.ui.UiFrameClock;
 import com.makar.tacticaltablet.tablet.client.ui.UiFrameContext;
@@ -16,7 +17,7 @@ import net.minecraft.util.Mth;
 import java.util.ArrayList;
 import java.util.List;
 
-public final class CustomPauseScreen extends Screen {
+public final class CustomPauseScreen extends Screen implements com.makar.tacticaltablet.tablet.client.ui.UiPaletteProvider {
 
     private static final float ENTRANCE_DURATION_SECONDS = 0.30F;
     private static final float BUTTON_STAGGER = 0.08F;
@@ -100,7 +101,7 @@ public final class CustomPauseScreen extends Screen {
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         UiFrameContext frame = frameClock.nextFrame(Util.getMillis(), reducedMotion());
-        try (TacticalUi.FrameScope ignored = TacticalUi.openFrame(frame)) {
+        try (TacticalUi.FrameScope ignored = TacticalUi.openFrame(frame, ExternalUiTheme.PALETTE)) {
             updateEntrance(frame);
             TabletMenuRenderer.render(
                     graphics,
@@ -136,5 +137,10 @@ public final class CustomPauseScreen extends Screen {
     @Override
     public boolean isPauseScreen() {
         return true;
+    }
+
+    @Override
+    public com.makar.tacticaltablet.tablet.client.ui.UiPalette uiPalette() {
+        return ExternalUiTheme.PALETTE;
     }
 }

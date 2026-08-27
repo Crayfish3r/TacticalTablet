@@ -79,9 +79,10 @@ public final class TacticalTextField extends EditBox implements FocusKeyProvider
 
     @Override
     public void renderWidget(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
-        int border = !active ? TacticalTheme.BORDER_DISABLED : error ? TacticalTheme.DANGER
-                : isFocused() ? TacticalTheme.BORDER_HOVER : TacticalTheme.BORDER;
-        int fill = active ? TacticalTheme.SURFACE_RAISED : TacticalTheme.SURFACE_DISABLED;
+        var palette = TacticalUi.currentPalette();
+        int border = !active ? palette.borderDisabled() : error ? palette.danger()
+                : isFocused() ? palette.borderHover() : palette.border();
+        int fill = active ? palette.surfaceRaised() : palette.surfaceDisabled();
         TacticalUi.drawCutCornerBorder(graphics, getX(), getY(), width, height, TacticalTheme.CORNER_CUT,
                 TacticalTheme.BORDER_WIDTH, border, fill);
 
@@ -116,7 +117,7 @@ public final class TacticalTextField extends EditBox implements FocusKeyProvider
         boolean hovered = isOverClearButton(mouseX, mouseY);
         int centerX = getX() + width - CLEAR_BUTTON_WIDTH / 2 - 2;
         int centerY = getY() + height / 2;
-        int color = hovered ? TacticalTheme.ACCENT : TacticalTheme.TEXT_SECONDARY;
+        int color = hovered ? TacticalUi.currentPalette().accent() : TacticalUi.currentPalette().textSecondary();
         for (int offset = -2; offset <= 2; offset++) {
             graphics.fill(centerX + offset, centerY + offset, centerX + offset + 1, centerY + offset + 1, color);
             graphics.fill(centerX + offset, centerY - offset, centerX + offset + 1, centerY - offset + 1, color);

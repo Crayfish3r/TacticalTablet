@@ -4,6 +4,8 @@ import com.makar.tacticaltablet.tablet.client.ui.TacticalLayout;
 import com.makar.tacticaltablet.tablet.client.ui.TacticalTheme;
 import com.makar.tacticaltablet.tablet.client.ui.TacticalUi;
 import com.makar.tacticaltablet.tablet.client.ui.UiFrameClock;
+import com.makar.tacticaltablet.tablet.client.ui.UiPalette;
+import com.makar.tacticaltablet.tablet.client.ui.UiPaletteProvider;
 import com.makar.tacticaltablet.tablet.client.ui.animation.AnimatedFloat;
 import com.makar.tacticaltablet.tablet.client.ui.render.ScissorScope;
 import net.minecraft.Util;
@@ -80,7 +82,7 @@ public class TacticalDialog extends Screen {
         confirmButton = TacticalButton.standard(bounds.right() - TacticalTheme.SPACING_LARGE - buttonWidth,
                 buttonY, buttonWidth, confirmLabel, ignored -> confirm()).withFocusKey("dialog.confirm");
         confirmButton.active = confirmEnabled.getAsBoolean();
-        if (danger) confirmButton.withAccentColor(TacticalTheme.DANGER).withAccentBar(true);
+        if (danger) confirmButton.withAccentColor(dialogPalette().danger()).withAccentBar(true);
         addRenderableWidget(cancelButton);
         addRenderableWidget(confirmButton);
         setInitialFocus(danger ? cancelButton : confirmButton);
@@ -98,7 +100,7 @@ public class TacticalDialog extends Screen {
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         try (TacticalUi.FrameScope ignored = TacticalUi.openFrame(
-                frameClock.nextFrame(Util.getMillis(), false))) {
+                frameClock.nextFrame(Util.getMillis(), false), dialogPalette())) {
             renderFrame(graphics, mouseX, mouseY, partialTick);
         }
     }
@@ -106,7 +108,8 @@ public class TacticalDialog extends Screen {
     private void renderFrame(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         confirmButton.active = confirmEnabled.getAsBoolean();
         parent.render(graphics, -1, -1, partialTick);
-        graphics.fill(0, 0, width, height, TacticalTheme.BACKDROP);
+        UiPalette palette = TacticalUi.currentPalette();
+        graphics.fill(0, 0, width, height, palette.backdrop());
         if (TacticalUi.currentFrame().reducedMotion()) appearance.snapTo(1.0F);
         else appearance.update(TacticalUi.currentFrame().deltaSeconds());
         int offset = Math.round((1.0F - appearance.value()) * APPEAR_OFFSET);
@@ -116,9 +119,9 @@ public class TacticalDialog extends Screen {
 
         TacticalUi.drawPanel(graphics, bounds.x(), panelY, bounds.width(), bounds.height());
         TacticalUi.drawAccentBar(graphics, bounds.x() + TacticalTheme.SPACING_LARGE, panelY + 12, 16,
-                danger ? TacticalTheme.DANGER : TacticalTheme.ACCENT);
+                danger ? palette.danger() : palette.accent());
         graphics.drawString(font, title, bounds.x() + TacticalTheme.SPACING_LARGE + 7, panelY + 14,
-                TacticalTheme.TEXT_PRIMARY, false);
+                palette.textPrimary(), false);
         if (bodyViewport.width() > 0 && bodyViewport.height() > 0) {
             int viewportY = bodyViewport.y() + offset;
             try (ScissorScope ignored = ScissorScope.open(
@@ -129,7 +132,7 @@ public class TacticalDialog extends Screen {
                 int end = Math.min(bodyLines.size(), bodyScrollLine + maxVisible);
                 for (int index = bodyScrollLine; index < end; index++) {
                     graphics.drawString(font, bodyLines.get(index), bodyViewport.x(), lineY,
-                            TacticalTheme.TEXT_SECONDARY, false);
+                            palette.textSecondary(), false);
                     lineY += lineStep;
                 }
             }
@@ -180,6 +183,12 @@ public class TacticalDialog extends Screen {
         Minecraft.getInstance().setScreen(parent);
         GuiEventListener restored = previousFocus.resolve(parent);
         if (restored != null) parent.setFocused(restored);
+    }
+
+    private UiPalette dialogPalette() {
+        return parent instanceof UiPaletteProvider provider
+                ? provider.uiPalette()
+                : UiPalette.tabletDefault();
     }
 
     private record FocusTarget(String key, int fallbackIndex) {

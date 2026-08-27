@@ -33,13 +33,14 @@ public final class RulesScreen extends Screen {
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         renderBackground(graphics);
-        graphics.drawCenteredString(font, title, width / 2, height / 2 - 46, 0xFFFFFFFF);
+        graphics.drawCenteredString(font, title, width / 2, height / 2 - 46,
+                com.makar.tacticaltablet.client.ExternalUiTheme.TEXT_PRIMARY);
         graphics.drawCenteredString(
                 font,
                 Component.translatable("screen.tacticaltablet.common.coming_soon"),
                 width / 2,
                 height / 2 - 10,
-                0xFFAAAAAA
+                com.makar.tacticaltablet.client.ExternalUiTheme.TEXT_SECONDARY
         );
         super.render(graphics, mouseX, mouseY, partialTick);
     }
