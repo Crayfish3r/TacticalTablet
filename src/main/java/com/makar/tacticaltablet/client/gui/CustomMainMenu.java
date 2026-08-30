@@ -23,8 +23,6 @@ import java.util.List;
 
 public final class CustomMainMenu extends Screen implements com.makar.tacticaltablet.tablet.client.ui.UiPaletteProvider {
 
-    static final String SERVER_ADDRESS = "deluxewarfare.sosal.today";
-
     private static final String SERVER_NAME = "DeluxeWarfare";
     private static final float ENTRANCE_DURATION_SECONDS = 0.34F;
     private static final float BUTTON_STAGGER = 0.08F;
@@ -89,11 +87,12 @@ public final class CustomMainMenu extends Screen implements com.makar.tacticalta
 
     private void connectToServer() {
         Minecraft minecraft = Minecraft.getInstance();
-        ServerData serverData = new ServerData(SERVER_NAME, SERVER_ADDRESS, false);
+        String serverAddress = JoinServerAddressPolicy.configuredOrDefault();
+        ServerData serverData = new ServerData(SERVER_NAME, serverAddress, false);
         ConnectScreen.startConnecting(
                 this,
                 minecraft,
-                ServerAddress.parseString(SERVER_ADDRESS),
+                ServerAddress.parseString(serverAddress),
                 serverData,
                 false
         );

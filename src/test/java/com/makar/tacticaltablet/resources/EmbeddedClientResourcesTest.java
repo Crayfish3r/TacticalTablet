@@ -112,8 +112,8 @@ class EmbeddedClientResourcesTest {
             BufferedImage button = readImage(asset(
                     "tacticaltablet/textures/gui/main_menu/button_" + name + ".png"
             ));
-            assertEquals(849, button.getWidth(), name);
-            assertEquals(71, button.getHeight(), name);
+            assertEquals(728, button.getWidth(), name);
+            assertEquals(61, button.getHeight(), name);
             assertTrue(hasPartiallyTransparentPixel(button), name);
         }
     }

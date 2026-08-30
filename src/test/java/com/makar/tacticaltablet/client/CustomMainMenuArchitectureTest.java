@@ -32,13 +32,16 @@ class CustomMainMenuArchitectureTest {
     @Test
     void playConnectsDirectlyToTheOnlyServerAndUsesTheMenuAsParent() throws IOException {
         String menu = read(CLIENT_GUI.resolve("CustomMainMenu.java"));
+        String config = read(Path.of(
+                "src/main/java/com/makar/tacticaltablet/core/TacticalTabletClientConfig.java"));
 
-        assertTrue(menu.contains("deluxewarfare.sosal.today"));
+        assertTrue(config.contains("deluxewarfare.sosal.today"));
         assertFalse(menu.contains("zuma.sos-al.net"));
         assertFalse(menu.contains("http://"));
         assertFalse(menu.contains("https://"));
+        assertTrue(menu.contains("JoinServerAddressPolicy.configuredOrDefault()"));
         assertTrue(menu.contains("ConnectScreen.startConnecting(\n                this,"));
-        assertTrue(menu.contains("ServerAddress.parseString(SERVER_ADDRESS)"));
+        assertTrue(menu.contains("ServerAddress.parseString(serverAddress)"));
         assertFalse(menu.contains("JoinMultiplayerScreen"));
         assertFalse(menu.contains("DirectJoinServerScreen"));
         assertFalse(menu.contains("OptionsScreen"));

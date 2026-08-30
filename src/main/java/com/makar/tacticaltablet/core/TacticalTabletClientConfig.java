@@ -8,7 +8,9 @@ import net.minecraftforge.fml.config.ModConfig;
 public final class TacticalTabletClientConfig {
     public enum StaminaHudSide { AUTO, LEFT, RIGHT }
 
+    public static final String DEFAULT_JOIN_SERVER_ADDRESS = "deluxewarfare.sosal.today";
     public static final ForgeConfigSpec SPEC;
+    private static final ForgeConfigSpec.ConfigValue<String> JOIN_SERVER_ADDRESS;
     public static final ForgeConfigSpec.BooleanValue MDC_STAMINA_HUD_ENABLED;
     public static final ForgeConfigSpec.EnumValue<StaminaHudSide> MDC_STAMINA_HUD_SIDE;
     public static final ForgeConfigSpec.IntValue MDC_STAMINA_HUD_X_OFFSET;
@@ -18,6 +20,12 @@ public final class TacticalTabletClientConfig {
 
     static {
         ForgeConfigSpec.Builder builder = new ForgeConfigSpec.Builder();
+        builder.push("mainMenu");
+        JOIN_SERVER_ADDRESS = builder
+                .comment("Server address used by the main-menu Join button (host or host:port).")
+                .define("joinServerAddress", DEFAULT_JOIN_SERVER_ADDRESS);
+        builder.pop();
+
         builder.push("modernDamageControl");
         MDC_STAMINA_HUD_ENABLED = builder
                 .comment("Render TacticalTablet arm and leg stamina bars when supported MDC is installed.")
@@ -42,6 +50,15 @@ public final class TacticalTabletClientConfig {
     }
 
     private TacticalTabletClientConfig() {
+    }
+
+    public static String getJoinServerAddress() {
+        return JOIN_SERVER_ADDRESS.get();
+    }
+
+    public static void setJoinServerAddress(String address) {
+        JOIN_SERVER_ADDRESS.set(address);
+        save();
     }
 
     public static void save() {

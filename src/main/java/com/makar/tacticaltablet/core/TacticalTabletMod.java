@@ -2,6 +2,7 @@ package com.makar.tacticaltablet.core;
 
 import com.makar.tacticaltablet.airdrop.AirdropCommands;
 import com.makar.tacticaltablet.airdrop.AirdropEvents;
+import com.makar.tacticaltablet.client.ClientConfigScreenRegistration;
 import com.makar.tacticaltablet.command.CoinCommand;
 import com.makar.tacticaltablet.command.CorpseTestCommand;
 import com.makar.tacticaltablet.command.DebugXPCommand;
@@ -27,11 +28,13 @@ import com.makar.tacticaltablet.tablet.net.PacketHandler;
 import com.mojang.logging.LogUtils;
 import net.minecraft.world.item.CreativeModeTabs;
 import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.event.BuildCreativeModeTabContentsEvent;
 import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.ModLoadingContext;
+import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.config.ModConfig;
 import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
@@ -62,6 +65,7 @@ public class TacticalTabletMod {
                 ModConfig.Type.CLIENT,
                 TacticalTabletClientConfig.SPEC
         );
+        DistExecutor.safeRunWhenOn(Dist.CLIENT, () -> ClientConfigScreenRegistration::register);
 
         modEventBus.addListener(this::setup);
         modEventBus.addListener(this::addCreative);
