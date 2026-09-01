@@ -5,6 +5,7 @@ import com.makar.tacticaltablet.game.MatchMode;
 import com.makar.tacticaltablet.game.MatchAdmissionManager;
 import com.makar.tacticaltablet.game.SpectatorCameraManager;
 import com.makar.tacticaltablet.game.lives.LivesManager;
+import com.makar.tacticaltablet.game.lobby.LobbyManager;
 import com.makar.tacticaltablet.voice.VoiceChatTeamManager;
 
 import net.minecraft.server.MinecraftServer;
@@ -154,6 +155,7 @@ public final class TeamMatchManager {
 
         List<ServerPlayer> players = new ArrayList<>(server.getPlayerList().getPlayers());
         players.sort((a, b) -> a.getStringUUID().compareTo(b.getStringUUID()));
+        players.removeIf(player -> !LobbyManager.isMatchParticipantCandidate(player));
 
         for (ServerPlayer player : players) {
             rememberName(player);
@@ -182,6 +184,7 @@ public final class TeamMatchManager {
         }
 
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            if (!LobbyManager.isMatchParticipantCandidate(player)) continue;
             assignClanWarPlayer(server, player);
         }
 
@@ -191,6 +194,10 @@ public final class TeamMatchManager {
 
     public static TeamId assignClanWarPlayer(MinecraftServer server, ServerPlayer player) {
         if (server == null || player == null) return null;
+        if (!LobbyManager.isMatchParticipantCandidate(player)) {
+            removeAssignment(player.getUUID());
+            return null;
+        }
         if (MatchAdmissionManager.isLateSpectator(player)) return null;
 
         rememberName(player);

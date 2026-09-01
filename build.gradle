@@ -370,7 +370,7 @@ tasks.register('verifyJarEmbeddedServerData') {
         def expected = [
                 'data/lobby/dimension/lobby.json'     : 'f20b614fc6cac9923215b3891e8932f90035a3c2dae479a147b1008c7494ad89',
                 'data/lobby/dimension_type/lobby.json': 'd1f4abba76943bcd681a9fdb1c0e558a75e4f91306586bf628967e51cb9240a5',
-                'data/lobby/structures/spawn.nbt'      : '75ed60c6143ef7ebf5fad70d5e942a09177002b4014f4b6a55c38ddcf506c61e'
+                'data/lobby/structures/spawn.nbt'      : '59f5389a2a0273e73bf153feb3fe4b01d211ee0325ad61e46a3edd5e07428a84'
         ]
         def archive = new java.util.zip.ZipFile(archiveFile.get().asFile)
         try {

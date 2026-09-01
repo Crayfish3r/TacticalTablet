@@ -18,7 +18,7 @@ import java.util.Optional;
 
 /** Installs lobby:spawn once and records the decision in dimension SavedData. */
 public final class LobbyBootstrapManager {
-    static final int CURRENT_VERSION = 1;
+    static final int CURRENT_VERSION = 2;
     static final ResourceLocation LOBBY_SPAWN_TEMPLATE = new ResourceLocation("lobby", "spawn");
     static final BlockPos LOBBY_SPAWN_ORIGIN = new BlockPos(-10, 64, -10);
     private static final Vec3i LEGACY_STRUCTURE_SIZE = new Vec3i(20, 20, 20);
@@ -45,6 +45,9 @@ public final class LobbyBootstrapManager {
                     data.version());
             return true;
         }
+        if (data.version() > 0) {
+            return migrateCasinoNpcs(lobby, data);
+        }
         Optional<StructureTemplate> template = lobby.getStructureManager().get(LOBBY_SPAWN_TEMPLATE);
         boolean hasContent = targetVolumeHasContent(lobby, template.orElse(null));
         LobbyBootstrapPolicy.Action action = LobbyBootstrapPolicy.decide(
@@ -58,11 +61,7 @@ public final class LobbyBootstrapManager {
                 yield true;
             }
             case MARK_EXISTING_CONTENT -> {
-                data.markVersion(CURRENT_VERSION);
-                TacticalTabletMod.LOGGER.info(
-                        "Lobby bootstrap migration detected existing content; recorded v{} without placing lobby:spawn",
-                        CURRENT_VERSION);
-                yield true;
+                yield migrateCasinoNpcs(lobby, data);
             }
             case PLACE_STRUCTURE -> placeAndMark(lobby, template.orElseThrow(), data);
             case FAIL_MISSING_TEMPLATE -> {
@@ -141,6 +140,33 @@ public final class LobbyBootstrapManager {
         TacticalTabletMod.LOGGER.info(
                 "Lobby bootstrap placed lobby:spawn at {} and recorded v{}",
                 LOBBY_SPAWN_ORIGIN, CURRENT_VERSION);
+        return true;
+    }
+
+    private static boolean migrateCasinoNpcs(ServerLevel lobby, LobbyBootstrapSavedData data) {
+        CasinoNpcTemplateMigration.Result result = CasinoNpcTemplateMigration.migrate(
+                lobby,
+                LOBBY_SPAWN_TEMPLATE,
+                LOBBY_SPAWN_ORIGIN
+        );
+        if (!result.successful()) {
+            TacticalTabletMod.LOGGER.error(
+                    "Lobby bootstrap v{} migration failed: {}/{} casino NPCs are present; version remains v{} for retry",
+                    CURRENT_VERSION,
+                    result.present(),
+                    result.expected(),
+                    data.version()
+            );
+            return false;
+        }
+        data.markVersion(CURRENT_VERSION);
+        TacticalTabletMod.LOGGER.info(
+                "Lobby bootstrap migrated to v{}: {}/{} casino NPCs present ({} spawned); lobby blocks were preserved",
+                CURRENT_VERSION,
+                result.present(),
+                result.expected(),
+                result.spawned()
+        );
         return true;
     }
 }

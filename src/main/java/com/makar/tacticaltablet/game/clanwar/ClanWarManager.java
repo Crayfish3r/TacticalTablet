@@ -74,6 +74,7 @@ public final class ClanWarManager {
         if (server == null) return;
 
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            if (!LobbyManager.isMatchParticipantCandidate(player)) continue;
             player.removeTag(TAG_SPECTATING);
             player.removeTag(TAG_REGROUP_PENDING);
             String clanId = ClanManager.getClanIdForPlayer(player);

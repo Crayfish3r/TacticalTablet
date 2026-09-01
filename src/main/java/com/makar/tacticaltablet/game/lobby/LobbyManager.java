@@ -1,6 +1,7 @@
 package com.makar.tacticaltablet.game.lobby;
 
 import com.makar.tacticaltablet.game.GameStateManager;
+import com.makar.tacticaltablet.casino.CasinoSessionManager;
 import com.makar.tacticaltablet.game.MatchAdmissionManager;
 import com.makar.tacticaltablet.airdrop.AirdropManager;
 import com.makar.tacticaltablet.game.clanwar.ClanWarManager;
@@ -117,7 +118,8 @@ public class LobbyManager {
                 && player.gameMode.getGameModeForPlayer() != GameType.SPECTATOR
                 && !ModerModeManager.isInModerMode(player)
                 && !LivesManager.isEliminated(player)
-                && !ClanWarManager.shouldKeepSpectating(player);
+                && !ClanWarManager.shouldKeepSpectating(player)
+                && !CasinoSessionManager.isInCasino(player);
     }
 
     public static void normalizeAfterMatch(ServerPlayer player, boolean wasParticipant) {

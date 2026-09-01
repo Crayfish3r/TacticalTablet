@@ -1,6 +1,7 @@
 package com.makar.tacticaltablet.tablet.net;
 
 import com.makar.tacticaltablet.airdrop.net.AirdropNoticePacket;
+import com.makar.tacticaltablet.casino.net.*;
 import com.makar.tacticaltablet.airdrop.net.AirdropSmokeStatePacket;
 import com.makar.tacticaltablet.clan.*;
 import com.makar.tacticaltablet.prefix.PrefixListPacket;
@@ -25,9 +26,9 @@ import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
-/** Tactical Tablet protocol registry. Protocol 40 adds the allow-listed MDC admin exchange. */
+/** Tactical Tablet protocol registry. Protocol 41 adds the server-authoritative casino exchange. */
 public final class PacketHandler {
-    public static final String VERSION = "40";
+    public static final String VERSION = "41";
 
     public static final int TABLET = 0, TABLET_STATE = 1, VOTE_MODE = 2, JOIN_TEAM = 3, VOTE_MAP = 4,
             MAP_VOTE_STATE = 5, SET_COMPETITIVE = 6, SET_CLAN_WAR = 7, CONTRACT_SELECTION_STATE = 8,
@@ -38,7 +39,9 @@ public final class PacketHandler {
             CLAN_DISBAND = 23, CLAN_REJECT_JOIN = 24, CLAN_KICK_MEMBER = 25,
             CLAN_CHANGE_COLOR = 26, PREFIX_LIST = 27, KILL_FEED = 28, VOTE_SET_MODE = 29, CHAOS_STATE = 30,
             TABLET_MATCH_SETUP_STATE = 31, CONTRACT_SELECTION_TIMER = 32, SPECTATOR_HUD_STATE = 33,
-            MDC_BALANCE_REQUEST = 34, MDC_BALANCE_STATE = 35, MDC_BALANCE_UPDATE = 36;
+            MDC_BALANCE_REQUEST = 34, MDC_BALANCE_STATE = 35, MDC_BALANCE_UPDATE = 36,
+            CASINO_OPEN_STATE = 37, CASINO_SPIN_REQUEST = 38, CASINO_SPIN_RESULT = 39,
+            CASINO_CLOSE = 40, CASINO_SPECTATOR_OPEN = 41;
 
     public static final SimpleChannel INSTANCE = NetworkRegistry.newSimpleChannel(
             new ResourceLocation("tacticaltablet", "main"), () -> VERSION, VERSION::equals, VERSION::equals);
@@ -51,7 +54,7 @@ public final class PacketHandler {
         TABLET(3, 2_000_000_000L), VOTE(6, 1_000_000_000L), CLAN_MUTATION(4, 2_000_000_000L),
         CONTRACT_SELECT(3, 2_000_000_000L), TRACKER(8, 1_000_000_000L),
         SPECTATOR(8, 1_000_000_000L), ADMIN_MAP(3, 2_000_000_000L),
-        ADMIN_MDC(3, 2_000_000_000L);
+        ADMIN_MDC(3, 2_000_000_000L), CASINO(6, 2_000_000_000L);
         private final C2SRateLimiter.Budget budget;
         C2SAction(int count, long windowNanos) { this.budget = new C2SRateLimiter.Budget(count, windowNanos); }
     }
@@ -99,6 +102,11 @@ public final class PacketHandler {
         register(MDC_BALANCE_REQUEST, MdcBalanceRequestPacket.class, MdcBalanceRequestPacket::encode, MdcBalanceRequestPacket::new, MdcBalanceRequestPacket::handle, NetworkDirection.PLAY_TO_SERVER);
         register(MDC_BALANCE_STATE, MdcBalanceStatePacket.class, MdcBalanceStatePacket::encode, MdcBalanceStatePacket::new, MdcBalanceStatePacket::handle, NetworkDirection.PLAY_TO_CLIENT);
         register(MDC_BALANCE_UPDATE, MdcBalanceUpdatePacket.class, MdcBalanceUpdatePacket::encode, MdcBalanceUpdatePacket::new, MdcBalanceUpdatePacket::handle, NetworkDirection.PLAY_TO_SERVER);
+        register(CASINO_OPEN_STATE, CasinoOpenStatePacket.class, CasinoOpenStatePacket::encode, CasinoOpenStatePacket::new, CasinoOpenStatePacket::handle, NetworkDirection.PLAY_TO_CLIENT);
+        register(CASINO_SPIN_REQUEST, CasinoSpinRequestPacket.class, CasinoSpinRequestPacket::encode, CasinoSpinRequestPacket::new, CasinoSpinRequestPacket::handle, NetworkDirection.PLAY_TO_SERVER);
+        register(CASINO_SPIN_RESULT, CasinoSpinResultPacket.class, CasinoSpinResultPacket::encode, CasinoSpinResultPacket::new, CasinoSpinResultPacket::handle, NetworkDirection.PLAY_TO_CLIENT);
+        register(CASINO_CLOSE, CasinoClosePacket.class, CasinoClosePacket::encode, CasinoClosePacket::new, CasinoClosePacket::handle, NetworkDirection.PLAY_TO_SERVER);
+        register(CASINO_SPECTATOR_OPEN, CasinoSpectatorOpenPacket.class, CasinoSpectatorOpenPacket::encode, CasinoSpectatorOpenPacket::new, CasinoSpectatorOpenPacket::handle, NetworkDirection.PLAY_TO_SERVER);
         verifyUniqueIds();
         registered = true;
     }

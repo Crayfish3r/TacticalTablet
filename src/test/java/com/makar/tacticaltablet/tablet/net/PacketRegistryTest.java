@@ -17,14 +17,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class PacketRegistryTest {
 
     @Test
-    void registryPreservesAllProtocol40IdsAndDirections() {
+    void registryPreservesAllProtocol41IdsAndDirections() {
         var entries = PacketProtocol.entries();
         Map<Class<?>, PacketProtocol.Entry> map = entries.stream()
                 .collect(java.util.stream.Collectors.toMap(PacketProtocol.Entry::packetClass, entry -> entry));
 
-        assertEquals(37, entries.size());
-        assertEquals(37, new HashSet<>(entries.stream().map(PacketProtocol.Entry::id).toList()).size());
-        assertEquals(IntStream.range(0, 37).boxed().toList(), entries.stream().map(PacketProtocol.Entry::id).toList());
+        assertEquals(42, entries.size());
+        assertEquals(42, new HashSet<>(entries.stream().map(PacketProtocol.Entry::id).toList()).size());
+        assertEquals(IntStream.range(0, 42).boxed().toList(), entries.stream().map(PacketProtocol.Entry::id).toList());
         assertEquals(List.of(
                 TabletPacket.class, TabletStatePacket.class, VoteModePacket.class, JoinTeamPacket.class, VoteMapPacket.class,
                 MapVoteStatePacket.class, SetCompetitivePacket.class, SetClanWarPacket.class, ContractSelectionStatePacket.class,
@@ -40,7 +40,12 @@ class PacketRegistryTest {
                 ContractSelectionTimerPacket.class, SpectatorHudStatePacket.class,
                 com.makar.tacticaltablet.integration.moderndamage.net.MdcBalanceRequestPacket.class,
                 com.makar.tacticaltablet.integration.moderndamage.net.MdcBalanceStatePacket.class,
-                com.makar.tacticaltablet.integration.moderndamage.net.MdcBalanceUpdatePacket.class
+                com.makar.tacticaltablet.integration.moderndamage.net.MdcBalanceUpdatePacket.class,
+                com.makar.tacticaltablet.casino.net.CasinoOpenStatePacket.class,
+                com.makar.tacticaltablet.casino.net.CasinoSpinRequestPacket.class,
+                com.makar.tacticaltablet.casino.net.CasinoSpinResultPacket.class,
+                com.makar.tacticaltablet.casino.net.CasinoClosePacket.class,
+                com.makar.tacticaltablet.casino.net.CasinoSpectatorOpenPacket.class
         ), entries.stream().map(PacketProtocol.Entry::packetClass).toList());
         assertEquals(19, map.get(com.makar.tacticaltablet.clan.ClanCreatePacket.class).id());
         assertEquals(18, map.get(com.makar.tacticaltablet.clan.ClanListPacket.class).id());
@@ -66,7 +71,9 @@ class PacketRegistryTest {
                 NetworkDirection.PLAY_TO_SERVER, NetworkDirection.PLAY_TO_CLIENT, NetworkDirection.PLAY_TO_CLIENT,
                 NetworkDirection.PLAY_TO_CLIENT, NetworkDirection.PLAY_TO_CLIENT,
                 NetworkDirection.PLAY_TO_SERVER, NetworkDirection.PLAY_TO_CLIENT,
-                NetworkDirection.PLAY_TO_SERVER
+                NetworkDirection.PLAY_TO_SERVER,
+                NetworkDirection.PLAY_TO_CLIENT, NetworkDirection.PLAY_TO_SERVER, NetworkDirection.PLAY_TO_CLIENT,
+                NetworkDirection.PLAY_TO_SERVER, NetworkDirection.PLAY_TO_SERVER
         ), entries.stream().map(PacketProtocol.Entry::direction).toList());
         PacketProtocol.verify();
     }
@@ -86,7 +93,9 @@ class PacketRegistryTest {
                 PacketHandler.KILL_FEED, PacketHandler.VOTE_SET_MODE, PacketHandler.CHAOS_STATE,
                 PacketHandler.TABLET_MATCH_SETUP_STATE, PacketHandler.CONTRACT_SELECTION_TIMER,
                 PacketHandler.SPECTATOR_HUD_STATE, PacketHandler.MDC_BALANCE_REQUEST,
-                PacketHandler.MDC_BALANCE_STATE, PacketHandler.MDC_BALANCE_UPDATE
+                PacketHandler.MDC_BALANCE_STATE, PacketHandler.MDC_BALANCE_UPDATE,
+                PacketHandler.CASINO_OPEN_STATE, PacketHandler.CASINO_SPIN_REQUEST,
+                PacketHandler.CASINO_SPIN_RESULT, PacketHandler.CASINO_CLOSE, PacketHandler.CASINO_SPECTATOR_OPEN
         );
 
         assertEquals(PacketProtocol.entries().stream().map(PacketProtocol.Entry::id).toList(), constants);

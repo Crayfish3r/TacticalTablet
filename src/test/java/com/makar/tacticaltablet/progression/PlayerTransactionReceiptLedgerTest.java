@@ -259,6 +259,23 @@ class PlayerTransactionReceiptLedgerTest {
         assertEquals(16, third.coins());
     }
 
+    @Test
+    void casinoReceiptMayPreserveBalanceAndSurvivesNormalization() {
+        AppliedTransactionReceipt receipt = new AppliedTransactionReceipt();
+        receipt.transactionId = UUID.fromString("77777777-7777-7777-7777-777777777777").toString();
+        receipt.operationType = "casino_spin";
+        receipt.appliedAt = CLOCK.millis();
+        receipt.expectedOldBalance = 250;
+        receipt.newBalance = 250;
+        receipt.payloadHash = "250|COINS|250||false";
+
+        List<AppliedTransactionReceipt> normalized =
+                PlayerTransactionReceiptLedger.normalizeReceipts(List.of(receipt));
+        assertEquals(1, normalized.size());
+
+        receipt.operationType = "set_reward";
+        assertTrue(PlayerTransactionReceiptLedger.normalizeReceipts(List.of(receipt)).isEmpty());
+    }
     private static TestState reload(TestState state) {
         TestState loaded = GSON.fromJson(GSON.toJson(state), TestState.class);
         loaded.receipts(PlayerTransactionReceiptLedger.normalizeReceipts(loaded.receipts()));

@@ -2,6 +2,7 @@ package com.makar.tacticaltablet.game.team;
 
 import com.makar.tacticaltablet.admin.TestModeManager;
 import com.makar.tacticaltablet.game.MatchMode;
+import com.makar.tacticaltablet.game.lobby.LobbyManager;
 
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
@@ -55,14 +56,18 @@ public final class VoteManager {
     }
 
     public static boolean vote(ServerPlayer player, MatchMode mode) {
-        if (player == null || mode == null || !active) return false;
-        int online = player.server == null ? 0 : player.server.getPlayerList().getPlayerCount();
+        if (player == null || mode == null || !active || !LobbyManager.isMatchParticipantCandidate(player)) return false;
+        int online = participantCount(player.server);
         if (!mode.isSelectableFor(online, TestModeManager.canBypassTeamModeMinimums())) {
             return false;
         }
 
         votes.put(player.getUUID(), mode);
         return true;
+    }
+
+    public static void removeVote(ServerPlayer player) {
+        if (player != null) votes.remove(player.getUUID());
     }
 
     public static MatchMode getVote(ServerPlayer player) {
@@ -90,7 +95,7 @@ public final class VoteManager {
         int best = 0;
         List<MatchMode> leaders = new ArrayList<>();
 
-        int online = server == null ? 0 : server.getPlayerList().getPlayerCount();
+        int online = participantCount(server);
         for (MatchMode mode : MatchMode.selectableModes(online, TestModeManager.canBypassTeamModeMinimums())) {
             int count = counts.getOrDefault(mode, 0);
             if (count > best) {
@@ -110,12 +115,20 @@ public final class VoteManager {
     }
 
     private static MatchMode sanitizeForOnlineCount(MinecraftServer server, MatchMode selected) {
-        int online = server == null ? 0 : server.getPlayerList().getPlayerCount();
+        int online = participantCount(server);
         return MatchMode.sanitizeForOnlineCount(online, selected, TestModeManager.canBypassTeamModeMinimums());
     }
 
     public static int getVoteOptionsMask(MinecraftServer server) {
-        int online = server == null ? 0 : server.getPlayerList().getPlayerCount();
+        int online = participantCount(server);
         return MatchMode.voteMaskFor(online, TestModeManager.canBypassTeamModeMinimums());
+    }
+    private static int participantCount(MinecraftServer server) {
+        if (server == null) return 0;
+        int count = 0;
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            if (LobbyManager.isMatchParticipantCandidate(player)) count++;
+        }
+        return count;
     }
 }

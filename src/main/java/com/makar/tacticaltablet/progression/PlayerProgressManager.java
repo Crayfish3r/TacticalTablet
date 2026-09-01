@@ -1,5 +1,8 @@
 package com.makar.tacticaltablet.progression;
 
+import com.makar.tacticaltablet.casino.CasinoRewardKind;
+import com.makar.tacticaltablet.casino.CasinoSpinTable;
+
 import com.makar.tacticaltablet.core.TacticalTabletMod;
 import com.makar.tacticaltablet.clan.transaction.CreateClanTransaction;
 import com.makar.tacticaltablet.clan.transaction.RepositoryResult;
@@ -35,6 +38,8 @@ import java.util.function.Supplier;
 public class PlayerProgressManager {
 
     private static final int DATA_VERSION = 11;
+    private static final String CASINO_OPERATION = "casino_spin";
+    private static final int MAX_CASINO_TRANSACTION_ID_LENGTH = 64;
     public static final int BASIC_TIER = ClassTier.BASIC.id();
     public static final int RARE_TIER = ClassTier.RARE.id();
     public static final int EPIC_TIER = ClassTier.EPIC.id();
@@ -635,6 +640,195 @@ public class PlayerProgressManager {
 
         PlayerProgress progress = getOrLoad(player, getPlayerKey(player));
         return progress.coins;
+    }
+
+    /**
+     * Applies stake and reward in one durable player-profile snapshot. The persistent receipt makes a repeated
+     * request id return the original result instead of charging or granting a second time.
+     */
+    public static synchronized CasinoProgressResult applyCasinoSpin(
+            ServerPlayer player,
+            CasinoProgressRequest request
+    ) {
+        if (player == null || request == null || !validCasinoRequest(request)) {
+            return casinoFailure(CasinoProgressResult.Status.INVALID_REQUEST, player, "Invalid casino request");
+        }
+
+        String key = getPlayerKey(player);
+        PlayerProgress progress = getOrLoad(player, key);
+        normalize(progress);
+
+        CasinoProgressResult repeated = repeatedCasinoResult(progress, request.transactionId());
+        if (repeated != null) return repeated;
+        if (progress.coins < request.stake()) {
+            return new CasinoProgressResult(
+                    CasinoProgressResult.Status.INSUFFICIENT_COINS,
+                    progress.coins,
+                    request.rewardKind(),
+                    0,
+                    request.classId(),
+                    false,
+                    "Insufficient coins"
+            );
+        }
+
+        int previousCoins = progress.coins;
+        boolean previousSadTrombone = progress.sadTromboneKills;
+        String normalizedClass = normalizeClass(request.classId());
+        boolean previousClassEntry = !normalizedClass.isBlank()
+                && progress.purchasedClasses.containsKey(normalizedClass);
+        int previousClassValue = normalizedClass.isBlank()
+                ? 0 : progress.purchasedClasses.getOrDefault(normalizedClass, 0);
+        List<AppliedTransactionReceipt> previousReceipts =
+                new ArrayList<>(progress.appliedTransactionReceipts);
+
+        boolean duplicate = false;
+        int awardedCoins = request.rewardKind() == CasinoRewardKind.COINS ? request.coinReward() : 0;
+        switch (request.rewardKind()) {
+            case COINS -> { }
+            case SHOP_CLASS, VIP_CLASS -> {
+                duplicate = previousClassValue > 0;
+                if (duplicate) awardedCoins = request.duplicateCompensation();
+                else {
+                    progress.purchasedClasses.put(normalizedClass, 1);
+                }
+            }
+            case SAD_TROMBONE -> {
+                duplicate = progress.sadTromboneKills;
+                if (duplicate) awardedCoins = request.duplicateCompensation();
+                else progress.sadTromboneKills = true;
+            }
+        }
+
+        long resultingBalance = (long) previousCoins - request.stake() + awardedCoins;
+        if (resultingBalance < 0L || resultingBalance > Integer.MAX_VALUE) {
+            restoreCasinoMutation(progress, previousCoins, previousSadTrombone, normalizedClass,
+                    previousClassEntry, previousClassValue, previousReceipts);
+            return new CasinoProgressResult(
+                    CasinoProgressResult.Status.INVALID_REQUEST,
+                    previousCoins,
+                    request.rewardKind(),
+                    0,
+                    normalizedClass,
+                    duplicate,
+                    "Casino balance would overflow"
+            );
+        }
+
+        progress.coins = (int) resultingBalance;
+        AppliedTransactionReceipt receipt = new AppliedTransactionReceipt();
+        receipt.transactionId = request.transactionId();
+        receipt.operationType = CASINO_OPERATION;
+        receipt.appliedAt = Clock.systemUTC().millis();
+        receipt.expectedOldBalance = previousCoins;
+        receipt.newBalance = progress.coins;
+        receipt.payloadHash = casinoPayload(request.stake(), request.rewardKind(), awardedCoins,
+                normalizedClass, duplicate);
+        progress.appliedTransactionReceipts.add(receipt);
+
+        if (!saveOffline(player.getUUID(), progress)) {
+            restoreCasinoMutation(progress, previousCoins, previousSadTrombone, normalizedClass,
+                    previousClassEntry, previousClassValue, previousReceipts);
+            return new CasinoProgressResult(
+                    CasinoProgressResult.Status.SAVE_FAILED,
+                    previousCoins,
+                    request.rewardKind(),
+                    0,
+                    normalizedClass,
+                    duplicate,
+                    "Failed to durably save casino transaction"
+            );
+        }
+
+        return new CasinoProgressResult(
+                CasinoProgressResult.Status.APPLIED,
+                progress.coins,
+                request.rewardKind(),
+                awardedCoins,
+                normalizedClass,
+                duplicate,
+                ""
+        );
+    }
+
+    private static boolean validCasinoRequest(CasinoProgressRequest request) {
+        if (request.transactionId().isBlank()
+                || request.transactionId().length() > MAX_CASINO_TRANSACTION_ID_LENGTH
+                || !CasinoSpinTable.isAllowedStake(request.stake())
+                || request.coinReward() < 0
+                || request.duplicateCompensation() < 0) {
+            return false;
+        }
+        String normalizedClass = normalizeClass(request.classId());
+        return switch (request.rewardKind()) {
+            case COINS, SAD_TROMBONE -> normalizedClass.isBlank();
+            case SHOP_CLASS -> isShopClass(normalizedClass);
+            case VIP_CLASS -> isExclusiveClass(normalizedClass);
+        };
+    }
+
+    private static CasinoProgressResult repeatedCasinoResult(PlayerProgress progress, String transactionId) {
+        for (AppliedTransactionReceipt receipt : progress.appliedTransactionReceipts) {
+            if (receipt == null || !transactionId.equals(receipt.transactionId)) continue;
+            if (!CASINO_OPERATION.equals(receipt.operationType)) {
+                return new CasinoProgressResult(CasinoProgressResult.Status.INVALID_REQUEST, progress.coins,
+                        CasinoRewardKind.COINS, 0, "", false, "Casino transaction id collision");
+            }
+            String[] fields = receipt.payloadHash == null
+                    ? new String[0] : receipt.payloadHash.split("\\|", -1);
+            if (fields.length != 5) {
+                return new CasinoProgressResult(CasinoProgressResult.Status.INVALID_REQUEST, progress.coins,
+                        CasinoRewardKind.COINS, 0, "", false, "Malformed casino receipt");
+            }
+            try {
+                CasinoRewardKind kind = CasinoRewardKind.valueOf(fields[1]);
+                int awardedCoins = Integer.parseInt(fields[2]);
+                boolean duplicate = Boolean.parseBoolean(fields[4]);
+                return new CasinoProgressResult(CasinoProgressResult.Status.ALREADY_APPLIED, progress.coins,
+                        kind, awardedCoins, fields[3], duplicate, "");
+            } catch (IllegalArgumentException exception) {
+                return new CasinoProgressResult(CasinoProgressResult.Status.INVALID_REQUEST, progress.coins,
+                        CasinoRewardKind.COINS, 0, "", false, "Malformed casino receipt");
+            }
+        }
+        return null;
+    }
+
+    private static String casinoPayload(
+            int stake,
+            CasinoRewardKind kind,
+            int awardedCoins,
+            String classId,
+            boolean duplicate
+    ) {
+        return stake + "|" + kind.name() + "|" + awardedCoins + "|" + classId + "|" + duplicate;
+    }
+
+    private static void restoreCasinoMutation(
+            PlayerProgress progress,
+            int coins,
+            boolean sadTrombone,
+            String classId,
+            boolean previousClassEntry,
+            int previousClassValue,
+            List<AppliedTransactionReceipt> receipts
+    ) {
+        progress.coins = coins;
+        progress.sadTromboneKills = sadTrombone;
+        if (!classId.isBlank()) {
+            if (previousClassEntry) progress.purchasedClasses.put(classId, previousClassValue);
+            else progress.purchasedClasses.remove(classId);
+        }
+        progress.appliedTransactionReceipts = new ArrayList<>(receipts);
+    }
+
+    private static CasinoProgressResult casinoFailure(
+            CasinoProgressResult.Status status,
+            ServerPlayer player,
+            String diagnostic
+    ) {
+        return new CasinoProgressResult(status, player == null ? 0 : getCoins(player),
+                CasinoRewardKind.COINS, 0, "", false, diagnostic);
     }
 
     public static synchronized void setCoins(ServerPlayer player, int amount) {

@@ -4,6 +4,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtIo;
+import net.minecraft.network.chat.Component;
 import org.junit.jupiter.api.Test;
 
 import java.io.InputStream;
@@ -29,7 +30,7 @@ class EmbeddedServerDataResourcesTest {
                 sha256NormalizedText(dimension));
         JsonObject dimensionTypeJson = JsonParser.parseString(Files.readString(dimensionType)).getAsJsonObject();
         assertEquals(0.0F, dimensionTypeJson.get("ambient_light").getAsFloat());
-        assertEquals("75ed60c6143ef7ebf5fad70d5e942a09177002b4014f4b6a55c38ddcf506c61e",
+        assertEquals("59f5389a2a0273e73bf153feb3fe4b01d211ee0325ad61e46a3edd5e07428a84",
                 sha256(structure));
 
         JsonObject dimensionJson = JsonParser.parseString(Files.readString(dimension)).getAsJsonObject();
@@ -61,17 +62,26 @@ class EmbeddedServerDataResourcesTest {
             for (int index = 0; index < blocks.size(); index++) {
                 if (blocks.getCompound(index).contains("nbt", 10)) blockEntities++;
             }
-            assertEquals(30, blockEntities);
+            assertEquals(28, blockEntities);
             assertTrue(nbt.contains("entities", 9));
-            assertEquals(11, nbt.getList("entities", 10).size());
+            assertEquals(16, nbt.getList("entities", 10).size());
             var entities = nbt.getList("entities", 10);
             boolean containsPainting = false;
+            int casinoVillagers = 0;
             for (int index = 0; index < entities.size(); index++) {
-                if ("minecraft:painting".equals(entities.getCompound(index).getCompound("nbt").getString("id"))) {
+                CompoundTag entity = entities.getCompound(index).getCompound("nbt");
+                if ("minecraft:painting".equals(entity.getString("id"))) {
                     containsPainting = true;
+                }
+                if ("minecraft:villager".equals(entity.getString("id")) && entity.contains("CustomName", 8)) {
+                    Component name = Component.Serializer.fromJson(entity.getString("CustomName"));
+                    if (name != null && "Однорукий бандит".equals(name.getString())) {
+                        casinoVillagers++;
+                    }
                 }
             }
             assertTrue(containsPainting);
+            assertEquals(4, casinoVillagers);
         }
     }
 

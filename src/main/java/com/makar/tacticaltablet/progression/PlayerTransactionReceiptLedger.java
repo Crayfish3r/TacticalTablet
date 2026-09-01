@@ -170,7 +170,8 @@ final class PlayerTransactionReceiptLedger {
                 && receipt.operationType.length() <= MAX_OPERATION_LENGTH
                 && receipt.expectedOldBalance >= 0
                 && receipt.newBalance >= 0
-                && receipt.expectedOldBalance != receipt.newBalance
+                && (receipt.expectedOldBalance != receipt.newBalance
+                    || "casino_spin".equals(receipt.operationType))
                 && receipt.payloadHash != null && !receipt.payloadHash.isBlank()
                 && receipt.payloadHash.length() <= MAX_HASH_LENGTH;
     }

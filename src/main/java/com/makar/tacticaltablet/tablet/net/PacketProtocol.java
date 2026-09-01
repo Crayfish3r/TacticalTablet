@@ -1,6 +1,7 @@
 package com.makar.tacticaltablet.tablet.net;
 
 import com.makar.tacticaltablet.airdrop.net.AirdropNoticePacket;
+import com.makar.tacticaltablet.casino.net.*;
 import com.makar.tacticaltablet.airdrop.net.AirdropSmokeStatePacket;
 import com.makar.tacticaltablet.clan.*;
 import com.makar.tacticaltablet.prefix.PrefixListPacket;
@@ -13,7 +14,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-/** Immutable protocol-39 map; deliberately independent of Forge channel bootstrap. */
+/** Immutable protocol-41 map; deliberately independent of Forge channel bootstrap. */
 public final class PacketProtocol {
     public record Entry(int id, Class<?> packetClass, NetworkDirection direction) { }
 
@@ -40,7 +41,12 @@ public final class PacketProtocol {
             entry(33, SpectatorHudStatePacket.class, NetworkDirection.PLAY_TO_CLIENT),
             entry(34, MdcBalanceRequestPacket.class, NetworkDirection.PLAY_TO_SERVER),
             entry(35, MdcBalanceStatePacket.class, NetworkDirection.PLAY_TO_CLIENT),
-            entry(36, MdcBalanceUpdatePacket.class, NetworkDirection.PLAY_TO_SERVER)
+            entry(36, MdcBalanceUpdatePacket.class, NetworkDirection.PLAY_TO_SERVER),
+            entry(37, CasinoOpenStatePacket.class, NetworkDirection.PLAY_TO_CLIENT),
+            entry(38, CasinoSpinRequestPacket.class, NetworkDirection.PLAY_TO_SERVER),
+            entry(39, CasinoSpinResultPacket.class, NetworkDirection.PLAY_TO_CLIENT),
+            entry(40, CasinoClosePacket.class, NetworkDirection.PLAY_TO_SERVER),
+            entry(41, CasinoSpectatorOpenPacket.class, NetworkDirection.PLAY_TO_SERVER)
     );
 
     private PacketProtocol() { }
