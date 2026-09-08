@@ -18,6 +18,7 @@ public final class CasinoAdmissionPolicy {
         return phase == MatchPhase.WAITING
                 || phase == MatchPhase.VOTING
                 || phase == MatchPhase.TEAM_SELECT
+                || phase == MatchPhase.STARTING
                 || phase == MatchPhase.POST_GAME
                 || phase == MatchPhase.SET_REWARDING;
     }

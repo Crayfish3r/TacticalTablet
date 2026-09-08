@@ -119,7 +119,7 @@ public class LobbyManager {
                 && !ModerModeManager.isInModerMode(player)
                 && !LivesManager.isEliminated(player)
                 && !ClanWarManager.shouldKeepSpectating(player)
-                && !CasinoSessionManager.isInCasino(player);
+                && !CasinoSessionManager.isExcludedFromMatch(player);
     }
 
     public static void normalizeAfterMatch(ServerPlayer player, boolean wasParticipant) {

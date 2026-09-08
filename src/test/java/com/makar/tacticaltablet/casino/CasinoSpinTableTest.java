@@ -61,6 +61,21 @@ class CasinoSpinTableTest {
     }
 
     @Test
+    void presentationOddsMatchTheAuthoritativeBalanceTable() {
+        var rows = CasinoSpinTable.oddsRows();
+        assertEquals(5, rows.size());
+        assertEquals(new CasinoSpinTable.OddsRow(50, 60, 24, 25, 10, 75, 5, 150, 0, 0, 1),
+                rows.get(0));
+        assertEquals(new CasinoSpinTable.OddsRow(1000, 30, 25, 500, 20, 1500, 12, 3000, 9, 3, 1),
+                rows.get(4));
+        for (CasinoSpinTable.OddsRow row : rows) {
+            assertEquals(100, row.noPrizeChance() + row.smallChance() + row.mediumChance()
+                    + row.largeChance() + row.shopClassChance() + row.vipClassChance()
+                    + row.sadTromboneChance());
+        }
+    }
+
+    @Test
     void unsupportedStakeCannotReachRewardRoll() {
         CasinoSpinTable table = new CasinoSpinTable(new Random(1L));
         assertThrows(IllegalArgumentException.class, () -> table.roll(75));

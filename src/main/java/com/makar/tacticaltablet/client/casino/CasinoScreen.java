@@ -24,8 +24,8 @@ import java.util.UUID;
 
 /** Texture-free first casino presentation. The server has already committed the result before animation starts. */
 public final class CasinoScreen extends Screen implements com.makar.tacticaltablet.tablet.client.ui.UiPaletteProvider {
-    private static final int PANEL_MAX_WIDTH = 520;
-    private static final int PANEL_MAX_HEIGHT = 330;
+    private static final int PANEL_MAX_WIDTH = 430;
+    private static final int PANEL_MAX_HEIGHT = 270;
     private static final int PANEL_MARGIN = 18;
     private static final int SLOT_GAP = 10;
     private static final List<String> SPIN_SYMBOLS = List.of("COINS", "КЛАСС", "VIP", "♪", "—");
@@ -47,12 +47,14 @@ public final class CasinoScreen extends Screen implements com.makar.tacticaltabl
     private Component statusText = Component.translatable("screen.tacticaltablet.casino.ready");
     private TacticalButton stakeButton;
     private TacticalButton playButton;
+    private TacticalButton oddsButton;
     private TacticalButton exitButton;
     private int panelX;
     private int panelY;
     private int panelWidth;
     private int panelHeight;
     private boolean closeSent;
+    private boolean navigatingToOdds;
 
     public CasinoScreen(UUID sessionId, int balance, boolean spectatorSource) {
         super(Component.translatable("screen.tacticaltablet.casino.title"));
@@ -63,16 +65,18 @@ public final class CasinoScreen extends Screen implements com.makar.tacticaltabl
 
     @Override
     protected void init() {
-        panelWidth = Math.min(PANEL_MAX_WIDTH, Math.max(300, width - PANEL_MARGIN * 2));
-        panelHeight = Math.min(PANEL_MAX_HEIGHT, Math.max(250, height - PANEL_MARGIN * 2));
+        panelWidth = Math.min(Math.max(1, width - 8),
+                Math.min(PANEL_MAX_WIDTH, Math.max(280, width - PANEL_MARGIN * 2)));
+        panelHeight = Math.min(Math.max(1, height - 8),
+                Math.min(PANEL_MAX_HEIGHT, Math.max(200, height - PANEL_MARGIN * 2)));
         panelX = (width - panelWidth) / 2;
         panelY = (height - panelHeight) / 2;
 
-        int gap = 10;
-        int available = panelWidth - 40;
-        int buttonWidth = Math.max(78, (available - gap * 2) / 3);
-        int buttonY = panelY + panelHeight - TacticalTheme.CONTROL_HEIGHT - 18;
-        int buttonX = panelX + 20;
+        int gap = 6;
+        int available = panelWidth - 32;
+        int buttonWidth = Math.max(62, (available - gap * 3) / 4);
+        int buttonY = panelY + panelHeight - TacticalTheme.CONTROL_HEIGHT - 14;
+        int buttonX = panelX + 16;
         stakeButton = addRenderableWidget(TacticalButton.standard(
                 buttonX,
                 buttonY,
@@ -87,8 +91,15 @@ public final class CasinoScreen extends Screen implements com.makar.tacticaltabl
                 Component.translatable("screen.tacticaltablet.casino.play"),
                 ignored -> play()
         ).withAccentBar(true).withAccentColor(ExternalUiTheme.SUCCESS));
-        exitButton = addRenderableWidget(TacticalButton.standard(
+        oddsButton = addRenderableWidget(TacticalButton.standard(
                 buttonX + (buttonWidth + gap) * 2,
+                buttonY,
+                buttonWidth,
+                Component.translatable("screen.tacticaltablet.casino.odds"),
+                ignored -> openOdds()
+        ));
+        exitButton = addRenderableWidget(TacticalButton.standard(
+                buttonX + (buttonWidth + gap) * 3,
                 buttonY,
                 buttonWidth,
                 Component.translatable("screen.tacticaltablet.casino.exit"),
@@ -102,6 +113,12 @@ public final class CasinoScreen extends Screen implements com.makar.tacticaltabl
         stakeButton.setMessage(stakeLabel());
         statusText = Component.translatable("screen.tacticaltablet.casino.ready");
         updateButtons();
+    }
+
+    private void openOdds() {
+        if (minecraft == null || awaitingServer || animationTicksRemaining > 0) return;
+        navigatingToOdds = true;
+        minecraft.setScreen(new CasinoOddsScreen(this));
     }
 
     private Component stakeLabel() {
@@ -168,6 +185,7 @@ public final class CasinoScreen extends Screen implements com.makar.tacticaltabl
         boolean ready = !awaitingServer && animationTicksRemaining <= 0;
         if (stakeButton != null) stakeButton.active = ready;
         if (playButton != null) playButton.active = ready && balance >= currentStake();
+        if (oddsButton != null) oddsButton.active = ready;
         if (exitButton != null) exitButton.active = true;
     }
 
@@ -202,7 +220,7 @@ public final class CasinoScreen extends Screen implements com.makar.tacticaltabl
     private void renderSlots(GuiGraphics graphics) {
         int totalWidth = panelWidth - 80;
         int slotWidth = (totalWidth - SLOT_GAP * 2) / 3;
-        int slotHeight = Math.min(92, Math.max(58, panelHeight / 3));
+        int slotHeight = Math.min(72, Math.max(52, panelHeight / 3));
         int startX = panelX + (panelWidth - (slotWidth * 3 + SLOT_GAP * 2)) / 2;
         int slotY = panelY + 70;
         for (int index = 0; index < 3; index++) {
@@ -284,8 +302,16 @@ public final class CasinoScreen extends Screen implements com.makar.tacticaltabl
 
     @Override
     public void removed() {
-        sendCloseOnce();
+        if (navigatingToOdds) {
+            navigatingToOdds = false;
+        } else {
+            sendCloseOnce();
+        }
         super.removed();
+    }
+
+    void closeSessionFromChild() {
+        sendCloseOnce();
     }
 
     private void sendCloseOnce() {

@@ -41,12 +41,12 @@ public final class LobbyBootstrapManager {
         );
         if (data.version() >= CURRENT_VERSION) {
             TacticalTabletMod.LOGGER.info(
-                    "Lobby bootstrap v{} already committed; preserving lobby blocks",
+                    "Lobby bootstrap v{} already committed; preserving lobby blocks and verifying casino NPCs",
                     data.version());
-            return true;
+            return ensureCasinoNpcs(lobby, data);
         }
         if (data.version() > 0) {
-            return migrateCasinoNpcs(lobby, data);
+            return ensureCasinoNpcs(lobby, data);
         }
         Optional<StructureTemplate> template = lobby.getStructureManager().get(LOBBY_SPAWN_TEMPLATE);
         boolean hasContent = targetVolumeHasContent(lobby, template.orElse(null));
@@ -61,7 +61,7 @@ public final class LobbyBootstrapManager {
                 yield true;
             }
             case MARK_EXISTING_CONTENT -> {
-                yield migrateCasinoNpcs(lobby, data);
+                yield ensureCasinoNpcs(lobby, data);
             }
             case PLACE_STRUCTURE -> placeAndMark(lobby, template.orElseThrow(), data);
             case FAIL_MISSING_TEMPLATE -> {
@@ -136,14 +136,13 @@ public final class LobbyBootstrapManager {
                     LOBBY_SPAWN_ORIGIN);
             return false;
         }
-        data.markVersion(CURRENT_VERSION);
         TacticalTabletMod.LOGGER.info(
-                "Lobby bootstrap placed lobby:spawn at {} and recorded v{}",
+                "Lobby bootstrap placed lobby:spawn at {}; verifying casino NPCs before recording v{}",
                 LOBBY_SPAWN_ORIGIN, CURRENT_VERSION);
-        return true;
+        return ensureCasinoNpcs(lobby, data);
     }
 
-    private static boolean migrateCasinoNpcs(ServerLevel lobby, LobbyBootstrapSavedData data) {
+    private static boolean ensureCasinoNpcs(ServerLevel lobby, LobbyBootstrapSavedData data) {
         CasinoNpcTemplateMigration.Result result = CasinoNpcTemplateMigration.migrate(
                 lobby,
                 LOBBY_SPAWN_TEMPLATE,
@@ -161,7 +160,7 @@ public final class LobbyBootstrapManager {
         }
         data.markVersion(CURRENT_VERSION);
         TacticalTabletMod.LOGGER.info(
-                "Lobby bootstrap migrated to v{}: {}/{} casino NPCs present ({} spawned); lobby blocks were preserved",
+                "Lobby bootstrap reconciled v{}: {}/{} casino NPCs present ({} spawned); lobby blocks were preserved",
                 CURRENT_VERSION,
                 result.present(),
                 result.expected(),

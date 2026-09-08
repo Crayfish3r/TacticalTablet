@@ -16,6 +16,7 @@ class CasinoAdmissionPolicyTest {
                 MatchPhase.WAITING,
                 MatchPhase.VOTING,
                 MatchPhase.TEAM_SELECT,
+                MatchPhase.STARTING,
                 MatchPhase.POST_GAME,
                 MatchPhase.SET_REWARDING
         );

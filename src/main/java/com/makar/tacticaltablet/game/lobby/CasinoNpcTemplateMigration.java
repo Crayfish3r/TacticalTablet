@@ -53,36 +53,55 @@ final class CasinoNpcTemplateMigration {
                 return new Result(false, templateNpcs.size(), 0, 0);
             }
 
+            // Force-load the four anchor chunks before inspecting saved entities. Without this,
+            // getAllEntities() can miss an already saved villager and a duplicate spawn is attempted.
+            for (TemplateNpc npc : templateNpcs) {
+                lobby.getChunkAt(BlockPos.containing(
+                        npc.position().x,
+                        npc.position().y,
+                        npc.position().z
+                ));
+            }
+
             List<Villager> existing = new ArrayList<>();
             for (Entity entity : lobby.getAllEntities()) {
                 if (entity instanceof Villager villager && isCasinoVillager(villager)) existing.add(villager);
             }
-            if (existing.size() >= templateNpcs.size()) {
-                return new Result(true, templateNpcs.size(), existing.size(), 0);
-            }
 
-            List<TemplateNpc> unmatched = new ArrayList<>(templateNpcs);
-            for (Villager villager : existing) {
-                TemplateNpc nearest = null;
+            List<Villager> unmatchedExisting = new ArrayList<>(existing);
+            List<TemplateNpc> missing = new ArrayList<>();
+            int present = 0;
+            for (TemplateNpc npc : templateNpcs) {
+                Villager nearest = null;
                 double nearestDistance = MATCH_DISTANCE_SQUARED;
-                for (TemplateNpc candidate : unmatched) {
-                    double distance = villager.position().distanceToSqr(candidate.position());
+                for (Villager candidate : unmatchedExisting) {
+                    double distance = candidate.position().distanceToSqr(npc.position());
                     if (distance <= nearestDistance) {
                         nearest = candidate;
                         nearestDistance = distance;
                     }
                 }
-                if (nearest != null) unmatched.remove(nearest);
+                if (nearest == null) {
+                    missing.add(npc);
+                    continue;
+                }
+                stabilize(nearest);
+                unmatchedExisting.remove(nearest);
+                present++;
             }
 
-            int needed = templateNpcs.size() - existing.size();
             int spawned = 0;
-            for (TemplateNpc npc : unmatched) {
-                if (spawned >= needed) break;
+            for (TemplateNpc npc : missing) {
                 if (spawn(lobby, npc)) spawned++;
             }
-            int total = existing.size() + spawned;
-            return new Result(total >= templateNpcs.size(), templateNpcs.size(), total, spawned);
+            present += spawned;
+            if (!unmatchedExisting.isEmpty()) {
+                TacticalTabletMod.LOGGER.warn(
+                        "Found {} additional named casino villager(s) outside the four template anchors; preserving them",
+                        unmatchedExisting.size()
+                );
+            }
+            return new Result(present == templateNpcs.size(), templateNpcs.size(), present, spawned);
         } catch (IOException | RuntimeException exception) {
             TacticalTabletMod.LOGGER.error("Casino NPC migration failed while reading " + resourceId, exception);
             return Result.failed();
@@ -120,13 +139,38 @@ final class CasinoNpcTemplateMigration {
     }
 
     private static boolean spawn(ServerLevel lobby, TemplateNpc npc) {
-        Entity loaded = EntityType.loadEntityRecursive(npc.entityTag(), lobby, entity -> {
+        Entity loaded = EntityType.loadEntityRecursive(sanitizeEntityTag(npc.entityTag()), lobby, entity -> {
             entity.moveTo(npc.position().x, npc.position().y, npc.position().z,
                     entity.getYRot(), entity.getXRot());
             return entity;
         });
         if (!(loaded instanceof Villager villager) || !isCasinoVillager(villager)) return false;
-        return lobby.addFreshEntity(villager);
+        stabilize(villager);
+        boolean added = lobby.addFreshEntity(villager);
+        if (!added) {
+            TacticalTabletMod.LOGGER.error(
+                    "Casino NPC spawn was rejected at [{}, {}, {}]",
+                    npc.position().x,
+                    npc.position().y,
+                    npc.position().z
+            );
+        }
+        return added;
+    }
+
+    /** Mirrors vanilla StructureTemplate entity placement: template UUIDs must never be reused. */
+    static CompoundTag sanitizeEntityTag(CompoundTag source) {
+        CompoundTag sanitized = source.copy();
+        sanitized.remove("UUID");
+        sanitized.remove("UUIDMost");
+        sanitized.remove("UUIDLeast");
+        return sanitized;
+    }
+
+    private static void stabilize(Villager villager) {
+        villager.setPersistenceRequired();
+        villager.setNoAi(true);
+        villager.setInvulnerable(true);
     }
 
     record Result(boolean successful, int expected, int present, int spawned) {

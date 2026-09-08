@@ -25,6 +25,9 @@ public final class CasinoSpinTable {
             500, table(35, 0, 25, 250, 20, 750, 10, 1500, 7, 2, 1),
             1000, table(30, 0, 25, 500, 20, 1500, 12, 3000, 9, 3, 1)
     );
+    private static final List<OddsRow> ODDS_ROWS = STAKES.stream()
+            .map(CasinoSpinTable::oddsFor)
+            .toList();
 
     private final RandomGenerator random;
 
@@ -50,6 +53,49 @@ public final class CasinoSpinTable {
 
     public static boolean isAllowedStake(int stake) {
         return STAKES.contains(stake);
+    }
+
+    /** Immutable presentation snapshot derived from the authoritative weighted tables. */
+    public static List<OddsRow> oddsRows() {
+        return ODDS_ROWS;
+    }
+
+    private static OddsRow oddsFor(int stake) {
+        List<WeightedReward> table = TABLES.get(stake);
+        int[] coinWeights = new int[4];
+        int[] coinRewards = new int[4];
+        int coinIndex = 0;
+        int shopWeight = 0;
+        int vipWeight = 0;
+        int sadWeight = 0;
+        for (WeightedReward entry : table) {
+            switch (entry.reward().kind()) {
+                case COINS -> {
+                    if (coinIndex >= coinWeights.length) {
+                        throw new IllegalStateException("Casino table has too many coin tiers for stake " + stake);
+                    }
+                    coinWeights[coinIndex] = entry.weight();
+                    coinRewards[coinIndex] = entry.reward().coins();
+                    coinIndex++;
+                }
+                case SHOP_CLASS -> shopWeight += entry.weight();
+                case VIP_CLASS -> vipWeight += entry.weight();
+                case SAD_TROMBONE -> sadWeight += entry.weight();
+            }
+        }
+        if (coinIndex != coinWeights.length) {
+            throw new IllegalStateException("Casino table must expose four coin tiers for stake " + stake);
+        }
+        return new OddsRow(
+                stake,
+                coinWeights[0],
+                coinWeights[1], coinRewards[1],
+                coinWeights[2], coinRewards[2],
+                coinWeights[3], coinRewards[3],
+                shopWeight,
+                vipWeight,
+                sadWeight
+        );
     }
 
     private CasinoReward materialize(CasinoReward reward, int stake) {
@@ -87,6 +133,26 @@ public final class CasinoSpinTable {
 
     private static void add(List<WeightedReward> rewards, int weight, CasinoReward reward) {
         if (weight > 0) rewards.add(new WeightedReward(weight, reward));
+    }
+
+    public record OddsRow(
+            int stake,
+            int noPrizeChance,
+            int smallChance,
+            int smallCoins,
+            int mediumChance,
+            int mediumCoins,
+            int largeChance,
+            int largeCoins,
+            int shopClassChance,
+            int vipClassChance,
+            int sadTromboneChance
+    ) {
+        public OddsRow {
+            int total = noPrizeChance + smallChance + mediumChance + largeChance
+                    + shopClassChance + vipClassChance + sadTromboneChance;
+            if (total != 100) throw new IllegalArgumentException("Casino odds must total 100, got " + total);
+        }
     }
 
     private record WeightedReward(int weight, CasinoReward reward) {

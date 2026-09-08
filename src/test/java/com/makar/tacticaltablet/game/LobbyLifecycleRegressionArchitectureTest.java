@@ -70,6 +70,24 @@ class LobbyLifecycleRegressionArchitectureTest {
     }
 
     @Test
+    void committedBootstrapStillRepairsAndStabilizesCasinoNpcs() throws IOException {
+        String bootstrap = source("game/lobby/LobbyBootstrapManager.java");
+        String migration = source("game/lobby/CasinoNpcTemplateMigration.java");
+
+        String committedBranch = method(
+                bootstrap,
+                "if (data.version() >= CURRENT_VERSION)",
+                "if (data.version() > 0)"
+        );
+        assertTrue(committedBranch.contains("return ensureCasinoNpcs(lobby, data)"));
+        assertTrue(migration.contains("lobby.getChunkAt(BlockPos.containing("));
+        assertTrue(migration.contains("sanitized.remove(\"UUID\")"));
+        assertTrue(migration.contains("villager.setPersistenceRequired()"));
+        assertTrue(migration.contains("villager.setNoAi(true)"));
+        assertTrue(migration.contains("villager.setInvulnerable(true)"));
+    }
+
+    @Test
     void fragileLobbyRepairIsAutomaticAndNeverOverwritesExistingBlocks() throws IOException {
         String bootstrap = source("game/lobby/LobbyBootstrapManager.java");
         String command = source("command/LobbyCommand.java");
