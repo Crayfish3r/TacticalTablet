@@ -198,10 +198,14 @@ tasks.named('jar', Jar).configure {
             "Implementation-Vendor"   : mod_authors
         ])
     }
+
+    // `jar` contains development-mapped bytecode until ForgeGradle reobfuscates it.
+    // Always leave the canonical artifact in production form, even after `gradlew jar` or `check`.
+    finalizedBy 'reobfJar'
 }
 
 tasks.register('verifyJarModsToml') {
-    dependsOn tasks.named('jar')
+    dependsOn 'reobfJar'
     def archiveFile = tasks.named('jar', Jar).flatMap { it.archiveFile }
     inputs.file(archiveFile)
     doLast {
@@ -302,7 +306,7 @@ tasks.register('verifyEmbeddedClientResourceSources') {
 }
 
 tasks.register('verifyJarEmbeddedClientResources') {
-    dependsOn tasks.named('jar')
+    dependsOn 'reobfJar'
     inputs.file(runtimeAssetManifest)
     def archiveFile = tasks.named('jar', Jar).flatMap { it.archiveFile }
     inputs.file(archiveFile)
@@ -363,7 +367,7 @@ tasks.register('verifyJarEmbeddedClientResources') {
 }
 
 tasks.register('verifyJarEmbeddedServerData') {
-    dependsOn tasks.named('jar')
+    dependsOn 'reobfJar'
     def archiveFile = tasks.named('jar', Jar).flatMap { it.archiveFile }
     inputs.file(archiveFile)
     doLast {
@@ -382,6 +386,42 @@ tasks.register('verifyJarEmbeddedServerData') {
                 byte[] bytes = archive.getInputStream(entry).bytes
                 if (sha256(bytes) != expectedSha256) {
                     throw new GradleException("JAR server-data resource differs from approved embedded source: ${path}")
+                }
+            }
+        } finally {
+            archive.close()
+        }
+    }
+}
+
+tasks.register('verifyProductionJarReobfuscated') {
+    dependsOn 'reobfJar'
+    def archiveFile = tasks.named('jar', Jar).flatMap { it.archiveFile }
+    inputs.file(archiveFile)
+    doLast {
+        def forbiddenDevelopmentReferences = [
+                'com/makar/tacticaltablet/core/ModSounds.class'             : 'createFixedRangeEvent',
+                'com/makar/tacticaltablet/core/ModItems.class'              : 'stacksTo',
+                'com/makar/tacticaltablet/airdrop/AirdropCrateBlock.class'  : 'create',
+                'com/makar/tacticaltablet/core/ModEntities.class'           : 'of'
+        ]
+        def archive = new java.util.zip.ZipFile(archiveFile.get().asFile)
+        try {
+            forbiddenDevelopmentReferences.each { classPath, methodName ->
+                def entry = archive.getEntry(classPath)
+                if (entry == null) {
+                    throw new GradleException("Production JAR is missing ${classPath}")
+                }
+                byte[] classBytes = archive.getInputStream(entry).bytes
+                int majorVersion = ((classBytes[6] & 0xff) << 8) | (classBytes[7] & 0xff)
+                if (majorVersion != 61) {
+                    throw new GradleException(
+                            "${classPath} uses class-file version ${majorVersion}; Java 17 requires 61")
+                }
+                String constantPoolText = new String(classBytes, java.nio.charset.StandardCharsets.ISO_8859_1)
+                if (constantPoolText.contains(methodName)) {
+                    throw new GradleException(
+                            "Production JAR still contains development-mapped Minecraft method ${methodName} in ${classPath}")
                 }
             }
         } finally {
@@ -436,4 +476,5 @@ tasks.named('check') {
     dependsOn tasks.named('verifyJarEmbeddedClientResources')
     dependsOn tasks.named('verifyJarEmbeddedServerData')
     dependsOn tasks.named('verifyModernDamageRussianLocalization')
+    dependsOn tasks.named('verifyProductionJarReobfuscated')
 }

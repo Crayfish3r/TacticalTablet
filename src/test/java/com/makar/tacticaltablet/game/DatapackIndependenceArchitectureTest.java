@@ -40,7 +40,7 @@ class DatapackIndependenceArchitectureTest {
         assertFalse(lobby.contains("kill @e"));
         assertFalse(lobby.contains("placeInWorld"));
         assertTrue(lobby.contains("LobbyGameModePolicy.target"));
-        assertTrue(lobby.contains("player.getY() < rescueY"));
+        assertTrue(lobby.contains("player.getY() >= LOBBY_RESCUE_Y"));
     }
 
     @Test

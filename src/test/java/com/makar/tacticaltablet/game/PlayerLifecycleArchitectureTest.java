@@ -43,8 +43,9 @@ class PlayerLifecycleArchitectureTest {
         assertOrdered(lobby,
                 "InventoryManager.clearInventory(player)",
                 "PlayerLifecycleSanitizer.clearPreviousLifeState(player)",
-                "player.changeDimension(lobby)",
+                "player.teleportTo(lobby",
                 "PlayerLifecycleSanitizer.restoreLobbySafety(player)");
+        assertFalse(lobby.contains("player.changeDimension(lobby)"));
         assertFalse(lobby.contains("MobEffects.DAMAGE_RESISTANCE"));
         assertFalse(lobby.contains("player.addEffect("));
 

@@ -34,6 +34,14 @@ public final class LobbyBootstrapManager {
             return false;
         }
 
+        Optional<StructureTemplate> template = lobby.getStructureManager().get(LOBBY_SPAWN_TEMPLATE);
+        if (template.isEmpty()) {
+            TacticalTabletMod.LOGGER.error(
+                    "Lobby bootstrap failed: embedded structure lobby:spawn is unavailable");
+            return false;
+        }
+        if (!ensureSpawnChunkResidency(lobby, template.orElseThrow())) return false;
+
         LobbyBootstrapSavedData data = lobby.getDataStorage().computeIfAbsent(
                 LobbyBootstrapSavedData::load,
                 LobbyBootstrapSavedData::new,
@@ -48,7 +56,6 @@ public final class LobbyBootstrapManager {
         if (data.version() > 0) {
             return ensureCasinoNpcs(lobby, data);
         }
-        Optional<StructureTemplate> template = lobby.getStructureManager().get(LOBBY_SPAWN_TEMPLATE);
         boolean hasContent = targetVolumeHasContent(lobby, template.orElse(null));
         LobbyBootstrapPolicy.Action action = LobbyBootstrapPolicy.decide(
                 data.version(), CURRENT_VERSION, hasContent, template.isPresent());
@@ -70,6 +77,32 @@ public final class LobbyBootstrapManager {
                 yield false;
             }
         };
+    }
+
+    static boolean ensureSpawnChunkResidency(ServerLevel lobby, StructureTemplate template) {
+        if (lobby == null || template == null) return false;
+
+        final LobbyChunkRange range;
+        try {
+            range = LobbyChunkRange.fromStructure(LOBBY_SPAWN_ORIGIN, template.getSize(), 1);
+            for (LobbyChunkRange.ChunkCoordinate chunk : range.positions()) {
+                lobby.setChunkForced(chunk.x(), chunk.z(), true);
+                lobby.getChunk(chunk.x(), chunk.z());
+            }
+        } catch (RuntimeException exception) {
+            TacticalTabletMod.LOGGER.error(
+                    "Failed to protect lobby spawn chunks for template {} at {}",
+                    LOBBY_SPAWN_TEMPLATE,
+                    LOBBY_SPAWN_ORIGIN,
+                    exception
+            );
+            return false;
+        }
+
+        TacticalTabletMod.LOGGER.debug(
+                "Lobby spawn chunk residency ensured: x={}..{}, z={}..{} ({} chunks)",
+                range.minChunkX(), range.maxChunkX(), range.minChunkZ(), range.maxChunkZ(), range.chunkCount());
+        return true;
     }
 
     static boolean targetVolumeHasContent(ServerLevel lobby, StructureTemplate template) {

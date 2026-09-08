@@ -70,6 +70,23 @@ class LobbyLifecycleRegressionArchitectureTest {
     }
 
     @Test
+    void bootstrapProtectsOnlyTemplateSizedChunkRangeBeforeCommittedFastPath() throws IOException {
+        String bootstrap = source("game/lobby/LobbyBootstrapManager.java");
+        String residency = method(
+                bootstrap,
+                "static boolean ensureSpawnChunkResidency",
+                "static boolean targetVolumeHasContent"
+        );
+
+        assertTrue(bootstrap.indexOf("ensureSpawnChunkResidency(lobby, template.orElseThrow())")
+                < bootstrap.indexOf("if (data.version() >= CURRENT_VERSION)"));
+        assertTrue(residency.contains("LobbyChunkRange.fromStructure(LOBBY_SPAWN_ORIGIN, template.getSize(), 1)"));
+        assertTrue(residency.contains("lobby.setChunkForced(chunk.x(), chunk.z(), true)"));
+        assertTrue(residency.contains("lobby.getChunk(chunk.x(), chunk.z())"));
+        assertFalse(residency.contains("placeInWorld"));
+    }
+
+    @Test
     void committedBootstrapStillRepairsAndStabilizesCasinoNpcs() throws IOException {
         String bootstrap = source("game/lobby/LobbyBootstrapManager.java");
         String migration = source("game/lobby/CasinoNpcTemplateMigration.java");

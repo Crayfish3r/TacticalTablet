@@ -267,7 +267,6 @@ public class SafeTeleport {
             return false;
         }
 
-        player.changeDimension(overworld);
         player.teleportTo(
                 overworld,
                 safePos.getX() + 0.5,
@@ -325,7 +324,6 @@ public class SafeTeleport {
             ServerPlayer player = players.get(i);
 
             BlockPos safePos = positions.get(i);
-            player.changeDimension(overworld);
             player.teleportTo(
                     overworld,
                     safePos.getX() + 0.5,

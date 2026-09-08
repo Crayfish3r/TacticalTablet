@@ -30,11 +30,13 @@ import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.border.WorldBorder;
+import net.minecraft.world.phys.Vec3;
 
+import java.util.Optional;
 
 public class LobbyManager {
 
-    private static final double LOBBY_PLAYER_Y = 69.0D;
+    private static final double LOBBY_RESCUE_Y = LobbySpawnResolver.CANONICAL_Y - 8.0D;
 
     public static void moveToLobby(ServerPlayer player) {
         moveToLobby(player, false);
@@ -57,6 +59,11 @@ public class LobbyManager {
         }
 
         relaxLobbyBorder(lobby);
+        Optional<Vec3> resolvedSpawn = LobbySpawnResolver.resolve(lobby, player);
+        if (resolvedSpawn.isEmpty()) {
+            disconnectForUnavailableSpawn(player);
+            return;
+        }
 
         RtpTimerManager.cancel(player);
         boolean matchRunningOrStarting = GameStateManager.isRunning(player.server)
@@ -96,8 +103,8 @@ public class LobbyManager {
             player.removeTag("in_lobby");
         }
 
-        player.changeDimension(lobby);
-        player.teleportTo(lobby, 0.5, LOBBY_PLAYER_Y, 0.5, player.getYRot(), player.getXRot());
+        Vec3 spawn = resolvedSpawn.orElseThrow();
+        player.teleportTo(lobby, spawn.x, spawn.y, spawn.z, player.getYRot(), player.getXRot());
         PlayerLifecycleSanitizer.restoreLobbySafety(player);
 
         if (canUseTabletNow) {
@@ -130,13 +137,27 @@ public class LobbyManager {
     public static void tick(MinecraftServer server) {
         ServerLevel lobby = GameStateManager.getLobbyLevel(server);
         if (lobby == null) return;
-        double rescueY = lobby.getMinBuildHeight() + 1.0D;
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-            if (GameStateManager.isInLobby(player) && player.getY() < rescueY) {
-                player.teleportTo(lobby, 0.5D, LOBBY_PLAYER_Y, 0.5D, player.getYRot(), player.getXRot());
-                PlayerLifecycleSanitizer.restoreLobbySafety(player);
+            if (player.serverLevel() != lobby
+                    || !GameStateManager.isInLobby(player)
+                    || player.getY() >= LOBBY_RESCUE_Y) continue;
+
+            Optional<Vec3> resolvedSpawn = LobbySpawnResolver.resolve(lobby, player);
+            if (resolvedSpawn.isEmpty()) {
+                disconnectForUnavailableSpawn(player);
+                continue;
             }
+            Vec3 spawn = resolvedSpawn.orElseThrow();
+            player.teleportTo(lobby, spawn.x, spawn.y, spawn.z, player.getYRot(), player.getXRot());
+            PlayerLifecycleSanitizer.restoreLobbySafety(player);
         }
+    }
+
+    private static void disconnectForUnavailableSpawn(ServerPlayer player) {
+        if (player == null || player.hasDisconnected()) return;
+        player.connection.disconnect(Component.literal(
+                "[TacticalTablet] Safe lobby spawn is unavailable. Please contact a server administrator."
+        ));
     }
 
     public static void keepLobbyWeatherClear(MinecraftServer server) {
@@ -187,4 +208,3 @@ public class LobbyManager {
         ContractManager.syncSelection(player);
     }
 }
-

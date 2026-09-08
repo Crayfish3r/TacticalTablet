@@ -16,7 +16,6 @@ public final class LobbyGameModePolicy {
         if (moderator || forcedSpectator) {
             return GameType.SPECTATOR;
         }
-        if (!ordinaryRespawn && current == GameType.SPECTATOR) return GameType.SPECTATOR;
         return GameType.SURVIVAL;
     }
 }

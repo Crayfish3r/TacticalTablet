@@ -13,11 +13,17 @@ class LobbyGameModePolicyTest {
     }
 
     @Test
-    void legitimateAndEliminatedSpectatorsRemainSpectator() {
-        assertEquals(GameType.SPECTATOR,
-                LobbyGameModePolicy.target(GameType.SPECTATOR, false, false, false));
+    void eliminatedAndOtherForcedSpectatorsRemainSpectator() {
         assertEquals(GameType.SPECTATOR,
                 LobbyGameModePolicy.target(GameType.SURVIVAL, false, true, false));
+        assertEquals(GameType.SPECTATOR,
+                LobbyGameModePolicy.target(GameType.SPECTATOR, false, true, false));
+    }
+
+    @Test
+    void lateSpectatorReasonRemainsSpectator() {
+        assertEquals(GameType.SPECTATOR,
+                LobbyGameModePolicy.target(GameType.ADVENTURE, false, true, false));
     }
 
     @Test
@@ -26,6 +32,8 @@ class LobbyGameModePolicyTest {
                 LobbyGameModePolicy.target(GameType.ADVENTURE, false, false, false));
         assertEquals(GameType.SURVIVAL,
                 LobbyGameModePolicy.target(GameType.SURVIVAL, false, false, false));
+        assertEquals(GameType.SURVIVAL,
+                LobbyGameModePolicy.target(GameType.SPECTATOR, false, false, false));
     }
 
     @Test
