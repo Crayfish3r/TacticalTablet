@@ -126,6 +126,7 @@ public class PlayerProgressManager {
     private static final Map<String, PlayerProgress> cache = new HashMap<>();
     private static final Map<String, Boolean> dirty = new HashMap<>();
     private static final Map<String, Long> snapshotRevisions = new HashMap<>();
+    private static final Map<String, UUID> pendingUnloads = new HashMap<>();
     private static final Map<MatchPlayedKey, PendingMatchPlayed> pendingMatchesPlayed = new HashMap<>();
     private static int autosaveTicks;
     private static int backupTicks;
@@ -273,6 +274,7 @@ public class PlayerProgressManager {
         init(player.server);
 
         String key = getPlayerKey(player);
+        pendingUnloads.remove(key);
         PlayerProgress progress = cache.get(key);
         boolean fileExists = progressRepository != null && progressRepository.exists(key);
         boolean repositoryRequiresSave = false;
@@ -314,6 +316,26 @@ public class PlayerProgressManager {
         enqueueSnapshot(key, progress);
     }
 
+    /**
+     * Queues the logout snapshot but keeps it authoritative until persistence confirms the latest
+     * submitted revision. A reconnect cancels the pending eviction in {@link #loadPlayer} and
+     * therefore cannot reload an older on-disk profile while the logout write is still pending.
+     */
+    public static synchronized void saveAndUnloadPlayer(ServerPlayer player) {
+        if (player == null) return;
+
+        init(player.server);
+
+        String key = getPlayerKey(player);
+        PlayerProgress progress = getOrLoad(player, key);
+        updateIdentity(progress, player);
+        progress.lastSeen = Instant.now().toEpochMilli();
+        normalize(progress);
+
+        enqueueSnapshot(key, progress);
+        pendingUnloads.put(key, player.getUUID());
+    }
+
     public static synchronized void saveAll() {
         saveAll(false);
     }
@@ -339,6 +361,7 @@ public class PlayerProgressManager {
         cache.clear();
         dirty.clear();
         snapshotRevisions.clear();
+        pendingUnloads.clear();
         pendingMatchesPlayed.clear();
         autosaveTicks = 0;
         backupTicks = 0;
@@ -1489,6 +1512,9 @@ public class PlayerProgressManager {
     public static synchronized void tick(MinecraftServer server) {
         if (server == null || progressRepository == null) return;
 
+        reconcileCompletedWrites();
+        evictCompletedOfflinePlayers(server);
+
         for (Map.Entry<MatchPlayedKey, PendingMatchPlayed> entry
                 : new ArrayList<>(pendingMatchesPlayed.entrySet())) {
             PendingMatchPlayed pending = entry.getValue();
@@ -1512,11 +1538,7 @@ public class PlayerProgressManager {
     }
 
     public static synchronized void unloadPlayer(ServerPlayer player) {
-        if (player == null) return;
-
-        String key = getPlayerKey(player);
-        cache.remove(key);
-        dirty.remove(key);
+        saveAndUnloadPlayer(player);
     }
 
     public static synchronized Map<String, Integer> getAllClassXP(ServerPlayer player) {
@@ -1890,6 +1912,35 @@ public class PlayerProgressManager {
             if (progressRepository.completedRevision(key) >= revision) {
                 dirty.remove(key);
             }
+        }
+    }
+
+    private static void evictCompletedOfflinePlayers(MinecraftServer server) {
+        if (server == null || progressRepository == null || pendingUnloads.isEmpty()) return;
+
+        for (Map.Entry<String, UUID> entry : new ArrayList<>(pendingUnloads.entrySet())) {
+            String key = entry.getKey();
+            ServerPlayer online = server.getPlayerList().getPlayer(entry.getValue());
+            boolean playerOnline = online != null && !online.hasDisconnected();
+            if (playerOnline) {
+                pendingUnloads.remove(key);
+                continue;
+            }
+
+            Long submittedRevision = snapshotRevisions.get(key);
+            long completedRevision = progressRepository.completedRevision(key);
+            if (!ProgressUnloadPolicy.canEvict(
+                    false,
+                    dirty.containsKey(key),
+                    submittedRevision,
+                    completedRevision
+            )) {
+                continue;
+            }
+
+            cache.remove(key);
+            snapshotRevisions.remove(key);
+            pendingUnloads.remove(key);
         }
     }
 

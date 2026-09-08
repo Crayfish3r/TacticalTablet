@@ -58,17 +58,22 @@ public class LivesManager {
         if (player == null) return;
 
         UUID currentMatchId = GameStateManager.getLifecycleSnapshot().matchId().orElse(null);
-        if (currentMatchId == null) return;
-
         String savedMatchId = player.getPersistentData().getString(DATA_MATCH_ID);
-        if (!isStateFromCurrentMatch(savedMatchId, currentMatchId)) {
+        boolean hasMatchScopedState = !savedMatchId.isBlank()
+                || player.getTags().contains(TAG_LIVES_INIT)
+                || player.getTags().contains(TAG_ELIMINATED);
+        if (shouldResetMatchStateOnJoin(savedMatchId, currentMatchId, hasMatchScopedState)) {
             resetPlayer(player);
             player.removeTag("war.playing");
             player.removeTag("in_lobby");
             PlayerTabletState.reset(player);
             RtpTimerManager.cancel(player);
         }
-        setMatchId(player, currentMatchId);
+        if (currentMatchId == null) {
+            player.getPersistentData().remove(DATA_MATCH_ID);
+        } else {
+            setMatchId(player, currentMatchId);
+        }
     }
 
     public static boolean isBoundToCurrentMatch(ServerPlayer player) {
@@ -92,6 +97,15 @@ public class LivesManager {
 
     static boolean isStateFromCurrentMatch(String savedMatchId, UUID currentMatchId) {
         return currentMatchId != null && currentMatchId.toString().equals(savedMatchId);
+    }
+
+    static boolean shouldResetMatchStateOnJoin(
+            String savedMatchId,
+            UUID currentMatchId,
+            boolean hasMatchScopedState
+    ) {
+        if (currentMatchId == null) return hasMatchScopedState;
+        return !isStateFromCurrentMatch(savedMatchId, currentMatchId);
     }
 
     private static void bindToCurrentMatch(ServerPlayer player) {

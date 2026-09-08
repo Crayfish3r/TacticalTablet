@@ -34,7 +34,7 @@ class CombatAttributionIntegrationArchitectureTest {
         assertTrue(events.contains("CombatAttributionLedger.clear(oldPlayer.getUUID())"));
         assertTrue(events.contains("CombatAttributionLedger.clear(newPlayer.getUUID())"));
         assertTrue(events.contains("onServerStopping(ServerStoppingEvent event)"));
-        assertTrue(gameState.contains("matchPhase = MatchPhase.POST_GAME;\n        CombatAttributionLedger.reset();"));
+        assertTrue(gameState.contains("matchPhase = MatchPhase.POST_GAME;\n        runMatchStage(\"end.combat-attribution\", CombatAttributionLedger::reset, endFailures);"));
         assertTrue(runtime.contains("CombatAttributionLedger.reset()"));
     }
 

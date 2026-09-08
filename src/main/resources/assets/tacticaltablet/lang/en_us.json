@@ -232,5 +232,6 @@
   "screen.tacticaltablet.common.coming_soon": "coming soon...",
   "message.tacticaltablet.lobby.dimension_missing": "[WAR] The lobby:lobby dimension is unavailable. Check the installed mod version.",
   "message.tacticaltablet.lobby.welcome.title": "WELCOME",
-  "message.tacticaltablet.lobby.welcome.subtitle": "Battle Royale lobby"
+  "message.tacticaltablet.lobby.welcome.subtitle": "Battle Royale lobby",
+  "message.tacticaltablet.match.joined_team": "[WAR] You joined team %s."
 }

@@ -22,4 +22,21 @@ class LivesMatchStatePolicyTest {
         assertFalse(LivesManager.isStateFromCurrentMatch(oldMatchId.toString(), currentMatchId));
         assertFalse(LivesManager.isStateFromCurrentMatch("", currentMatchId));
     }
+
+    @Test
+    void completedMatchClearsOfflineEliminationStateOnJoin() {
+        UUID oldMatchId = UUID.randomUUID();
+        assertTrue(LivesManager.shouldResetMatchStateOnJoin(oldMatchId.toString(), null, true));
+    }
+
+    @Test
+    void idleJoinWithoutMatchStateNeedsNoReset() {
+        assertFalse(LivesManager.shouldResetMatchStateOnJoin("", null, false));
+    }
+
+    @Test
+    void reconnectToCurrentMatchKeepsPersistentState() {
+        UUID matchId = UUID.randomUUID();
+        assertFalse(LivesManager.shouldResetMatchStateOnJoin(matchId.toString(), matchId, true));
+    }
 }

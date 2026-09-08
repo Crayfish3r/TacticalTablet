@@ -116,6 +116,19 @@ class LobbyLifecycleRegressionArchitectureTest {
         assertTrue(lobby.contains("MatchAdmissionManager.releaseLateSpectatorAfterMatch(player)"));
         assertTrue(lobby.contains("ordinaryRespawn || releasedLateSpectator"));
     }
+
+    @Test
+    void returningTeamPlayerUsesLocalizedUtf8Message() throws IOException {
+        String events = source("game/ServerEvents.java");
+        String russian = Files.readString(Path.of("src/main/resources/assets/tacticaltablet/lang/ru_ru.json"));
+        String english = Files.readString(Path.of("src/main/resources/assets/tacticaltablet/lang/en_us.json"));
+
+        assertTrue(events.contains("message.tacticaltablet.match.joined_team"));
+        assertFalse(events.contains("Р’С‹"));
+        assertTrue(russian.contains("\"message.tacticaltablet.match.joined_team\""));
+        assertTrue(english.contains("\"message.tacticaltablet.match.joined_team\""));
+    }
+
     private static String method(String source, String start, String end) {
         int from = source.indexOf(start);
         int to = source.indexOf(end, from);

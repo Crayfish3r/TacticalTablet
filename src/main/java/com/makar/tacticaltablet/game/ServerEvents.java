@@ -216,8 +216,9 @@ public class ServerEvents {
             if (team != null) {
                 LivesManager.ensureStarted(player);
                 VoiceChatTeamManager.assignPlayerToVoiceGroup(player);
-                player.sendSystemMessage(Component.literal(
-                        "[WAR] Р’С‹ РїСЂРёСЃРѕРµРґРёРЅРµРЅС‹ Рє РєРѕРјР°РЅРґРµ " + team.displayName() + "."
+                player.sendSystemMessage(Component.translatable(
+                        "message.tacticaltablet.match.joined_team",
+                        team.displayName()
                 ).withStyle(team.chatColor()));
             }
         }
@@ -587,7 +588,7 @@ public class ServerEvents {
                     && GameStateManager.getMatchPhase() == MatchPhase.RUNNING
                     && LivesManager.isAliveParticipant(player);
 
-            PlayerProgressManager.savePlayer(player);
+            PlayerProgressManager.saveAndUnloadPlayer(player);
             SpectatorCameraManager.onPlayerDisconnect(player);
             DeathTransitionManager.clear(player);
             ContractManager.onPlayerDisconnect(player);
@@ -616,7 +617,6 @@ public class ServerEvents {
                 player.removeTag("war.playing");
                 player.removeTag("in_lobby");
             }
-            PlayerProgressManager.unloadPlayer(player);
             player.server.execute(() -> syncPrefixes(player.server));
             player.server.execute(() -> GameStateManager.checkForMatchEnd(player.server));
         }

@@ -227,5 +227,6 @@
   "screen.tacticaltablet.common.coming_soon": "coming soon...",
   "message.tacticaltablet.lobby.dimension_missing": "[WAR] Измерение lobby:lobby недоступно. Проверьте установленную версию мода.",
   "message.tacticaltablet.lobby.welcome.title": "ДОБРО ПОЖАЛОВАТЬ",
-  "message.tacticaltablet.lobby.welcome.subtitle": "Лобби Battle Royale"
+  "message.tacticaltablet.lobby.welcome.subtitle": "Лобби Battle Royale",
+  "message.tacticaltablet.match.joined_team": "[WAR] Вы присоединены к команде %s."
 }

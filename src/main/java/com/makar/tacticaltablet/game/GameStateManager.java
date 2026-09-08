@@ -9,6 +9,7 @@ import com.makar.tacticaltablet.game.lobby.LobbyManager;
 import com.makar.tacticaltablet.game.contract.ContractManager;
 import com.makar.tacticaltablet.game.extraction.ExtractionPointManager;
 import com.makar.tacticaltablet.game.lifecycle.LegacyMatchStateMapper;
+import com.makar.tacticaltablet.game.lifecycle.MatchEndReason;
 import com.makar.tacticaltablet.game.lifecycle.MatchLifecycleService;
 import com.makar.tacticaltablet.game.lifecycle.MatchLifecycleSnapshot;
 import com.makar.tacticaltablet.game.lifecycle.MatchTransitionResult;
@@ -23,6 +24,7 @@ import com.makar.tacticaltablet.game.lifecycle.integration.MatchStartPreflightRe
 import com.makar.tacticaltablet.game.lifecycle.integration.MatchStartRejectionReason;
 import com.makar.tacticaltablet.game.lifecycle.integration.MatchStartResult;
 import com.makar.tacticaltablet.game.lifecycle.integration.MatchStartStatus;
+import com.makar.tacticaltablet.game.lifecycle.integration.MatchStageRunner;
 import com.makar.tacticaltablet.game.respawn.RespawnControlManager;
 import com.makar.tacticaltablet.game.chaos.ChaosSetManager;
 import com.makar.tacticaltablet.game.respawn.RtpTimerManager;
@@ -67,6 +69,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 public class GameStateManager {
 
@@ -90,6 +93,7 @@ public class GameStateManager {
     private static int tickCounter = 0;
     private static int startCountdown = -1;
     private static int postGameDelay = 0;
+    private static boolean cleanupPending = false;
     private static final SetRewardCountdown SET_REWARD_COUNTDOWN = new SetRewardCountdown();
     private static MatchPhase matchPhase = MatchPhase.WAITING;
     private static MatchMode currentMode = MatchMode.SOLO;
@@ -227,14 +231,20 @@ public class GameStateManager {
         if (postGameDelay > 0) {
             postGameDelay--;
             if (postGameDelay <= 0) {
-                cleanupMatchRuntime(server);
-                if (MapSetManager.isSetComplete()) {
-                    beginSetRewarding(server);
-                } else {
-                    matchPhase = MatchPhase.WAITING;
-                }
-                ClassXPManager.syncAll(server);
+                cleanupPending = true;
             }
+            if (!cleanupPending) return;
+        }
+
+        if (cleanupPending) {
+            if (!cleanupMatchRuntime(server)) return;
+            cleanupPending = false;
+            if (MapSetManager.isSetComplete()) {
+                beginSetRewarding(server);
+            } else {
+                matchPhase = MatchPhase.WAITING;
+            }
+            ClassXPManager.syncAll(server);
             return;
         }
 
@@ -309,7 +319,7 @@ public class GameStateManager {
         TacticalTabletMod.LOGGER.warn("Recovering legacy match phase after unsuccessful start: {}", status);
         if (status == MatchStartStatus.FAILED_REQUIRES_CLEANUP
                 || status == MatchStartStatus.BLOCKED_REQUIRES_CLEANUP) {
-            cleanupMatchRuntime(server);
+            cleanupPending = !cleanupMatchRuntime(server);
         }
 
         MatchAdmissionManager.clearAdmissionWindow();
@@ -397,20 +407,23 @@ public class GameStateManager {
                 || matchPhase == MatchPhase.SET_REWARDING || matchPhase == MatchPhase.MAP_VOTING
                 || matchPhase == MatchPhase.RESTARTING) return;
 
+        beginLifecycleEnding(MatchEndReason.NATURAL);
+        List<String> endFailures = new ArrayList<>();
         getLifecycleSnapshot().matchId().ifPresent(MatchAdmissionManager::clearAdmissionWindow);
         matchHadEnoughPlayers = false;
         matchStartingParticipants = 0;
         startCountdown = -1;
         postGameDelay = POST_GAME_DELAY_SECONDS;
+        cleanupPending = false;
         matchPhase = MatchPhase.POST_GAME;
-        CombatAttributionLedger.reset();
-        setGameState(server, WAITING);
-        SpectatorCameraManager.onMatchEnd(server);
-        VoiceChatTeamManager.endMatch(server);
-        applySelectedClassCooldowns(server);
+        runMatchStage("end.combat-attribution", CombatAttributionLedger::reset, endFailures);
+        runMatchStage("end.scoreboard", () -> setGameState(server, WAITING), endFailures);
+        runMatchStage("end.spectator-camera", () -> SpectatorCameraManager.onMatchEnd(server), endFailures);
+        runMatchStage("end.voice-chat", () -> VoiceChatTeamManager.endMatch(server), endFailures);
+        runMatchStage("end.class-cooldowns", () -> applySelectedClassCooldowns(server), endFailures);
 
-        ContractManager.finishMatch(server);
-        ExtractionPointManager.reset(server);
+        runMatchStage("end.contracts", () -> ContractManager.finishMatch(server), endFailures);
+        runMatchStage("end.extraction", () -> ExtractionPointManager.reset(server), endFailures);
         boolean clanWarSet = MapSetManager.isClanWarSet();
         boolean completingSet = MapSetManager.getCompletedGames() + 1 >= MapSetManager.GAMES_PER_MAP;
         List<ServerPlayer> normalizedWinners = normalizedWinners(winners, displayWinner);
@@ -428,33 +441,43 @@ public class GameStateManager {
         }
 
         for (ServerPlayer winner : normalizedWinners) {
-            PlayerProgressManager.addWin(winner);
-            ClassXPManager.addXPToAllClasses(winner, WIN_XP_ALL_CLASSES);
-            PlayerProgressManager.savePlayer(winner);
-            ClassXPManager.sync(winner);
+            String playerId = winner.getUUID().toString();
+            runMatchStage("end.win." + playerId, () -> PlayerProgressManager.addWin(winner), endFailures);
+            runMatchStage("end.xp." + playerId,
+                    () -> ClassXPManager.addXPToAllClasses(winner, WIN_XP_ALL_CLASSES), endFailures);
+            runMatchStage("end.save." + playerId, () -> PlayerProgressManager.savePlayer(winner), endFailures);
+            runMatchStage("end.sync." + playerId, () -> ClassXPManager.sync(winner), endFailures);
         }
 
         boolean setComplete;
         SetRewardSummary setSummary;
         if (clanWarSet) {
             // Preserve the established clan-war durability boundary before its separate clan coin award.
-            setComplete = MapSetManager.onGameCompleted(server);
-            setSummary = DiscordLeaderboardService.sendCurrentMatchLeaderboard(
-                    server, normalizedWinners, setComplete, true);
+            setComplete = runMatchValueStage("end.map-set", () -> MapSetManager.onGameCompleted(server),
+                    false, endFailures);
+            boolean completed = setComplete;
+            setSummary = runMatchValueStage("end.discord", () -> DiscordLeaderboardService.sendCurrentMatchLeaderboard(
+                    server, normalizedWinners, completed, true), null, endFailures);
         } else {
-            setSummary = DiscordLeaderboardService.sendCurrentMatchLeaderboard(
-                    server, normalizedWinners, completingSet, false);
-            setComplete = MapSetManager.onGameCompleted(server);
+            setSummary = runMatchValueStage("end.discord", () -> DiscordLeaderboardService.sendCurrentMatchLeaderboard(
+                    server, normalizedWinners, completingSet, false), null, endFailures);
+            setComplete = runMatchValueStage("end.map-set", () -> MapSetManager.onGameCompleted(server),
+                    false, endFailures);
         }
-        ClassXPManager.syncAll(server);
+        runMatchStage("end.sync-all", () -> ClassXPManager.syncAll(server), endFailures);
 
         if (setComplete && !clanWarSet && setSummary != null) {
-            awardSetAndLogFailures(server, setSummary);
-            dispatchSetReportOnce(server, setSummary);
+            runMatchStage("end.set-award", () -> awardSetAndLogFailures(server, setSummary), endFailures);
+            runMatchStage("end.set-report", () -> dispatchSetReportOnce(server, setSummary), endFailures);
         }
 
-        showWinnerTitle(server, winnerName, winnerTeam);
-        ChaosSetManager.finishGame();
+        String finalWinnerName = winnerName;
+        TeamId finalWinnerTeam = winnerTeam;
+        runMatchStage("end.winner-title", () -> showWinnerTitle(server, finalWinnerName, finalWinnerTeam), endFailures);
+        runMatchStage("end.chaos", ChaosSetManager::finishGame, endFailures);
+        if (!endFailures.isEmpty()) {
+            TacticalTabletMod.LOGGER.error("Match end completed with failed stages: {}", endFailures);
+        }
     }
 
 
@@ -492,6 +515,7 @@ public class GameStateManager {
         tickCounter = 0;
         startCountdown = -1;
         postGameDelay = 0;
+        cleanupPending = false;
         SET_REWARD_COUNTDOWN.reset();
         SET_REPORT_DISPATCH.reset();
         matchPhase = MatchPhase.WAITING;
@@ -519,6 +543,7 @@ public class GameStateManager {
                 || postGameDelay > 0
                 || startCountdown >= 0;
 
+        beginLifecycleEnding(MatchEndReason.FORCED);
         matchHadEnoughPlayers = false;
         matchStartingParticipants = 0;
         tickCounter = 0;
@@ -529,7 +554,7 @@ public class GameStateManager {
         SetMatchRuntime.reset();
         ChaosSetManager.clear();
 
-        cleanupMatchRuntime(server);
+        cleanupPending = !cleanupMatchRuntime(server);
         broadcast(server, hadActiveState
                 ? "[WAR] Матч принудительно остановлен."
                 : "[WAR] Состояние матча сброшено.");
@@ -537,47 +562,108 @@ public class GameStateManager {
         return hadActiveState;
     }
 
-    private static void cleanupMatchRuntime(MinecraftServer server) {
-        if (server == null) return;
+    private static boolean cleanupMatchRuntime(MinecraftServer server) {
+        if (server == null) return true;
 
+        List<String> failures = new ArrayList<>();
+        if (!beginLifecycleCleanup()) {
+            failures.add("cleanup.lifecycle-transition");
+        }
         Set<UUID> completedParticipantIds = getLifecycleSnapshot().participantIds();
-        MatchAdmissionManager.clearAdmissionWindow();
-        setGameState(server, WAITING);
-        SpectatorCameraManager.onMatchEnd(server);
-        VoiceChatTeamManager.endMatch(server);
-        TeamMatchManager.cleanupScoreboardTeams(server);
-        AirdropManager.resetAutoScheduler();
-        ContractManager.reset(server);
-        ExtractionPointManager.reset(server);
-        ServerLevel activeAirdropLevel = getOverworld(server);
-        if (activeAirdropLevel != null) {
-            AirdropManager.cancel(activeAirdropLevel);
+        runMatchStage("cleanup.admission", MatchAdmissionManager::clearAdmissionWindow, failures);
+        runMatchStage("cleanup.scoreboard", () -> setGameState(server, WAITING), failures);
+        runMatchStage("cleanup.spectator-camera", () -> SpectatorCameraManager.onMatchEnd(server), failures);
+        runMatchStage("cleanup.voice-chat", () -> VoiceChatTeamManager.endMatch(server), failures);
+        runMatchStage("cleanup.scoreboard-teams", () -> TeamMatchManager.cleanupScoreboardTeams(server), failures);
+        runMatchStage("cleanup.airdrop-scheduler", AirdropManager::resetAutoScheduler, failures);
+        runMatchStage("cleanup.contracts", () -> ContractManager.reset(server), failures);
+        runMatchStage("cleanup.extraction", () -> ExtractionPointManager.reset(server), failures);
+        runMatchStage("cleanup.airdrop", () -> {
+            ServerLevel activeAirdropLevel = getOverworld(server);
+            if (activeAirdropLevel != null) AirdropManager.cancel(activeAirdropLevel);
+        }, failures);
+        runMatchStage("cleanup.zone", () -> ZoneManager.reset(server), failures);
+        runMatchStage("cleanup.respawn", () -> RespawnControlManager.reset(server), failures);
+        runMatchStage("cleanup.passive-xp", PassiveClassXPManager::clearAll, failures);
+        runMatchStage("cleanup.rtp", RtpTimerManager::clearAll, failures);
+        runMatchStage("cleanup.teleport-pool", SafeTeleport::clearPool, failures);
+        runMatchStage("cleanup.clan-war", ClanWarManager::resetRuntime, failures);
+        runMatchStage("cleanup.dropped-items", () -> WorldCleanupManager.clearDroppedItems(server), failures);
+        runMatchStage("cleanup.game-rules", () -> DropControlManager.enforceGameRules(server), failures);
+        runMatchStage("cleanup.lives", () -> LivesManager.resetAll(server), failures);
+
+        for (ServerPlayer player : new ArrayList<>(server.getPlayerList().getPlayers())) {
+            runMatchStage("cleanup.player." + player.getUUID(), () -> {
+                player.removeTag("war.playing");
+                player.removeTag("in_lobby");
+                LobbyManager.normalizeAfterMatch(player, completedParticipantIds.contains(player.getUUID()));
+                LobbyManager.moveToLobby(player);
+                ClassXPManager.sync(player);
+            }, failures);
         }
-        ZoneManager.reset(server);
-        RespawnControlManager.reset(server);
-        PassiveClassXPManager.clearAll();
-        RtpTimerManager.clearAll();
-        SafeTeleport.clearPool();
-        ClanWarManager.resetRuntime();
 
-        WorldCleanupManager.clearDroppedItems(server);
+        runMatchStage("cleanup.mode", () -> currentMode = MatchMode.SOLO, failures);
+        runMatchStage("cleanup.vote", VoteManager::reset, failures);
+        runMatchStage("cleanup.teams", () -> TeamMatchManager.reset(server), failures);
 
-        DropControlManager.enforceGameRules(server);
-
-        LivesManager.resetAll(server);
-
-        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-            player.removeTag("war.playing");
-            player.removeTag("in_lobby");
-            LobbyManager.normalizeAfterMatch(player, completedParticipantIds.contains(player.getUUID()));
-            LobbyManager.moveToLobby(player);
-            ClassXPManager.sync(player);
+        if (!failures.isEmpty()) {
+            TacticalTabletMod.LOGGER.error("Match cleanup remains pending; failed stages: {}", failures);
+            return false;
         }
 
-        currentMode = MatchMode.SOLO;
-        VoteManager.reset();
-        TeamMatchManager.reset(server);
         MATCH_START_COORDINATOR.clearAfterLegacyCleanup();
+        if (getLifecycleSnapshot().matchId().isPresent()) {
+            TacticalTabletMod.LOGGER.error("Match cleanup side effects completed, but lifecycle did not reach IDLE");
+            return false;
+        }
+        return true;
+    }
+
+    private static void beginLifecycleEnding(MatchEndReason reason) {
+        MatchLifecycleSnapshot snapshot = getLifecycleSnapshot();
+        if (snapshot.matchId().isEmpty() || snapshot.state() != MatchState.RUNNING) return;
+
+        MatchTransitionResult result = MATCH_LIFECYCLE.beginEnding(snapshot.matchId().orElseThrow(), reason);
+        if (!transitionReached(result, MatchState.ENDING)) {
+            TacticalTabletMod.LOGGER.error("Could not enter match ENDING state: {}", result.diagnostic().orElse("no diagnostic"));
+        }
+    }
+
+    private static boolean beginLifecycleCleanup() {
+        MatchLifecycleSnapshot snapshot = getLifecycleSnapshot();
+        if (snapshot.matchId().isEmpty()) return true;
+
+        MatchTransitionResult result = MATCH_LIFECYCLE.beginCleanup(snapshot.matchId().orElseThrow());
+        if (transitionReached(result, MatchState.CLEANING)) return true;
+
+        TacticalTabletMod.LOGGER.error("Could not enter match CLEANING state: {}", result.diagnostic().orElse("no diagnostic"));
+        return false;
+    }
+
+    private static boolean transitionReached(MatchTransitionResult result, MatchState expected) {
+        return result != null
+                && (result.status() == MatchTransitionStatus.APPLIED
+                || result.status() == MatchTransitionStatus.NO_OP)
+                && result.currentState() == expected;
+    }
+
+    private static boolean runMatchStage(String name, Runnable action, List<String> failures) {
+        return MatchStageRunner.run(action, exception -> {
+            failures.add(name);
+            TacticalTabletMod.LOGGER.error("Match stage {} failed", name, exception);
+        });
+    }
+
+    private static <T> T runMatchValueStage(
+            String name,
+            Supplier<T> action,
+            T fallback,
+            List<String> failures
+    ) {
+        return MatchStageRunner.call(action, fallback, exception -> {
+            failures.add(name);
+            TacticalTabletMod.LOGGER.error("Match stage {} failed", name, exception);
+        });
     }
 
     public static boolean validateRuntimeRequirements(MinecraftServer server) {
@@ -624,7 +710,7 @@ public class GameStateManager {
     }
 
     public static boolean forceStartVoting(MinecraftServer server) {
-        if (server == null || isRunning(server) || hasPendingSetReward()) return false;
+        if (server == null || isRunning(server) || cleanupPending || hasPendingSetReward()) return false;
 
         postGameDelay = 0;
         startCountdown = -1;
@@ -639,17 +725,21 @@ public class GameStateManager {
     }
 
     public static boolean forceStartMapVoting(MinecraftServer server) {
-        if (server == null || isRunning(server) || hasPendingSetReward()) return false;
+        if (server == null || isRunning(server) || cleanupPending || hasPendingSetReward()) return false;
 
         postGameDelay = 0;
         startCountdown = -1;
-        cleanupMatchRuntime(server);
+        if (!cleanupMatchRuntime(server)) {
+            cleanupPending = true;
+            return false;
+        }
         beginMapVoting(server, true);
         return MapSetManager.isVoting();
     }
 
     public static boolean forceStartTeamSelect(MinecraftServer server, MatchMode mode) {
-        if (server == null || isRunning(server) || hasPendingSetReward() || mode == null || !mode.isTeamMode()) return false;
+        if (server == null || isRunning(server) || cleanupPending || hasPendingSetReward()
+                || mode == null || !mode.isTeamMode()) return false;
 
         postGameDelay = 0;
         startCountdown = -1;
@@ -676,11 +766,14 @@ public class GameStateManager {
             boolean skipPreStartWait,
             boolean soloDebug
     ) {
-        if (server == null || isRunning(server) || hasPendingSetReward()) return false;
+        if (server == null || isRunning(server) || cleanupPending || hasPendingSetReward()) return false;
 
         postGameDelay = 0;
         startCountdown = -1;
-        cleanupMatchRuntime(server);
+        if (!cleanupMatchRuntime(server)) {
+            cleanupPending = true;
+            return false;
+        }
         ClanWarManager.setSoloDebugEnabled(soloDebug);
         currentMode = MatchMode.SQUADS;
         matchPhase = MatchPhase.WAITING;
@@ -1077,6 +1170,7 @@ public class GameStateManager {
                 case RESET_TRANSIENT_RUNTIME -> {
                     startCountdown = -1;
                     postGameDelay = 0;
+                    cleanupPending = false;
                     matchPhase = MatchPhase.STARTING;
                     RtpTimerManager.clearAll();
                     PassiveClassXPManager.clearAll();

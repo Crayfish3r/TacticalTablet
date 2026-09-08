@@ -55,7 +55,9 @@ class CompetitiveClassTierArchitectureTest {
     void lifecycleRecomputesTheTierForStartCompletionReconnectAndLateJoin() throws IOException {
         String gameState = source("game/GameStateManager.java");
         assertTrue(gameState.contains("case SYNC_CLASS_XP -> ClassXPManager.syncAll(server);"));
-        assertTrue(gameState.contains("setComplete = MapSetManager.onGameCompleted(server);\n        }\n        ClassXPManager.syncAll(server);"));
+        int completion = gameState.indexOf("runMatchValueStage(\"end.map-set\"");
+        int sync = gameState.indexOf("runMatchStage(\"end.sync-all\"");
+        assertTrue(completion >= 0 && sync > completion);
 
         String serverEvents = source("game/ServerEvents.java");
         assertTrue(serverEvents.contains("ClassXPManager.sync(player);"));
