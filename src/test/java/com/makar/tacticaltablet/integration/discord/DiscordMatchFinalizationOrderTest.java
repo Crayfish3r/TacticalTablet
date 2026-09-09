@@ -54,6 +54,30 @@ class DiscordMatchFinalizationOrderTest {
     }
 
     @Test
+    void winnerSnapshotIsCapturedBeforeEndingAndDrivesAllFinalizationOutputs() throws IOException {
+        String game = Files.readString(GAME_STATE_MANAGER);
+        String discord = Files.readString(DISCORD_SERVICE);
+        String endGame = block(game, "private static void endGame(MinecraftServer server, List<ServerPlayer>", "private static List<ServerPlayer> normalizedWinners");
+        String sendCurrent = block(discord, "public static synchronized SetRewardSummary sendCurrentMatchLeaderboard", "static synchronized List<MatchPlayerStatsSnapshot> finalizeMatchStatistics");
+
+        int snapshot = endGame.indexOf("Set<UUID> participantIds = Set.copyOf(getLifecycleSnapshot().participantIds())");
+        int normalize = endGame.indexOf("normalizedWinners(winners, displayWinner, participantIds)");
+        int beginEnding = endGame.indexOf("beginLifecycleEnding(MatchEndReason.NATURAL)");
+        assertTrue(snapshot >= 0 && snapshot < normalize);
+        assertTrue(normalize < beginEnding);
+
+        assertTrue(endGame.contains("PlayerProgressManager.addWin(winner)"));
+        assertTrue(endGame.contains("ClassXPManager.addXPToAllClasses(winner, WIN_XP_ALL_CLASSES)"));
+        assertTrue(endGame.contains("server, normalizedWinners, completed, true, participantIds"));
+        assertTrue(endGame.contains("server, normalizedWinners, completingSet, false, participantIds"));
+        assertTrue(endGame.contains("boolean hasEligibleWinner = !normalizedWinners.isEmpty()"));
+        assertTrue(endGame.contains("showWinnerTitle(server, finalWinnerName, finalWinnerTeam)"));
+
+        assertTrue(sendCurrent.contains("eligibleParticipantIds.contains(player.getUUID())"));
+        assertTrue(!sendCurrent.contains("MatchAdmissionManager.isCurrentMatchParticipant(player.getUUID())"));
+    }
+
+    @Test
     void setRewardIsCommittedBeforeSetReportAndCurrentStatsClear() throws IOException {
         String discord = Files.readString(DISCORD_SERVICE);
         String game = Files.readString(GAME_STATE_MANAGER);

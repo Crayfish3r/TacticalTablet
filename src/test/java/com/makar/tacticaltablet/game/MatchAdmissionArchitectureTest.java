@@ -39,7 +39,8 @@ class MatchAdmissionArchitectureTest {
         assertTrue(lives.contains("MatchAdmissionManager.isCurrentMatchParticipant"));
         assertTrue(lives.contains("clearForLateSpectator"));
         assertTrue(camera.contains("MatchAdmissionManager.isLateSpectator(player)"));
-        assertTrue(game.contains("MatchAdmissionManager.isCurrentMatchParticipant(winner.getUUID())"));
+        assertTrue(game.contains("Set<UUID> participantIds = Set.copyOf(getLifecycleSnapshot().participantIds())"));
+        assertTrue(game.contains("MatchWinnerNormalizer.normalize(winners, fallbackWinner, participantIds"));
     }
 
     @Test

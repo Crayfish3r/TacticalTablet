@@ -48,6 +48,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -231,9 +232,26 @@ public final class DiscordLeaderboardService {
             boolean setComplete,
             boolean clanWarSet
     ) {
+        return sendCurrentMatchLeaderboard(
+                server,
+                winners,
+                setComplete,
+                clanWarSet,
+                GameStateManager.getLifecycleSnapshot().participantIds()
+        );
+    }
+
+    public static synchronized SetRewardSummary sendCurrentMatchLeaderboard(
+            MinecraftServer server,
+            List<ServerPlayer> winners,
+            boolean setComplete,
+            boolean clanWarSet,
+            Set<UUID> participantIds
+    ) {
+        Set<UUID> eligibleParticipantIds = participantIds == null ? Set.of() : Set.copyOf(participantIds);
         winners = winners == null ? List.of() : winners.stream()
                 .filter(java.util.Objects::nonNull)
-                .filter(player -> MatchAdmissionManager.isCurrentMatchParticipant(player.getUUID()))
+                .filter(player -> eligibleParticipantIds.contains(player.getUUID()))
                 .distinct()
                 .toList();
         boolean effectiveClanWarSet = clanWarSet || currentSetClanWar;

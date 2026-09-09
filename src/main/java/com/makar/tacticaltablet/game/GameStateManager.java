@@ -407,6 +407,20 @@ public class GameStateManager {
                 || matchPhase == MatchPhase.SET_REWARDING || matchPhase == MatchPhase.MAP_VOTING
                 || matchPhase == MatchPhase.RESTARTING) return;
 
+        Set<UUID> participantIds = Set.copyOf(getLifecycleSnapshot().participantIds());
+        List<ServerPlayer> normalizedWinners = normalizedWinners(winners, displayWinner, participantIds);
+        boolean hasEligibleWinner = !normalizedWinners.isEmpty();
+        if (!hasEligibleWinner) {
+            displayWinner = null;
+            winnerName = "Нет победителя";
+            winnerTeam = null;
+        } else if (displayWinner == null || !participantIds.contains(displayWinner.getUUID())) {
+            displayWinner = normalizedWinners.get(0);
+            if (winnerTeam == null) {
+                winnerName = displayWinner.getName().getString();
+            }
+        }
+
         beginLifecycleEnding(MatchEndReason.NATURAL);
         List<String> endFailures = new ArrayList<>();
         getLifecycleSnapshot().matchId().ifPresent(MatchAdmissionManager::clearAdmissionWindow);
@@ -426,19 +440,6 @@ public class GameStateManager {
         runMatchStage("end.extraction", () -> ExtractionPointManager.reset(server), endFailures);
         boolean clanWarSet = MapSetManager.isClanWarSet();
         boolean completingSet = MapSetManager.getCompletedGames() + 1 >= MapSetManager.GAMES_PER_MAP;
-        List<ServerPlayer> normalizedWinners = normalizedWinners(winners, displayWinner);
-        boolean hasEligibleWinner = !normalizedWinners.isEmpty();
-        if (!hasEligibleWinner) {
-            displayWinner = null;
-            winnerName = "Нет победителя";
-            winnerTeam = null;
-        } else if (displayWinner == null
-                || !MatchAdmissionManager.isCurrentMatchParticipant(displayWinner.getUUID())) {
-            displayWinner = normalizedWinners.get(0);
-            if (winnerTeam == null) {
-                winnerName = displayWinner.getName().getString();
-            }
-        }
 
         for (ServerPlayer winner : normalizedWinners) {
             String playerId = winner.getUUID().toString();
@@ -457,10 +458,10 @@ public class GameStateManager {
                     false, endFailures);
             boolean completed = setComplete;
             setSummary = runMatchValueStage("end.discord", () -> DiscordLeaderboardService.sendCurrentMatchLeaderboard(
-                    server, normalizedWinners, completed, true), null, endFailures);
+                    server, normalizedWinners, completed, true, participantIds), null, endFailures);
         } else {
             setSummary = runMatchValueStage("end.discord", () -> DiscordLeaderboardService.sendCurrentMatchLeaderboard(
-                    server, normalizedWinners, completingSet, false), null, endFailures);
+                    server, normalizedWinners, completingSet, false, participantIds), null, endFailures);
             setComplete = runMatchValueStage("end.map-set", () -> MapSetManager.onGameCompleted(server),
                     false, endFailures);
         }
@@ -482,22 +483,12 @@ public class GameStateManager {
 
 
 
-    private static List<ServerPlayer> normalizedWinners(List<ServerPlayer> winners, ServerPlayer fallbackWinner) {
-        List<ServerPlayer> result = new ArrayList<>();
-        if (winners != null) {
-            for (ServerPlayer winner : winners) {
-                if (winner != null
-                        && MatchAdmissionManager.isCurrentMatchParticipant(winner.getUUID())
-                        && !result.contains(winner)) {
-                    result.add(winner);
-                }
-            }
-        }
-        if (result.isEmpty() && fallbackWinner != null
-                && MatchAdmissionManager.isCurrentMatchParticipant(fallbackWinner.getUUID())) {
-            result.add(fallbackWinner);
-        }
-        return result;
+    private static List<ServerPlayer> normalizedWinners(
+            List<ServerPlayer> winners,
+            ServerPlayer fallbackWinner,
+            Set<UUID> participantIds
+    ) {
+        return MatchWinnerNormalizer.normalize(winners, fallbackWinner, participantIds, ServerPlayer::getUUID);
     }
     private static void applySelectedClassCooldowns(MinecraftServer server) {
         if (server == null) return;
