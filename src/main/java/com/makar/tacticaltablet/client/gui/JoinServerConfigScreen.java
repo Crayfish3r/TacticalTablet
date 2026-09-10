@@ -19,7 +19,7 @@ import net.minecraft.network.chat.Component;
 public final class JoinServerConfigScreen extends Screen implements UiPaletteProvider {
 
     private static final int PANEL_WIDTH = 420;
-    private static final int PANEL_HEIGHT = 174;
+    private static final int PANEL_HEIGHT = 204;
     private static final int PANEL_MARGIN = 10;
     private static final int CONTENT_WIDTH = 360;
     private static final int BUTTON_GAP = 6;
@@ -76,6 +76,17 @@ public final class JoinServerConfigScreen extends Screen implements UiPalettePro
                 Component.translatable("screen.tacticaltablet.server_config.cancel"),
                 ignored -> onClose()
         ));
+        TacticalButton singleplayer = addRenderableWidget(TacticalButton.standard(
+                layout.contentX(), layout.buttonY() + TacticalTheme.CONTROL_HEIGHT + 8,
+                layout.contentWidth(), Component.translatable("menu.singleplayer"),
+                ignored -> openSingleplayer()));
+        singleplayer.active = minecraft != null && minecraft.level == null;
+    }
+
+    private void openSingleplayer() {
+        if (minecraft != null && minecraft.level == null) {
+            minecraft.setScreen(new net.minecraft.client.gui.screens.worldselection.SelectWorldScreen(this));
+        }
     }
 
     private void saveAddress() {

@@ -20,6 +20,7 @@ public final class Py132BalanceHandler {
 
     @SubscribeEvent(priority = EventPriority.LOWEST)
     public static void onLivingHurt(LivingHurtEvent event) {
+        if (!com.makar.tacticaltablet.game.ServerRules.enabled(event.getEntity().getServer())) return;
         if (event.getEntity().level().isClientSide()) {
             return;
         }

@@ -2,7 +2,6 @@ package com.makar.tacticaltablet.client.casino;
 
 import com.makar.tacticaltablet.casino.CasinoRewardKind;
 import com.makar.tacticaltablet.casino.CasinoSpinTable;
-import com.makar.tacticaltablet.casino.net.CasinoClosePacket;
 import com.makar.tacticaltablet.casino.net.CasinoSpinRequestPacket;
 import com.makar.tacticaltablet.casino.net.CasinoSpinResultPacket;
 import com.makar.tacticaltablet.client.ExternalUiTheme;
@@ -15,20 +14,23 @@ import com.makar.tacticaltablet.tablet.net.PacketHandler;
 
 import net.minecraft.Util;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
+import net.minecraft.world.entity.player.Inventory;
+import com.makar.tacticaltablet.casino.CasinoMenu;
+import com.makar.tacticaltablet.casino.CasinoReelResult;
+import com.makar.tacticaltablet.casino.CasinoAnimation;
+import com.makar.tacticaltablet.casino.net.CasinoAnimationPacket;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.Mth;
 
-import java.util.List;
 import java.util.UUID;
 
 /** Texture-free first casino presentation. The server has already committed the result before animation starts. */
-public final class CasinoScreen extends Screen implements com.makar.tacticaltablet.tablet.client.ui.UiPaletteProvider {
+public final class CasinoScreen extends AbstractContainerScreen<CasinoMenu> implements com.makar.tacticaltablet.tablet.client.ui.UiPaletteProvider {
     private static final int PANEL_MAX_WIDTH = 430;
     private static final int PANEL_MAX_HEIGHT = 270;
     private static final int PANEL_MARGIN = 18;
     private static final int SLOT_GAP = 10;
-    private static final List<String> SPIN_SYMBOLS = List.of("COINS", "КЛАСС", "VIP", "♪", "—");
 
     private final UUID sessionId;
     private final boolean spectatorSource;
@@ -53,18 +55,34 @@ public final class CasinoScreen extends Screen implements com.makar.tacticaltabl
     private int panelY;
     private int panelWidth;
     private int panelHeight;
-    private boolean closeSent;
-    private boolean navigatingToOdds;
+    public enum View { MAIN, ODDS }
+    private View view = View.MAIN;
+    private CasinoReelResult previousReels = CasinoReelResult.IDLE;
+    private CasinoReelResult targetReels = CasinoReelResult.IDLE;
+    private long animationStart;
+    private boolean timelineReceived;
 
-    public CasinoScreen(UUID sessionId, int balance, boolean spectatorSource) {
-        super(Component.translatable("screen.tacticaltablet.casino.title"));
-        this.sessionId = sessionId;
-        this.balance = Math.max(0, balance);
-        this.spectatorSource = spectatorSource;
+    public CasinoScreen(CasinoMenu menu, Inventory inventory, Component title) {
+        super(menu, inventory, title);
+        this.sessionId = menu.sessionId();
+        this.balance = menu.openingBalance();
+        this.spectatorSource = menu.spectatorSource();
     }
 
     @Override
     protected void init() {
+        super.init();
+        clearWidgets();
+        if (view == View.ODDS) {
+            panelWidth = Math.min(width - 8, 780);
+            panelHeight = Math.min(height - 8, 330);
+            panelX = (width - panelWidth) / 2;
+            panelY = (height - panelHeight) / 2;
+            addRenderableWidget(TacticalButton.standard(width / 2 - 70,
+                    panelY + panelHeight - TacticalTheme.CONTROL_HEIGHT - 12, 140,
+                    Component.translatable("screen.tacticaltablet.casino.back"), ignored -> switchView(View.MAIN)));
+            return;
+        }
         panelWidth = Math.min(Math.max(1, width - 8),
                 Math.min(PANEL_MAX_WIDTH, Math.max(280, width - PANEL_MARGIN * 2)));
         panelHeight = Math.min(Math.max(1, height - 8),
@@ -117,8 +135,7 @@ public final class CasinoScreen extends Screen implements com.makar.tacticaltabl
 
     private void openOdds() {
         if (minecraft == null || awaitingServer || animationTicksRemaining > 0) return;
-        navigatingToOdds = true;
-        minecraft.setScreen(new CasinoOddsScreen(this));
+        switchView(View.ODDS);
     }
 
     private Component stakeLabel() {
@@ -132,6 +149,7 @@ public final class CasinoScreen extends Screen implements com.makar.tacticaltabl
     private void play() {
         if (awaitingServer || animationTicksRemaining > 0 || balance < currentStake()) return;
         pendingRequestId = UUID.randomUUID();
+        timelineReceived = false;
         awaitingServer = true;
         statusText = Component.translatable("screen.tacticaltablet.casino.awaiting");
         updateButtons();
@@ -152,7 +170,6 @@ public final class CasinoScreen extends Screen implements com.makar.tacticaltabl
     ) {
         if (!sessionId.equals(receivedSessionId) || pendingRequestId == null
                 || !pendingRequestId.equals(requestId)) return;
-        awaitingServer = false;
         balance = Math.max(0, newBalance);
         if (status == CasinoSpinResultPacket.Status.SUCCESS) {
             rewardKind = newRewardKind;
@@ -160,10 +177,16 @@ public final class CasinoScreen extends Screen implements com.makar.tacticaltabl
             classId = newClassId == null ? "" : newClassId;
             duplicate = wasDuplicate;
             animationSeed = seed;
+            // Wait for packet 42, including a receipt replay with zero duration.
+            awaitingServer = true;
+            targetReels = CasinoReelResult.fromReward(newRewardKind, newAwardedCoins, seed);
             animationDurationTicks = Math.max(1, animationTicks);
             animationTicksRemaining = animationDurationTicks;
             statusText = Component.translatable("screen.tacticaltablet.casino.spinning");
         } else {
+            awaitingServer = false;
+            timelineReceived = false;
+            animationTicksRemaining = 0;
             pendingRequestId = null;
             statusText = Component.translatable("screen.tacticaltablet.casino.error." + status.name().toLowerCase());
         }
@@ -171,7 +194,18 @@ public final class CasinoScreen extends Screen implements com.makar.tacticaltabl
     }
 
     @Override
-    public void tick() {
+    protected void containerTick() {
+        if (awaitingServer) return;
+        if (timelineReceived && minecraft != null && minecraft.level != null) {
+            animationTicksRemaining = (int) Math.max(0, animationStart + animationDurationTicks - minecraft.level.getGameTime());
+            if (animationTicksRemaining == 0) {
+                statusText = rewardDescription();
+                pendingRequestId = null;
+                timelineReceived = false;
+                updateButtons();
+            }
+            return;
+        }
         if (animationTicksRemaining <= 0) return;
         animationTicksRemaining--;
         if (animationTicksRemaining == 0) {
@@ -194,6 +228,16 @@ public final class CasinoScreen extends Screen implements com.makar.tacticaltabl
         UiFrameContext frame = frameClock.nextFrame(Util.getMillis(), reducedMotion());
         try (TacticalUi.FrameScope ignored = TacticalUi.openFrame(frame, ExternalUiTheme.PALETTE)) {
             renderBackground(graphics);
+            if (view == View.ODDS) {
+                graphics.fill(0, 0, width, height, 0x88000000);
+                TacticalUi.drawPanel(graphics, panelX, panelY, panelWidth, panelHeight);
+                graphics.drawCenteredString(font, Component.translatable("screen.tacticaltablet.casino.odds_title"),
+                        width / 2, panelY + 16, ExternalUiTheme.ACCENT);
+                new CasinoOddsPresentation(font).render(graphics, panelX + 14, panelY + 38,
+                        panelWidth - 28, panelHeight - TacticalTheme.CONTROL_HEIGHT - 58);
+                super.render(graphics, mouseX, mouseY, partialTick);
+                return;
+            }
             graphics.fill(0, 0, width, height, 0x78000000);
             TacticalUi.drawPanel(graphics, panelX, panelY, panelWidth, panelHeight);
             graphics.drawCenteredString(font, title, width / 2, panelY + 18, ExternalUiTheme.ACCENT);
@@ -228,96 +272,54 @@ public final class CasinoScreen extends Screen implements com.makar.tacticaltabl
             TacticalUi.drawCutCornerBorder(graphics, x, slotY, slotWidth, slotHeight,
                     TacticalTheme.CORNER_CUT, 1, ExternalUiTheme.BORDER,
                     TacticalUi.withAlpha(ExternalUiTheme.SURFACE_RAISED, 0xF0));
-            Component symbol = animationTicksRemaining > 0
-                    ? Component.literal(spinningSymbol(index))
-                    : finalSymbol();
+            int position = targetReels.symbol(index);
+            if (animationTicksRemaining > 0 && minecraft != null && minecraft.level != null) {
+                double elapsed = timelineReceived ? minecraft.level.getGameTime() - animationStart
+                        : animationDurationTicks - animationTicksRemaining;
+                double degrees = CasinoAnimation.reelDegrees(index, previousReels.symbol(index), position,
+                        elapsed, animationDurationTicks, animationSeed);
+                position = Math.floorMod((int) Math.round(-degrees / 45), 8);
+            }
+            Component symbol = CasinoPresentation.symbol(position);
             graphics.drawCenteredString(font, symbol, x + slotWidth / 2,
                     slotY + (slotHeight - font.lineHeight) / 2, ExternalUiTheme.TEXT_PRIMARY);
         }
     }
 
-    private String spinningSymbol(int reel) {
-        long elapsed = Math.max(0, animationDurationTicks - animationTicksRemaining);
-        long value = animationSeed + elapsed * (7L + reel * 4L) + reel * 31L;
-        return SPIN_SYMBOLS.get(Math.floorMod(value, SPIN_SYMBOLS.size()));
-    }
-
-    private Component finalSymbol() {
-        return switch (rewardKind) {
-            case COINS -> Component.literal(awardedCoins > 0 ? "+" + awardedCoins : "—");
-            case SHOP_CLASS -> Component.literal("КЛАСС");
-            case VIP_CLASS -> Component.literal("VIP");
-            case SAD_TROMBONE -> Component.literal("♪");
-        };
-    }
-
     private Component rewardDescription() {
-        if (duplicate) {
-            return Component.translatable("screen.tacticaltablet.casino.reward.duplicate", awardedCoins);
-        }
-        return switch (rewardKind) {
-            case COINS -> awardedCoins > 0
-                    ? Component.translatable("screen.tacticaltablet.casino.reward.coins", awardedCoins)
-                    : Component.translatable("screen.tacticaltablet.casino.reward.none");
-            case SHOP_CLASS -> Component.translatable("screen.tacticaltablet.casino.reward.shop_class",
-                    classDisplayName(classId));
-            case VIP_CLASS -> Component.translatable("screen.tacticaltablet.casino.reward.vip_class",
-                    classDisplayName(classId));
-            case SAD_TROMBONE -> Component.translatable("screen.tacticaltablet.casino.reward.sad_trombone");
-        };
-    }
-
-    private static String classDisplayName(String id) {
-        return switch (id) {
-            case "solider" -> "Солдат";
-            case "blackops" -> "Black Ops";
-            case "rebel" -> "Повстанец";
-            case "saboteur" -> "Саботёр";
-            case "dream" -> "Dream";
-            case "shahed" -> "Шахед оператор";
-            case "miniboss" -> "Мини-босс";
-            case "cowboy" -> "Ковбой";
-            case "boomguy" -> "Подрывник";
-            case "tagilla" -> "Тагилла";
-            case "killer" -> "Киллер";
-            case "crossbowman" -> "Арбалетчик";
-            case "krot" -> "Крот";
-            case "medic" -> "Медик";
-            case "microwave" -> "Микровэйв";
-            case "railgunner" -> "Рэйл-ганнер";
-            case "smartstormtrooper" -> "Smart-штурмовик";
-            default -> id == null || id.isBlank() ? "Неизвестный класс" : id;
-        };
+        return CasinoPresentation.rewardDescription(rewardKind, awardedCoins, classId, duplicate);
     }
 
     private boolean reducedMotion() {
         return minecraft != null && minecraft.options.screenEffectScale().get() <= 0.0D;
     }
 
-    @Override
-    public void onClose() {
-        sendCloseOnce();
+    private void switchView(View next) {
+        view = next;
+        init();
+    }
+
+    void acceptAnimation(CasinoAnimationPacket packet) {
+        if (!sessionId.equals(packet.sessionId()) || !packet.requestId().equals(pendingRequestId)) return;
+        previousReels = packet.previous();
+        targetReels = packet.target();
+        animationStart = packet.startTick();
+        animationDurationTicks = packet.duration();
+        animationSeed = packet.seed();
+        awaitingServer = false;
+        timelineReceived = true;
+        containerTick();
+    }
+
+    void refreshBalance(UUID id, int coins) {
+        if (sessionId.equals(id)) { balance = Math.max(0, coins); updateButtons(); }
+    }
+
+    @Override protected void renderBg(GuiGraphics graphics, float partialTick, int mouseX, int mouseY) { }
+    @Override protected void renderLabels(GuiGraphics graphics, int mouseX, int mouseY) { }
+    @Override public void onClose() {
+        if (view == View.ODDS) { switchView(View.MAIN); return; }
         super.onClose();
-    }
-
-    @Override
-    public void removed() {
-        if (navigatingToOdds) {
-            navigatingToOdds = false;
-        } else {
-            sendCloseOnce();
-        }
-        super.removed();
-    }
-
-    void closeSessionFromChild() {
-        sendCloseOnce();
-    }
-
-    private void sendCloseOnce() {
-        if (closeSent) return;
-        closeSent = true;
-        PacketHandler.sendToServer(new CasinoClosePacket(sessionId));
     }
 
     @Override

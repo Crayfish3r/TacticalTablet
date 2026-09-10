@@ -7,7 +7,12 @@ public final class CasinoAdmissionPolicy {
     private CasinoAdmissionPolicy() {
     }
 
-    public static boolean allowsNpc(
+    @Deprecated
+    public static boolean allowsNpc(boolean inLobby, boolean matchRunning, boolean startTransitionSetup, boolean moderMode, MatchPhase phase) {
+        return allowsMachine(inLobby, matchRunning, startTransitionSetup, moderMode, phase);
+    }
+
+    public static boolean allowsMachine(
             boolean inLobby,
             boolean matchRunning,
             boolean startTransitionSetup,

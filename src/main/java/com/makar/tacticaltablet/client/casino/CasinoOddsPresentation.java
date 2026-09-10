@@ -2,80 +2,19 @@ package com.makar.tacticaltablet.client.casino;
 
 import com.makar.tacticaltablet.casino.CasinoSpinTable;
 import com.makar.tacticaltablet.client.ExternalUiTheme;
-import com.makar.tacticaltablet.tablet.client.ui.TacticalTheme;
 import com.makar.tacticaltablet.tablet.client.ui.TacticalUi;
-import com.makar.tacticaltablet.tablet.client.ui.UiFrameClock;
-import com.makar.tacticaltablet.tablet.client.ui.UiFrameContext;
-import com.makar.tacticaltablet.tablet.client.ui.widget.TacticalButton;
-
-import net.minecraft.Util;
+import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.network.chat.Component;
-
 import java.util.List;
 
-/** Read-only odds presentation backed by the authoritative CasinoSpinTable snapshot. */
-final class CasinoOddsScreen extends Screen implements com.makar.tacticaltablet.tablet.client.ui.UiPaletteProvider {
-    private static final int PANEL_MARGIN = 10;
-    private static final int PANEL_MAX_WIDTH = 780;
-    private static final int PANEL_MAX_HEIGHT = 330;
-    private static final int WIDE_TABLE_THRESHOLD = 620;
-
-    private final CasinoScreen parent;
-    private final UiFrameClock frameClock = new UiFrameClock();
-    private int panelX;
-    private int panelY;
-    private int panelWidth;
-    private int panelHeight;
-    private boolean returningToParent;
-
-    CasinoOddsScreen(CasinoScreen parent) {
-        super(Component.translatable("screen.tacticaltablet.casino.odds_title"));
-        this.parent = parent;
+/** Reusable odds view; deliberately has no Screen or container lifecycle. */
+final class CasinoOddsPresentation {
+    private final Font font;
+    CasinoOddsPresentation(Font font) { this.font = font; }
+    void render(GuiGraphics graphics, int x, int y, int width, int height) {
+        if (width >= 620) renderWideTable(graphics, x, y, width, height);
+        else renderCompactTable(graphics, x, y, width, height);
     }
-
-    @Override
-    protected void init() {
-        panelWidth = Math.min(Math.max(1, width - 8),
-                Math.min(PANEL_MAX_WIDTH, Math.max(300, width - PANEL_MARGIN * 2)));
-        panelHeight = Math.min(Math.max(1, height - 8),
-                Math.min(PANEL_MAX_HEIGHT, Math.max(220, height - PANEL_MARGIN * 2)));
-        panelX = (width - panelWidth) / 2;
-        panelY = (height - panelHeight) / 2;
-
-        int buttonWidth = Math.min(180, panelWidth - 32);
-        addRenderableWidget(TacticalButton.standard(
-                panelX + (panelWidth - buttonWidth) / 2,
-                panelY + panelHeight - TacticalTheme.CONTROL_HEIGHT - 12,
-                buttonWidth,
-                Component.translatable("screen.tacticaltablet.casino.back"),
-                ignored -> onClose()
-        ));
-    }
-
-    @Override
-    public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
-        UiFrameContext frame = frameClock.nextFrame(Util.getMillis(), reducedMotion());
-        try (TacticalUi.FrameScope ignored = TacticalUi.openFrame(frame, ExternalUiTheme.PALETTE)) {
-            renderBackground(graphics);
-            graphics.fill(0, 0, width, height, 0x88000000);
-            TacticalUi.drawPanel(graphics, panelX, panelY, panelWidth, panelHeight);
-            graphics.drawCenteredString(font, title, width / 2, panelY + 16, ExternalUiTheme.ACCENT);
-
-            int contentX = panelX + 14;
-            int contentY = panelY + 38;
-            int contentWidth = panelWidth - 28;
-            int contentBottom = panelY + panelHeight - TacticalTheme.CONTROL_HEIGHT - 20;
-            if (contentWidth >= WIDE_TABLE_THRESHOLD) {
-                renderWideTable(graphics, contentX, contentY, contentWidth, contentBottom - contentY);
-            } else {
-                renderCompactTable(graphics, contentX, contentY, contentWidth, contentBottom - contentY);
-            }
-            super.render(graphics, mouseX, mouseY, partialTick);
-        }
-    }
-
     private void renderWideTable(GuiGraphics graphics, int x, int y, int width, int height) {
         String[][] headers = {
                 {"Ставка", ""},
@@ -198,32 +137,4 @@ final class CasinoOddsScreen extends Screen implements com.makar.tacticaltablet.
         return chance + "% → " + coins;
     }
 
-    private boolean reducedMotion() {
-        return minecraft != null && minecraft.options.screenEffectScale().get() <= 0.0D;
-    }
-
-    @Override
-    public void onClose() {
-        if (minecraft == null) return;
-        returningToParent = true;
-        minecraft.setScreen(parent);
-    }
-
-    @Override
-    public void removed() {
-        if (!returningToParent && (minecraft == null || minecraft.screen != parent)) {
-            parent.closeSessionFromChild();
-        }
-        super.removed();
-    }
-
-    @Override
-    public boolean isPauseScreen() {
-        return false;
-    }
-
-    @Override
-    public com.makar.tacticaltablet.tablet.client.ui.UiPalette uiPalette() {
-        return ExternalUiTheme.PALETTE;
-    }
 }

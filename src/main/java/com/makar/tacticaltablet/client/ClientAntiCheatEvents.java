@@ -17,6 +17,7 @@ public class ClientAntiCheatEvents {
         if (event.phase != TickEvent.Phase.END) return;
 
         Minecraft mc = Minecraft.getInstance();
+        if (mc.hasSingleplayerServer()) return;
 
         if (mc.player == null) return;
         if (mc.level == null) return;

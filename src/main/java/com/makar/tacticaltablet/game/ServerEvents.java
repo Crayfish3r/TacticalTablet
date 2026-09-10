@@ -95,6 +95,11 @@ public class ServerEvents {
 
     @SubscribeEvent
     public static void onPlayerJoin(PlayerEvent.PlayerLoggedInEvent event) {
+        if (event.getEntity() instanceof ServerPlayer local && !ServerRules.enabled(local.server)) {
+            PlayerProgressManager.loadPlayer(local);
+            ClassXPManager.sync(local);
+            return;
+        }
         if (event.getEntity() instanceof ServerPlayer player) {
             PunishmentRecord tempBan = PunishmentManager.getTempBan(player.getUUID());
             if (tempBan != null) {
@@ -234,6 +239,11 @@ public class ServerEvents {
 
     @SubscribeEvent
     public static void onPlayerRespawn(PlayerEvent.PlayerRespawnEvent event) {
+        if (event.getEntity() instanceof ServerPlayer local && !ServerRules.enabled(local.server)) {
+            PlayerProgressManager.loadPlayer(local);
+            ClassXPManager.sync(local);
+            return;
+        }
         if (event.getEntity() instanceof ServerPlayer player) {
             PlayerProgressManager.loadPlayer(player);
 
@@ -270,6 +280,10 @@ public class ServerEvents {
 
     @SubscribeEvent
     public static void onPlayerClone(PlayerEvent.Clone event) {
+        if (event.getEntity() instanceof ServerPlayer local && !ServerRules.enabled(local.server)) {
+            PlayerProgressManager.loadPlayer(local);
+            return;
+        }
         if (!(event.getEntity() instanceof ServerPlayer newPlayer)) return;
         if (!(event.getOriginal() instanceof ServerPlayer oldPlayer)) return;
 
@@ -402,11 +416,13 @@ public class ServerEvents {
 
     private static boolean isLobbyLevel(LevelAccessor level) {
         return level instanceof ServerLevel serverLevel
+                && ServerRules.enabled(serverLevel.getServer())
                 && serverLevel.dimension().equals(GameStateManager.LOBBY_DIMENSION);
     }
 
     @SubscribeEvent(priority = EventPriority.HIGHEST)
     public static void onPostRtpAttack(LivingAttackEvent event) {
+        if (!ServerRules.enabled(event.getEntity().getServer())) return;
         if (isLobbyLevel(event.getEntity().level())) {
             event.setCanceled(true);
             if (event.getEntity() instanceof ServerPlayer player) {
@@ -422,6 +438,7 @@ public class ServerEvents {
 
     @SubscribeEvent(priority = EventPriority.HIGHEST)
     public static void onLobbyEffectApplicable(MobEffectEvent.Applicable event) {
+        if (!ServerRules.enabled(event.getEntity().getServer())) return;
         if (!(event.getEntity() instanceof ServerPlayer player)) return;
         if (!GameStateManager.isInLobby(player)) return;
 
@@ -430,6 +447,7 @@ public class ServerEvents {
 
     @SubscribeEvent(priority = EventPriority.LOWEST, receiveCanceled = true)
     public static void onLivingAttackAttribution(LivingAttackEvent event) {
+        if (!ServerRules.enabled(event.getEntity().getServer())) return;
         if (!(event.getEntity() instanceof ServerPlayer victim)) return;
         CombatAttributionLedger.observeIncomingAttack(
                 victim, event.getSource(), event.getAmount(), event.isCanceled());
@@ -437,6 +455,7 @@ public class ServerEvents {
 
     @SubscribeEvent
     public static void onLivingHurt(LivingHurtEvent event) {
+        if (!ServerRules.enabled(event.getEntity().getServer())) return;
         if (!(event.getEntity() instanceof ServerPlayer player)) return;
         long started = System.nanoTime();
 
@@ -496,6 +515,7 @@ public class ServerEvents {
 
     @SubscribeEvent(priority = EventPriority.LOWEST, receiveCanceled = true)
     public static void onLivingHurtAttribution(LivingHurtEvent event) {
+        if (!ServerRules.enabled(event.getEntity().getServer())) return;
         if (!(event.getEntity() instanceof ServerPlayer victim)) return;
         CombatAttributionLedger.observeOriginalDamage(
                 victim, event.getSource(), event.getAmount(), event.isCanceled());
@@ -503,6 +523,7 @@ public class ServerEvents {
 
     @SubscribeEvent
     public static void onLivingDamage(LivingDamageEvent event) {
+        if (!ServerRules.enabled(event.getEntity().getServer())) return;
         if (!(event.getEntity() instanceof ServerPlayer victim)) return;
         if (event.isCanceled()) {
             CombatAttributionLedger.rejectAppliedDamage(victim, event.getSource());
@@ -548,6 +569,7 @@ public class ServerEvents {
 
     @SubscribeEvent
     public static void onLivingDrops(LivingDropsEvent event) {
+        if (!ServerRules.enabled(event.getEntity().getServer())) return;
         if (event.getEntity() instanceof ServerPlayer player && player.getTags().contains("war.playing")) {
             event.getDrops().clear();
         }
@@ -558,6 +580,7 @@ public class ServerEvents {
         if (event.phase != TickEvent.Phase.END) return;
 
         PlayerProgressManager.tick(event.getServer());
+        if (!ServerRules.enabled(event.getServer())) return;
         LeaderboardScheduler.tick(event);
         OnlineWebhookService.tick(event);
         PassiveClassXPManager.tick(event.getServer());
@@ -581,6 +604,11 @@ public class ServerEvents {
 
     @SubscribeEvent
     public static void onLogout(PlayerEvent.PlayerLoggedOutEvent event) {
+        if (event.getEntity() instanceof ServerPlayer local && !ServerRules.enabled(local.server)) {
+            PacketHandler.clearC2SRateLimits(local);
+            PlayerProgressManager.saveAndUnloadPlayer(local);
+            return;
+        }
         if (event.getEntity() instanceof ServerPlayer player) {
             PostRtpProtectionManager.clear(player);
             PacketHandler.clearC2SRateLimits(player);
@@ -637,6 +665,7 @@ public class ServerEvents {
 
     @SubscribeEvent
     public static void onDeath(LivingDeathEvent event) {
+        if (!ServerRules.enabled(event.getEntity().getServer())) return;
         if (!(event.getEntity() instanceof ServerPlayer victim)) return;
         PostRtpProtectionManager.clear(victim);
         long started = System.nanoTime();
@@ -790,6 +819,7 @@ public class ServerEvents {
     @SubscribeEvent
     public static void onServerStarted(ServerStartedEvent event) {
         PlayerProgressManager.onServerStarted(event.getServer());
+        if (!ServerRules.enabled(event.getServer())) return;
         MatchScoreboard.ensureObjectives(event.getServer());
         MatchGameRules.apply(event.getServer());
         GameStateManager.resetRuntime(event.getServer());
@@ -814,6 +844,10 @@ public class ServerEvents {
 
     @SubscribeEvent
     public static void onServerStopped(ServerStoppedEvent event) {
+        if (!ServerRules.enabled(event.getServer())) {
+            PlayerProgressManager.resetStorage();
+            return;
+        }
         MapRotationManager.onServerStopped(event.getServer());
         MapSetManager.onServerStopped();
         KitRotationManager.resetRuntime();
@@ -847,12 +881,14 @@ public class ServerEvents {
     public static void onServerStopping(ServerStoppingEvent event) {
         CombatAttributionLedger.reset();
         PlayerProgressManager.flushForShutdown();
+        if (!ServerRules.enabled(event.getServer())) return;
         PrefixManager.save();
         PunishmentManager.saveAtomic();
     }
 
     @SubscribeEvent
     public static void onServerChat(ServerChatEvent event) {
+        if (!ServerRules.enabled(event.getPlayer().server)) return;
         ServerPlayer player = event.getPlayer();
         if (player == null) return;
 
@@ -879,6 +915,7 @@ public class ServerEvents {
 
     @SubscribeEvent
     public static void onTabListNameFormat(PlayerEvent.TabListNameFormat event) {
+        if (!ServerRules.enabled(event.getEntity().getServer())) return;
         if (!(event.getEntity() instanceof ServerPlayer player)) return;
         if (!PrefixManager.getRole(player).visible()) return;
 

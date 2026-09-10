@@ -12,7 +12,12 @@ public final class CasinoClientAccess {
     }
 
     public static void open(UUID sessionId, int balance, boolean spectatorSource) {
-        Minecraft.getInstance().setScreen(new CasinoScreen(sessionId, balance, spectatorSource));
+        // Legacy packet 37 may refresh a matching menu, but cannot create a client-only casino.
+        if (Minecraft.getInstance().screen instanceof CasinoScreen screen) screen.refreshBalance(sessionId, balance);
+    }
+
+    public static void animation(com.makar.tacticaltablet.casino.net.CasinoAnimationPacket packet) {
+        if (Minecraft.getInstance().screen instanceof CasinoScreen screen) screen.acceptAnimation(packet);
     }
 
     public static void result(

@@ -87,7 +87,7 @@ class LobbyLifecycleRegressionArchitectureTest {
     }
 
     @Test
-    void committedBootstrapStillRepairsAndStabilizesCasinoNpcs() throws IOException {
+    void committedBootstrapNeverRestoresCasinoNpcs() throws IOException {
         String bootstrap = source("game/lobby/LobbyBootstrapManager.java");
         String migration = source("game/lobby/CasinoNpcTemplateMigration.java");
 
@@ -96,12 +96,12 @@ class LobbyLifecycleRegressionArchitectureTest {
                 "if (data.version() >= CURRENT_VERSION)",
                 "if (data.version() > 0)"
         );
-        assertTrue(committedBranch.contains("return ensureCasinoNpcs(lobby, data)"));
-        assertTrue(migration.contains("lobby.getChunkAt(BlockPos.containing("));
-        assertTrue(migration.contains("sanitized.remove(\"UUID\")"));
-        assertTrue(migration.contains("villager.setPersistenceRequired()"));
-        assertTrue(migration.contains("villager.setNoAi(true)"));
-        assertTrue(migration.contains("villager.setInvulnerable(true)"));
+        assertTrue(committedBranch.contains("return true"));
+        assertFalse(bootstrap.contains("ensureCasinoNpcs"));
+        assertTrue(bootstrap.contains("withoutLegacyCasinoNpcs"));
+        assertFalse(migration.contains("addFreshEntity"));
+        assertFalse(migration.contains("setNoAi"));
+        assertFalse(migration.contains("setInvulnerable"));
     }
 
     @Test

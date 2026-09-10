@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class KeyBindingSanitizerArchitectureTest {
 
     @Test
-    void taczCrawlIsUnboundOnceOnTheClientAndPersisted() throws IOException {
+    void serverCrawlRestrictionIsTemporaryAndRestoresLocalBindings() throws IOException {
         String sanitizer = Files.readString(Path.of(
                 "src/main/java/com/makar/tacticaltablet/client/event/ClientKeyBindingSanitizer.java"));
 
@@ -20,6 +20,8 @@ class KeyBindingSanitizerArchitectureTest {
         assertTrue(sanitizer.contains("KeyBindingVisibilityPolicy.mustBeUnbound"));
         assertTrue(sanitizer.contains("InputConstants.UNKNOWN"));
         assertTrue(sanitizer.contains("KeyMapping.resetMapping()"));
-        assertTrue(sanitizer.contains("options.save()"));
+        org.junit.jupiter.api.Assertions.assertFalse(sanitizer.contains("options.save()"));
+        assertTrue(sanitizer.contains("minecraft.hasSingleplayerServer()"));
+        assertTrue(sanitizer.contains("binding.modifier(), binding.key()"));
     }
 }

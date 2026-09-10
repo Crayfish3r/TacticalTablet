@@ -22,6 +22,11 @@ public final class ModBlocks {
                     .noOcclusion())
     );
 
+    public static final RegistryObject<Block> CASINO_MACHINE = BLOCKS.register("casino_machine",
+            () -> new com.makar.tacticaltablet.casino.CasinoMachineBlock(BlockBehaviour.Properties.of()
+                    .mapColor(MapColor.COLOR_BLACK).strength(3.5F, 1200.0F).sound(SoundType.METAL)
+                    .pushReaction(net.minecraft.world.level.material.PushReaction.BLOCK).noOcclusion()));
+
     private ModBlocks() {
     }
 }

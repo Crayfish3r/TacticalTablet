@@ -18,6 +18,9 @@ public class ModItems {
     public static final RegistryObject<Item> CONTRACT_TRACKER = ITEMS.register("contract_tracker",
             () -> new ContractTrackerItem(new Item.Properties().stacksTo(1)));
 
+    public static final RegistryObject<Item> CASINO_MACHINE = ITEMS.register("casino_machine",
+            () -> new com.makar.tacticaltablet.casino.CasinoMachineItem(ModBlocks.CASINO_MACHINE.get(), new Item.Properties()));
+
     public static final RegistryObject<Item> AIRDROP_CRATE = ITEMS.register("airdrop_crate",
             () -> new BlockItem(ModBlocks.AIRDROP_CRATE.get(), new Item.Properties()));
 

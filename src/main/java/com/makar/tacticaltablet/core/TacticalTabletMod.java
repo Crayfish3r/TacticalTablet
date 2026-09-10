@@ -53,6 +53,7 @@ public class TacticalTabletMod {
         ModItems.ITEMS.register(modEventBus);
         ModBlocks.BLOCKS.register(modEventBus);
         ModBlockEntities.BLOCK_ENTITIES.register(modEventBus);
+        ModMenuTypes.MENUS.register(modEventBus);
         ModEntities.ENTITIES.register(modEventBus);
         ModSounds.SOUND_EVENTS.register(modEventBus);
         ModParticles.PARTICLES.register(modEventBus);
@@ -87,6 +88,7 @@ public class TacticalTabletMod {
         if (event.getTabKey() == CreativeModeTabs.TOOLS_AND_UTILITIES) {
             event.accept(ModItems.TACTICAL_TABLET);
             event.accept(ModItems.CONTRACT_TRACKER);
+            event.accept(ModItems.CASINO_MACHINE);
         }
     }
 

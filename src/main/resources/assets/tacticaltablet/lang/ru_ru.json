@@ -58,6 +58,8 @@
   "screen.tacticaltablet.pause.resume": "Продолжить",
   "screen.tacticaltablet.pause.quit": "Выйти",
   "screen.tacticaltablet.casino.title": "ОДНОРУКИЙ БАНДИТ",
+  "block.tacticaltablet.casino_machine": "Игровой автомат",
+  "screen.tacticaltablet.casino.error.casino_machine_busy": "Этот автомат занят. Дождитесь остановки барабанов",
   "screen.tacticaltablet.casino.open": "Казино",
   "screen.tacticaltablet.casino.stake": "Ставка: %s",
   "screen.tacticaltablet.casino.play": "Играть",

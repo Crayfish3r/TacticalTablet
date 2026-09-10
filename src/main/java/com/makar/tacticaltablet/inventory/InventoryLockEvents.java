@@ -38,6 +38,7 @@ public class InventoryLockEvents {
 
     @SubscribeEvent
     public static void onItemToss(ItemTossEvent event) {
+        if (!com.makar.tacticaltablet.game.ServerRules.enabled(event.getPlayer().getServer())) return;
         if (!(event.getPlayer() instanceof ServerPlayer player)) return;
         if (ModerModeManager.isInModerMode(player)) return;
 
@@ -53,6 +54,7 @@ public class InventoryLockEvents {
 
     @SubscribeEvent
     public static void onRightClickBlock(PlayerInteractEvent.RightClickBlock event) {
+        if (!com.makar.tacticaltablet.game.ServerRules.enabled(event.getEntity().getServer())) return;
         if (!(event.getEntity() instanceof ServerPlayer player)) return;
         if (ModerModeManager.isInModerMode(player)) return;
 
@@ -89,6 +91,7 @@ public class InventoryLockEvents {
 
     @SubscribeEvent
     public static void onItemPickup(EntityItemPickupEvent event) {
+        if (!com.makar.tacticaltablet.game.ServerRules.enabled(event.getEntity().getServer())) return;
         if (!(event.getEntity() instanceof ServerPlayer player)) return;
         if (ModerModeManager.isInModerMode(player)) return;
 

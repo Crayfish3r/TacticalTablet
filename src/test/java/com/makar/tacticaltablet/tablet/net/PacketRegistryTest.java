@@ -22,9 +22,9 @@ class PacketRegistryTest {
         Map<Class<?>, PacketProtocol.Entry> map = entries.stream()
                 .collect(java.util.stream.Collectors.toMap(PacketProtocol.Entry::packetClass, entry -> entry));
 
-        assertEquals(42, entries.size());
-        assertEquals(42, new HashSet<>(entries.stream().map(PacketProtocol.Entry::id).toList()).size());
-        assertEquals(IntStream.range(0, 42).boxed().toList(), entries.stream().map(PacketProtocol.Entry::id).toList());
+        assertEquals(43, entries.size());
+        assertEquals(43, new HashSet<>(entries.stream().map(PacketProtocol.Entry::id).toList()).size());
+        assertEquals(IntStream.range(0, 43).boxed().toList(), entries.stream().map(PacketProtocol.Entry::id).toList());
         assertEquals(List.of(
                 TabletPacket.class, TabletStatePacket.class, VoteModePacket.class, JoinTeamPacket.class, VoteMapPacket.class,
                 MapVoteStatePacket.class, SetCompetitivePacket.class, SetClanWarPacket.class, ContractSelectionStatePacket.class,
@@ -45,7 +45,8 @@ class PacketRegistryTest {
                 com.makar.tacticaltablet.casino.net.CasinoSpinRequestPacket.class,
                 com.makar.tacticaltablet.casino.net.CasinoSpinResultPacket.class,
                 com.makar.tacticaltablet.casino.net.CasinoClosePacket.class,
-                com.makar.tacticaltablet.casino.net.CasinoSpectatorOpenPacket.class
+                com.makar.tacticaltablet.casino.net.CasinoSpectatorOpenPacket.class,
+                com.makar.tacticaltablet.casino.net.CasinoAnimationPacket.class
         ), entries.stream().map(PacketProtocol.Entry::packetClass).toList());
         assertEquals(19, map.get(com.makar.tacticaltablet.clan.ClanCreatePacket.class).id());
         assertEquals(18, map.get(com.makar.tacticaltablet.clan.ClanListPacket.class).id());
@@ -73,7 +74,7 @@ class PacketRegistryTest {
                 NetworkDirection.PLAY_TO_SERVER, NetworkDirection.PLAY_TO_CLIENT,
                 NetworkDirection.PLAY_TO_SERVER,
                 NetworkDirection.PLAY_TO_CLIENT, NetworkDirection.PLAY_TO_SERVER, NetworkDirection.PLAY_TO_CLIENT,
-                NetworkDirection.PLAY_TO_SERVER, NetworkDirection.PLAY_TO_SERVER
+                NetworkDirection.PLAY_TO_SERVER, NetworkDirection.PLAY_TO_SERVER, NetworkDirection.PLAY_TO_CLIENT
         ), entries.stream().map(PacketProtocol.Entry::direction).toList());
         PacketProtocol.verify();
     }
@@ -95,7 +96,8 @@ class PacketRegistryTest {
                 PacketHandler.SPECTATOR_HUD_STATE, PacketHandler.MDC_BALANCE_REQUEST,
                 PacketHandler.MDC_BALANCE_STATE, PacketHandler.MDC_BALANCE_UPDATE,
                 PacketHandler.CASINO_OPEN_STATE, PacketHandler.CASINO_SPIN_REQUEST,
-                PacketHandler.CASINO_SPIN_RESULT, PacketHandler.CASINO_CLOSE, PacketHandler.CASINO_SPECTATOR_OPEN
+                PacketHandler.CASINO_SPIN_RESULT, PacketHandler.CASINO_CLOSE, PacketHandler.CASINO_SPECTATOR_OPEN,
+                PacketHandler.CASINO_ANIMATION
         );
 
         assertEquals(PacketProtocol.entries().stream().map(PacketProtocol.Entry::id).toList(), constants);

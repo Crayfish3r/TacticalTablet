@@ -32,6 +32,7 @@ public class ClientEvents {
         if (!event.isUseItem()) return;
 
         Minecraft mc = Minecraft.getInstance();
+        if (mc.hasSingleplayerServer()) return;
         Player player = mc.player;
 
         if (player == null) return;
@@ -48,6 +49,7 @@ public class ClientEvents {
         if (event.phase != TickEvent.Phase.END) return;
 
         Minecraft mc = Minecraft.getInstance();
+        if (mc.hasSingleplayerServer()) return;
         if (mc.level == null || mc.player == null) return;
 
         Screen current = mc.screen;

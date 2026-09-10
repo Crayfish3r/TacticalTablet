@@ -29,7 +29,9 @@ public final class CasinoClosePacket {
         NetworkEvent.Context context = contextSupplier.get();
         context.enqueueWork(() -> {
             ServerPlayer player = context.getSender();
-            if (player == null || !PacketHandler.allowC2S(player, PacketHandler.C2SAction.CASINO)) return;
+            if (player == null) return;
+            if (player.containerMenu instanceof com.makar.tacticaltablet.casino.CasinoMenu menu
+                    && menu.sessionId().equals(sessionId)) player.closeContainer();
             CasinoSessionManager.close(player, sessionId);
         });
         context.setPacketHandled(true);

@@ -24,6 +24,7 @@ public final class ClientScreenEvents {
     public static void onScreenOpening(ScreenEvent.Opening event) {
         Screen newScreen = event.getNewScreen();
         if (newScreen instanceof PauseScreen && VANILLA_PAUSE_MENU_TITLE.equals(newScreen.getTitle())) {
+            if (net.minecraft.client.Minecraft.getInstance().hasSingleplayerServer()) return;
             if (event.getCurrentScreen() instanceof CustomPauseScreen currentPauseScreen) {
                 event.setNewScreen(currentPauseScreen);
             } else {

@@ -19,6 +19,7 @@ public final class AirdropEvents {
         if (event.phase != TickEvent.Phase.END) return;
 
         MinecraftServer server = event.getServer();
+        if (!com.makar.tacticaltablet.game.ServerRules.enabled(server)) return;
         ServerLevel overworld = server.getLevel(Level.OVERWORLD);
         if (overworld != null) {
             AirdropManager.serverTick(overworld);
@@ -27,6 +28,7 @@ public final class AirdropEvents {
 
     @SubscribeEvent
     public static void onPlayerLoggedIn(PlayerEvent.PlayerLoggedInEvent event) {
+        if (!com.makar.tacticaltablet.game.ServerRules.enabled(event.getEntity().getServer())) return;
         if (!(event.getEntity() instanceof ServerPlayer player)) return;
 
         AirdropManager.giveCompassToJoiningPlayer(player);

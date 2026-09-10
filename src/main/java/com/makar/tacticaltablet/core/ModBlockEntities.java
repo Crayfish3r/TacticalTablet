@@ -19,6 +19,10 @@ public final class ModBlockEntities {
                     ).build(null)
             );
 
+    public static final RegistryObject<BlockEntityType<com.makar.tacticaltablet.casino.CasinoMachineBlockEntity>> CASINO_MACHINE =
+            BLOCK_ENTITIES.register("casino_machine", () -> BlockEntityType.Builder.of(
+                    com.makar.tacticaltablet.casino.CasinoMachineBlockEntity::new, ModBlocks.CASINO_MACHINE.get()).build(null));
+
     private ModBlockEntities() {
     }
 }

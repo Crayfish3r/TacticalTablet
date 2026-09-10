@@ -19,7 +19,8 @@ public final class CasinoSpinResultPacket {
         INSUFFICIENT_COINS,
         INVALID_SESSION,
         INVALID_REQUEST,
-        SAVE_FAILED
+        SAVE_FAILED,
+        CASINO_MACHINE_BUSY
     }
 
     private final UUID sessionId;

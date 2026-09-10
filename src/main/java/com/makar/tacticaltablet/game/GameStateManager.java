@@ -129,7 +129,7 @@ public class GameStateManager {
     }
 
     public static boolean isRunning(MinecraftServer server) {
-        return getGameState(server) == RUNNING;
+        return ServerRules.enabled(server) && getGameState(server) == RUNNING;
     }
 
     public static MatchLifecycleSnapshot getLifecycleSnapshot() {

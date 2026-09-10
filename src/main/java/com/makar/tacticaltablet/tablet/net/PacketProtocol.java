@@ -46,7 +46,8 @@ public final class PacketProtocol {
             entry(38, CasinoSpinRequestPacket.class, NetworkDirection.PLAY_TO_SERVER),
             entry(39, CasinoSpinResultPacket.class, NetworkDirection.PLAY_TO_CLIENT),
             entry(40, CasinoClosePacket.class, NetworkDirection.PLAY_TO_SERVER),
-            entry(41, CasinoSpectatorOpenPacket.class, NetworkDirection.PLAY_TO_SERVER)
+            entry(41, CasinoSpectatorOpenPacket.class, NetworkDirection.PLAY_TO_SERVER),
+            entry(42, CasinoAnimationPacket.class, NetworkDirection.PLAY_TO_CLIENT)
     );
 
     private PacketProtocol() { }

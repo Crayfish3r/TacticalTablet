@@ -1,32 +1,29 @@
 package com.makar.tacticaltablet.game.lobby;
-
-import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.*;
 import org.junit.jupiter.api.Test;
-
-import static org.junit.jupiter.api.Assertions.assertArrayEquals;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
+import java.nio.file.*;
+import static org.junit.jupiter.api.Assertions.*;
 class CasinoNpcTemplateMigrationTest {
-    @Test
-    void sanitizingTemplateEntityRemovesUuidWithoutMutatingResourceNbt() {
+    @Test void filterIsIdempotentAndPreservesBlocksAndOrdinaryEntities() throws Exception {
+        try (var input = Files.newInputStream(Path.of("src/main/resources/data/lobby/structures/spawn.nbt"))) {
+            CompoundTag source = NbtIo.readCompressed(input);
+            CompoundTag filtered = CasinoNpcTemplateMigration.withoutLegacyCasinoNpcs(source);
+            assertEquals(16, source.getList("entities", 10).size());
+            assertEquals(12, filtered.getList("entities", 10).size());
+            assertEquals(source.get("blocks"), filtered.get("blocks"));
+            assertEquals(source.get("palette"), filtered.get("palette"));
+            assertEquals(filtered, CasinoNpcTemplateMigration.withoutLegacyCasinoNpcs(filtered));
+        }
+    }
+    @Test void ordinaryNamedVillagerAndMachineBlockRemain() {
         CompoundTag source = new CompoundTag();
-        source.putString("id", "minecraft:villager");
-        source.putIntArray("UUID", new int[]{1, 2, 3, 4});
-        source.putLong("UUIDMost", 5L);
-        source.putLong("UUIDLeast", 6L);
-
-        CompoundTag sanitized = CasinoNpcTemplateMigration.sanitizeEntityTag(source);
-
-        assertFalse(sanitized.contains("UUID"));
-        assertFalse(sanitized.contains("UUIDMost"));
-        assertFalse(sanitized.contains("UUIDLeast"));
-        assertEquals("minecraft:villager", sanitized.getString("id"));
-
-        assertTrue(source.contains("UUID"));
-        assertArrayEquals(new int[]{1, 2, 3, 4}, source.getIntArray("UUID"));
-        assertEquals(5L, source.getLong("UUIDMost"));
-        assertEquals(6L, source.getLong("UUIDLeast"));
+        CompoundTag villager = new CompoundTag();
+        villager.putString("id", "minecraft:villager");
+        villager.putString("CustomName", "{\"text\":\"Trader\"}");
+        CompoundTag entry = new CompoundTag(); entry.put("nbt", villager);
+        ListTag entities = new ListTag(); entities.add(entry); source.put("entities", entities);
+        CompoundTag machine = new CompoundTag(); machine.putString("Name", "tacticaltablet:casino_machine");
+        ListTag palette = new ListTag(); palette.add(machine); source.put("palette", palette);
+        assertEquals(source, CasinoNpcTemplateMigration.withoutLegacyCasinoNpcs(source));
     }
 }

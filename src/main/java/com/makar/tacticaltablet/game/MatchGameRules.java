@@ -9,7 +9,7 @@ public final class MatchGameRules {
     }
 
     public static void apply(MinecraftServer server) {
-        if (server == null) return;
+        if (!ServerRules.enabled(server)) return;
         GameRules rules = server.getGameRules();
         rules.getRule(GameRules.RULE_ANNOUNCE_ADVANCEMENTS).set(false, server);
         rules.getRule(GameRules.RULE_DO_IMMEDIATE_RESPAWN).set(true, server);

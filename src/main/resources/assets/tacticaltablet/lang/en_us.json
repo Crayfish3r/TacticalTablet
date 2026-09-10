@@ -63,6 +63,8 @@
   "screen.tacticaltablet.pause.resume": "Resume",
   "screen.tacticaltablet.pause.quit": "Disconnect",
   "screen.tacticaltablet.casino.title": "ONE-ARMED BANDIT",
+  "block.tacticaltablet.casino_machine": "Casino Machine",
+  "screen.tacticaltablet.casino.error.casino_machine_busy": "This machine is busy. Wait for its reels to stop",
   "screen.tacticaltablet.casino.open": "Casino",
   "screen.tacticaltablet.casino.stake": "Stake: %s",
   "screen.tacticaltablet.casino.play": "Play",

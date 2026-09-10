@@ -16,10 +16,11 @@ import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemp
 
 import java.util.Optional;
 
-/** Installs lobby:spawn once and records the decision in dimension SavedData. */
+/** Installs the supplied lobby template once; machine blocks are ordinary template blocks. */
 public final class LobbyBootstrapManager {
     static final int CURRENT_VERSION = 2;
     static final ResourceLocation LOBBY_SPAWN_TEMPLATE = new ResourceLocation("lobby", "spawn");
+    static final ResourceLocation LOBBY_MACHINE_TEMPLATE = new ResourceLocation("lobby", "lobby");
     static final BlockPos LOBBY_SPAWN_ORIGIN = new BlockPos(-10, 64, -10);
     private static final Vec3i LEGACY_STRUCTURE_SIZE = new Vec3i(20, 20, 20);
 
@@ -34,7 +35,7 @@ public final class LobbyBootstrapManager {
             return false;
         }
 
-        Optional<StructureTemplate> template = lobby.getStructureManager().get(LOBBY_SPAWN_TEMPLATE);
+        Optional<StructureTemplate> template = lobbyTemplate(lobby);
         if (template.isEmpty()) {
             TacticalTabletMod.LOGGER.error(
                     "Lobby bootstrap failed: embedded structure lobby:spawn is unavailable");
@@ -49,12 +50,13 @@ public final class LobbyBootstrapManager {
         );
         if (data.version() >= CURRENT_VERSION) {
             TacticalTabletMod.LOGGER.info(
-                    "Lobby bootstrap v{} already committed; preserving lobby blocks and verifying casino NPCs",
+                    "Lobby bootstrap v{} already committed; preserving lobby blocks",
                     data.version());
-            return ensureCasinoNpcs(lobby, data);
+            return true;
         }
         if (data.version() > 0) {
-            return ensureCasinoNpcs(lobby, data);
+            data.markVersion(CURRENT_VERSION);
+            return true;
         }
         boolean hasContent = targetVolumeHasContent(lobby, template.orElse(null));
         LobbyBootstrapPolicy.Action action = LobbyBootstrapPolicy.decide(
@@ -68,7 +70,8 @@ public final class LobbyBootstrapManager {
                 yield true;
             }
             case MARK_EXISTING_CONTENT -> {
-                yield ensureCasinoNpcs(lobby, data);
+                data.markVersion(CURRENT_VERSION);
+                yield true;
             }
             case PLACE_STRUCTURE -> placeAndMark(lobby, template.orElseThrow(), data);
             case FAIL_MISSING_TEMPLATE -> {
@@ -127,7 +130,7 @@ public final class LobbyBootstrapManager {
             return -1;
         }
 
-        Optional<StructureTemplate> template = lobby.getStructureManager().get(LOBBY_SPAWN_TEMPLATE);
+        Optional<StructureTemplate> template = lobbyTemplate(lobby);
         if (template.isEmpty()) {
             TacticalTabletMod.LOGGER.error("Lobby fragile-block repair failed: lobby:spawn is unavailable");
             return -1;
@@ -155,7 +158,12 @@ public final class LobbyBootstrapManager {
             StructureTemplate template,
             LobbyBootstrapSavedData data
     ) {
-        boolean placed = template.placeInWorld(
+        // The bundled fallback is an old template. Filter only its casino entities;
+        // retain decorations, all blocks and BlockEntity data, and the original resource bytes.
+        StructureTemplate filtered = new StructureTemplate();
+        filtered.load(lobby.registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.BLOCK),
+                CasinoNpcTemplateMigration.withoutLegacyCasinoNpcs(template.save(new net.minecraft.nbt.CompoundTag())));
+        boolean placed = filtered.placeInWorld(
                 lobby,
                 LOBBY_SPAWN_ORIGIN,
                 LOBBY_SPAWN_ORIGIN,
@@ -170,35 +178,14 @@ public final class LobbyBootstrapManager {
             return false;
         }
         TacticalTabletMod.LOGGER.info(
-                "Lobby bootstrap placed lobby:spawn at {}; verifying casino NPCs before recording v{}",
+                "Lobby bootstrap placed the lobby template at {}; recording v{}",
                 LOBBY_SPAWN_ORIGIN, CURRENT_VERSION);
-        return ensureCasinoNpcs(lobby, data);
+        data.markVersion(CURRENT_VERSION);
+        return true;
     }
 
-    private static boolean ensureCasinoNpcs(ServerLevel lobby, LobbyBootstrapSavedData data) {
-        CasinoNpcTemplateMigration.Result result = CasinoNpcTemplateMigration.migrate(
-                lobby,
-                LOBBY_SPAWN_TEMPLATE,
-                LOBBY_SPAWN_ORIGIN
-        );
-        if (!result.successful()) {
-            TacticalTabletMod.LOGGER.error(
-                    "Lobby bootstrap v{} migration failed: {}/{} casino NPCs are present; version remains v{} for retry",
-                    CURRENT_VERSION,
-                    result.present(),
-                    result.expected(),
-                    data.version()
-            );
-            return false;
-        }
-        data.markVersion(CURRENT_VERSION);
-        TacticalTabletMod.LOGGER.info(
-                "Lobby bootstrap reconciled v{}: {}/{} casino NPCs present ({} spawned); lobby blocks were preserved",
-                CURRENT_VERSION,
-                result.present(),
-                result.expected(),
-                result.spawned()
-        );
-        return true;
+    private static Optional<StructureTemplate> lobbyTemplate(ServerLevel lobby) {
+        return lobby.getStructureManager().get(LOBBY_MACHINE_TEMPLATE)
+                .or(() -> lobby.getStructureManager().get(LOBBY_SPAWN_TEMPLATE));
     }
 }

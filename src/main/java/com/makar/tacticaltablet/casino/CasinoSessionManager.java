@@ -1,6 +1,12 @@
 package com.makar.tacticaltablet.casino;
 
-import com.makar.tacticaltablet.casino.net.CasinoOpenStatePacket;
+import com.makar.tacticaltablet.casino.net.CasinoAnimationPacket;
+import net.minecraft.core.BlockPos;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.SimpleMenuProvider;
+import net.minecraftforge.network.NetworkHooks;
+import com.makar.tacticaltablet.core.ModBlocks;
 import com.makar.tacticaltablet.casino.net.CasinoSpinResultPacket;
 import com.makar.tacticaltablet.game.GameStateManager;
 import com.makar.tacticaltablet.game.MapSetManager;
@@ -37,7 +43,6 @@ import java.util.UUID;
 /** Authoritative transient casino admission and spin state. All methods are called on the server thread. */
 public final class CasinoSessionManager {
     public static final String PLAYER_TAG = "tacticaltablet.casino";
-    public static final String NPC_NAME = "Однорукий бандит";
     public static final int ANIMATION_TICKS = 80;
     public static final int RETURN_DELAY_TICKS = 20 * 10;
 
@@ -63,12 +68,19 @@ public final class CasinoSessionManager {
         return isInCasino(player);
     }
 
-    public static boolean openFromNpc(ServerPlayer player) {
-        if (!canEnterFromNpc(player)) {
+    /** Compatibility entry cannot authenticate a physical machine and therefore fails closed. */
+    @Deprecated
+    public static boolean openFromNpc(ServerPlayer player) { return false; }
+
+    public static boolean openFromMachine(ServerPlayer player, BlockPos pos) {
+        if (!canEnterFromMachine(player) || pos == null) {
             if (player != null) player.sendSystemMessage(Component.translatable("message.tacticaltablet.casino.unavailable"));
             return false;
         }
-        return open(player, Source.NPC);
+        CasinoMachineBlockEntity machine = machineAt(player, pos);
+        if (machine == null || player.distanceToSqr(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5)
+                > CasinoMachineAccess.MAX_USE_DISTANCE_SQR) return false;
+        return open(player, Source.MACHINE, machine);
     }
 
     public static boolean openFromSpectator(ServerPlayer player) {
@@ -76,39 +88,79 @@ public final class CasinoSessionManager {
             if (player != null) player.sendSystemMessage(Component.translatable("message.tacticaltablet.casino.spectator_unavailable"));
             return false;
         }
-        return open(player, Source.SPECTATOR);
+        return open(player, Source.SPECTATOR, null);
     }
 
-    private static boolean open(ServerPlayer player, Source source) {
-        Session current = SESSIONS.get(player.getUUID());
-        if (current != null) {
-            return true;
-        }
-
-        PENDING_RETURNS.remove(player.getUUID());
-        if (source == Source.NPC) {
-            VoteManager.removeVote(player);
-            if (GameStateManager.getMatchPhase() == MatchPhase.TEAM_SELECT) {
-                TeamMatchManager.removePlayerFromMatch(player);
-            }
-        }
-        Session session = new Session(UUID.randomUUID(), source);
+    private static boolean open(ServerPlayer player, Source source, CasinoMachineBlockEntity machine) {
+        // Closing an old menu must not close the replacement session in its removed callback.
+        player.closeContainer();
+        Session session = new Session(UUID.randomUUID(), source, machine);
         SESSIONS.put(player.getUUID(), session);
+        PENDING_RETURNS.remove(player.getUUID());
         player.addTag(PLAYER_TAG);
-        sendOpen(player, session);
+        if (source == Source.MACHINE) {
+            VoteManager.removeVote(player);
+            if (GameStateManager.getMatchPhase() == MatchPhase.TEAM_SELECT) TeamMatchManager.removePlayerFromMatch(player);
+        }
+        int balance = PlayerProgressManager.getCoins(player);
+        NetworkHooks.openScreen(player, new SimpleMenuProvider(
+                (id, inventory, user) -> new CasinoMenu(id, session.id, balance, session.dimension, session.machinePos),
+                Component.translatable("screen.tacticaltablet.casino.title")), data -> {
+            data.writeUUID(session.id);
+            data.writeVarInt(balance);
+            data.writeBoolean(source == Source.SPECTATOR);
+            if (source == Source.MACHINE) {
+                data.writeResourceLocation(session.dimension.location());
+                data.writeBlockPos(session.machinePos);
+            }
+        });
+        if (!(player.containerMenu instanceof CasinoMenu menu) || !menu.sessionId().equals(session.id)) {
+            close(player, session.id);
+            return false;
+        }
         return true;
     }
 
+    private static CasinoMachineBlockEntity machineAt(ServerPlayer player, BlockPos pos) {
+        if (!player.serverLevel().hasChunkAt(pos) || !player.level().getBlockState(pos).is(ModBlocks.CASINO_MACHINE.get())) return null;
+        return player.level().getBlockEntity(pos) instanceof CasinoMachineBlockEntity machine && !machine.isRemoved() ? machine : null;
+    }
+
+    public static boolean isMenuValid(ServerPlayer player, CasinoMenu menu) {
+        Session session = SESSIONS.get(player.getUUID());
+        if (session == null || player.containerMenu != menu || !menu.matches(session.id, session.dimension, session.machinePos)
+                || player.hasDisconnected() || !player.isAlive() || ModerModeManager.isInModerMode(player)) return false;
+        if (session.source == Source.SPECTATOR) {
+            return GameStateManager.isInLobby(player) || player.gameMode.getGameModeForPlayer() == GameType.SPECTATOR;
+        }
+        boolean sameDimension = player.level().dimension().equals(session.dimension);
+        CasinoMachineBlockEntity actual = sameDimension ? machineAt(player, session.machinePos) : null;
+        return CasinoMachineAccess.allows(true, sameDimension, actual != null, actual == session.machine,
+                player.distanceToSqr(session.machinePos.getX() + 0.5, session.machinePos.getY() + 0.5,
+                        session.machinePos.getZ() + 0.5), true);
+    }
+
+    private static void invalidate(ServerPlayer player, Session session) {
+        if (player.containerMenu instanceof CasinoMenu menu && menu.sessionId().equals(session.id)) player.closeContainer();
+        close(player, session.id);
+    }
+
     public static void spin(ServerPlayer player, UUID sessionId, UUID requestId, int stake) {
-        if (player == null || sessionId == null || requestId == null) return;
+        if (player == null || player.hasDisconnected() || sessionId == null || requestId == null) return;
         Session session = SESSIONS.get(player.getUUID());
         if (session == null || !session.id.equals(sessionId)) {
             sendFailure(player, sessionId, requestId, CasinoSpinResultPacket.Status.INVALID_SESSION,
                     PlayerProgressManager.getCoins(player));
             return;
         }
+        if (!(player.containerMenu instanceof CasinoMenu menu) || !isMenuValid(player, menu)) {
+            invalidate(player, session);
+            sendFailure(player, sessionId, requestId, CasinoSpinResultPacket.Status.INVALID_SESSION, PlayerProgressManager.getCoins(player));
+            return;
+        }
         if (requestId.equals(session.lastRequestId) && session.lastResult != null) {
             PacketHandler.sendToPlayer(player, session.lastResult);
+            if (session.lastAnimation != null) PacketHandler.sendToPlayer(player, session.lastAnimation);
             return;
         }
         if (!CasinoSpinTable.isAllowedStake(stake)) {
@@ -124,23 +176,38 @@ public final class CasinoSessionManager {
             return;
         }
 
-        CasinoReward rolled = SPIN_TABLE.roll(stake);
-        CasinoProgressResult committed = PlayerProgressManager.applyCasinoSpin(player, new CasinoProgressRequest(
-                requestId.toString(),
-                stake,
-                rolled.kind(),
-                rolled.coins(),
-                rolled.classId(),
-                rolled.duplicateCompensation()
-        ));
-        CasinoSpinResultPacket result = packetFor(sessionId, requestId, committed);
-        if (committed.successful()) {
-            NEXT_SPIN_TICK.put(player.getUUID(), currentTick + ANIMATION_TICKS);
-            session.lastRequestId = requestId;
-            session.lastResult = result;
-            ClassXPManager.sync(player);
+        CasinoMachineBlockEntity machine = session.machine;
+        if (machine != null && !machine.reserveSpin()) {
+            sendFailure(player, sessionId, requestId, CasinoSpinResultPacket.Status.CASINO_MACHINE_BUSY, PlayerProgressManager.getCoins(player));
+            return;
         }
-        PacketHandler.sendToPlayer(player, result);
+        try {
+            CasinoReward rolled = SPIN_TABLE.roll(stake);
+            CasinoProgressResult committed = PlayerProgressManager.applyCasinoSpin(player, new CasinoProgressRequest(
+                    requestId.toString(), stake, rolled.kind(), rolled.coins(), rolled.classId(), rolled.duplicateCompensation()));
+            long seed = SECURE_RANDOM.nextLong();
+            boolean newlyApplied = committed.status() == CasinoProgressResult.Status.APPLIED;
+            CasinoSpinResultPacket result = packetFor(sessionId, requestId, committed, seed, newlyApplied);
+            if (committed.successful()) {
+                CasinoReelResult reels = CasinoReelResult.fromReward(committed.rewardKind(), committed.awardedCoins(), seed);
+                CasinoReelResult previous = machine == null ? session.previousReels : machine.animation().target();
+                long start = player.level().getGameTime();
+                if (machine != null && newlyApplied) machine.startAnimation(seed, reels);
+                else if (machine != null) machine.releaseSpin();
+                session.previousReels = reels;
+                NEXT_SPIN_TICK.put(player.getUUID(), currentTick + ANIMATION_TICKS);
+                session.lastRequestId = requestId;
+                session.lastResult = result;
+                session.lastAnimation = new CasinoAnimationPacket(sessionId, requestId, start,
+                        newlyApplied ? ANIMATION_TICKS : 0, seed, previous, reels);
+                ClassXPManager.sync(player);
+            } else if (machine != null) machine.releaseSpin();
+            PacketHandler.sendToPlayer(player, result);
+            if (committed.successful()) PacketHandler.sendToPlayer(player, session.lastAnimation);
+        } finally {
+            // Releases reservations on failure/exception; an already started visual spin stays busy.
+            if (machine != null) machine.releaseSpin();
+        }
     }
 
     public static void close(ServerPlayer player, UUID sessionId) {
@@ -169,17 +236,15 @@ public final class CasinoSessionManager {
         long currentTick = server.getTickCount();
         NEXT_SPIN_TICK.entrySet().removeIf(entry -> entry.getValue() + 200L < currentTick);
 
-        Iterator<Map.Entry<UUID, Session>> sessionIterator = SESSIONS.entrySet().iterator();
-        while (sessionIterator.hasNext()) {
-            Map.Entry<UUID, Session> entry = sessionIterator.next();
+        for (Map.Entry<UUID, Session> entry : new java.util.ArrayList<>(SESSIONS.entrySet())) {
             ServerPlayer player = server.getPlayerList().getPlayer(entry.getKey());
-            boolean valid = player != null && !player.hasDisconnected()
-                    && (GameStateManager.isInLobby(player)
-                    || player.gameMode.getGameModeForPlayer() == GameType.SPECTATOR);
-            if (valid) continue;
-            if (player != null) player.removeTag(PLAYER_TAG);
-            PENDING_RETURNS.remove(entry.getKey());
-            sessionIterator.remove();
+            if (player == null || player.hasDisconnected()) {
+                SESSIONS.remove(entry.getKey());
+                PENDING_RETURNS.remove(entry.getKey());
+                if (player != null) player.removeTag(PLAYER_TAG);
+            } else if (!(player.containerMenu instanceof CasinoMenu menu) || !isMenuValid(player, menu)) {
+                invalidate(player, entry.getValue());
+            }
         }
 
         Iterator<Map.Entry<UUID, PendingReturn>> returnIterator = PENDING_RETURNS.entrySet().iterator();
@@ -224,14 +289,15 @@ public final class CasinoSessionManager {
         NEXT_SPIN_TICK.clear();
     }
 
-    private static boolean canEnterFromNpc(ServerPlayer player) {
+    private static boolean canEnterFromMachine(ServerPlayer player) {
         if (player == null || player.hasDisconnected()) return false;
+        if (!com.makar.tacticaltablet.game.ServerRules.enabled(player.server)) return player.isAlive();
         if (hasOpenReentryWindow(player)) {
             return GameStateManager.isInLobby(player)
                     && !GameStateManager.isStartTransitionPlayerSetup()
                     && !ModerModeManager.isInModerMode(player);
         }
-        return CasinoAdmissionPolicy.allowsNpc(
+        return CasinoAdmissionPolicy.allowsMachine(
                 GameStateManager.isInLobby(player),
                 GameStateManager.isRunning(player.server),
                 GameStateManager.isStartTransitionPlayerSetup(),
@@ -257,6 +323,11 @@ public final class CasinoSessionManager {
 
     private static void scheduleReturn(ServerPlayer player) {
         SESSIONS.remove(player.getUUID());
+        if (!com.makar.tacticaltablet.game.ServerRules.enabled(player.server)) {
+            PENDING_RETURNS.remove(player.getUUID());
+            player.removeTag(PLAYER_TAG);
+            return;
+        }
         player.addTag(PLAYER_TAG);
         PENDING_RETURNS.put(
                 player.getUUID(),
@@ -347,18 +418,10 @@ public final class CasinoSessionManager {
         ));
     }
 
-    private static void sendOpen(ServerPlayer player, Session session) {
-        PacketHandler.sendToPlayer(player, new CasinoOpenStatePacket(
-                session.id,
-                PlayerProgressManager.getCoins(player),
-                session.source == Source.SPECTATOR
-        ));
-    }
-
     private static CasinoSpinResultPacket packetFor(
             UUID sessionId,
             UUID requestId,
-            CasinoProgressResult result
+            CasinoProgressResult result, long seed, boolean newlyApplied
     ) {
         CasinoSpinResultPacket.Status status = switch (result.status()) {
             case APPLIED, ALREADY_APPLIED -> CasinoSpinResultPacket.Status.SUCCESS;
@@ -375,8 +438,8 @@ public final class CasinoSessionManager {
                 result.awardedCoins(),
                 result.classId(),
                 result.duplicate(),
-                status == CasinoSpinResultPacket.Status.SUCCESS ? ANIMATION_TICKS : 0,
-                SECURE_RANDOM.nextLong()
+                status == CasinoSpinResultPacket.Status.SUCCESS && newlyApplied ? ANIMATION_TICKS : 0,
+                seed
         );
     }
 
@@ -401,17 +464,25 @@ public final class CasinoSessionManager {
         ));
     }
 
-    private enum Source { NPC, SPECTATOR }
+    public enum Source { MACHINE, SPECTATOR }
 
     private static final class Session {
         private final UUID id;
         private final Source source;
+        private final ResourceKey<Level> dimension;
+        private final BlockPos machinePos;
+        private final CasinoMachineBlockEntity machine;
+        private CasinoReelResult previousReels = CasinoReelResult.IDLE;
+        private CasinoAnimationPacket lastAnimation;
         private UUID lastRequestId;
         private CasinoSpinResultPacket lastResult;
 
-        private Session(UUID id, Source source) {
+        private Session(UUID id, Source source, CasinoMachineBlockEntity machine) {
             this.id = id;
             this.source = source;
+            this.machine = machine;
+            this.dimension = machine == null ? null : machine.getLevel().dimension();
+            this.machinePos = machine == null ? null : machine.getBlockPos().immutable();
         }
     }
 
