@@ -23,6 +23,14 @@ public final class ProgressApplicationService {
         return new ProgressApplicationResult<>(result, result.successful());
     }
 
+    ProgressApplicationResult<ProgressPurchaseResult> prepareCosmeticPurchase(
+            MutableCosmeticProgressState progress,
+            String productId
+    ) {
+        ProgressPurchaseResult result = progressService.purchaseCosmetic(progress, productId);
+        return new ProgressApplicationResult<>(result, result.successful());
+    }
+
     ProgressApplicationResult<BaseUnlockResult> prepareBaseUnlock(
             MutableProgressState progress,
             String classId,

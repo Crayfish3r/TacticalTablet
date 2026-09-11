@@ -1,15 +1,12 @@
 package com.makar.tacticaltablet.client.gui;
 
 import com.makar.tacticaltablet.client.gui.component.TextureMenuButton;
-import com.makar.tacticaltablet.casino.net.CasinoSpectatorOpenPacket;
 import com.makar.tacticaltablet.client.gui.render.TabletMenuRenderer;
-import com.makar.tacticaltablet.tablet.client.ui.widget.TacticalButton;
 import com.makar.tacticaltablet.client.ExternalUiTheme;
 import com.makar.tacticaltablet.tablet.client.ui.TacticalUi;
 import com.makar.tacticaltablet.tablet.client.ui.UiFrameClock;
 import com.makar.tacticaltablet.tablet.client.ui.UiFrameContext;
 import com.makar.tacticaltablet.tablet.client.ui.animation.AnimatedFloat;
-import com.makar.tacticaltablet.tablet.net.PacketHandler;
 import net.minecraft.Util;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
@@ -63,17 +60,6 @@ public final class CustomPauseScreen extends Screen implements com.makar.tactica
         );
 
         updateButtonAnimation(0.0F);
-        if (minecraft.player != null && minecraft.player.isSpectator()) {
-            int casinoWidth = Math.min(112, Math.max(80, menuLayout.frameWidth() / 4));
-            addRenderableWidget(TacticalButton.compact(
-                    menuLayout.frameX() + menuLayout.frameWidth() - casinoWidth - 12,
-                    menuLayout.frameY() + 12,
-                    casinoWidth,
-                    Component.translatable("screen.tacticaltablet.casino.open"),
-                    ignored -> PacketHandler.sendToServer(new CasinoSpectatorOpenPacket())
-            ).withAccentBar(true).withAccentColor(ExternalUiTheme.WARNING));
-        }
-
     }
 
     private void addMenuButton(

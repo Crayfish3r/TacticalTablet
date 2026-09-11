@@ -8,7 +8,10 @@ import java.util.Set;
 
 public final class KeyBindingVisibilityPolicy {
 
-    private static final String TACZ_CRAWL = "key.tacz.crawl.desc";
+    private static final Set<String> FORCED_UNBOUND = Set.of(
+            "key.tacz.crawl.desc",
+            "key.parcool.HideInBlock"
+    );
 
     private static final Set<String> PARCOOL_HIDDEN = Set.of(
             "key.parcool.HideInBlock",
@@ -63,7 +66,7 @@ public final class KeyBindingVisibilityPolicy {
     }
 
     public static boolean mustBeUnbound(String name) {
-        return TACZ_CRAWL.equals(name);
+        return name != null && FORCED_UNBOUND.contains(name);
     }
 
     private static Optional<Entry> classifyLesRaisins(String name) {

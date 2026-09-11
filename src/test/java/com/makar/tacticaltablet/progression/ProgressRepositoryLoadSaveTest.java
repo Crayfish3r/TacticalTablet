@@ -25,7 +25,7 @@ class ProgressRepositoryLoadSaveTest {
     private static final Set<String> JSON_FIELDS = Set.of(
             "dataVersion", "name", "uuid", "classes", "classTiers", "unlockedBaseClasses",
             "wins", "kills", "deaths", "matchesPlayed", "coins", "battlePassXp",
-            "xpBoost", "sadTromboneKills", "purchasedClasses", "donations", "stats",
+            "xpBoost", "sadTromboneKills", "purchasedClasses", "purchasedCosmetics", "donations", "stats",
             "appliedTransactionReceipts", "firstSeen", "lastSeen"
     );
 
@@ -47,11 +47,30 @@ class ProgressRepositoryLoadSaveTest {
             Path file = repository.playerFile("Игрок");
             JsonObject json = JsonParser.parseString(Files.readString(file)).getAsJsonObject();
             assertEquals(JSON_FIELDS, json.keySet());
-            assertEquals(11, json.get("dataVersion").getAsInt());
+            assertEquals(12, json.get("dataVersion").getAsInt());
             assertEquals(25, repository.loadByKey("Игрок").orElseThrow().data().coins());
             try (Stream<Path> files = Files.list(repository.playersRoot())) {
                 assertFalse(files.anyMatch(path -> path.getFileName().toString().endsWith(".tmp")));
             }
+        }
+    }
+
+    @Test
+    void purchasedCosmeticSurvivesSaveAndReload() throws Exception {
+        try (ProgressRepository repository = ProgressRepositoryTestSupport.repository(temporaryRoot)) {
+            ProgressSnapshot base = ProgressRepositoryTestSupport.snapshot("owner", 1, 500);
+            ProgressSnapshot.Data value = base.data();
+            ProgressSnapshot.Data owned = new ProgressSnapshot.Data(
+                    value.dataVersion(), value.name(), value.uuid(), value.classes(), value.classTiers(),
+                    value.unlockedBaseClasses(), value.wins(), value.kills(), value.deaths(), value.matchesPlayed(),
+                    value.coins(), value.battlePassXp(), value.xpBoost(), value.sadTromboneKills(),
+                    value.purchasedClasses(), Set.of(CosmeticCatalog.GHILLIE_SUIT_ID), value.donations(),
+                    value.stats(), value.appliedTransactionReceipts(), value.firstSeen(), value.lastSeen());
+
+            await(repository.save(new ProgressSnapshot("owner", 1, owned), false));
+
+            assertEquals(Set.of(CosmeticCatalog.GHILLIE_SUIT_ID),
+                    repository.loadByKey("owner").orElseThrow().data().purchasedCosmetics());
         }
     }
 
@@ -78,12 +97,13 @@ class ProgressRepositoryLoadSaveTest {
             ProgressRepository.LoadedProfile loaded = repository.loadByKey("legacy").orElseThrow();
 
             assertTrue(loaded.requiresSave());
-            assertEquals(11, loaded.data().dataVersion());
+            assertEquals(12, loaded.data().dataVersion());
             assertEquals(0, loaded.data().coins());
             assertEquals(800, loaded.data().classes().get("medic"));
             assertEquals(ClassTier.BASIC.id(), loaded.data().classTiers().get("medic"));
             assertEquals(1, loaded.data().unlockedBaseClasses().get("medic"));
             assertTrue(loaded.data().appliedTransactionReceipts().isEmpty());
+            assertTrue(loaded.data().purchasedCosmetics().isEmpty());
         }
     }
 

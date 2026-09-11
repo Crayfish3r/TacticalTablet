@@ -53,6 +53,20 @@ public final class ProgressService {
         return result;
     }
 
+    ProgressPurchaseResult purchaseCosmetic(MutableCosmeticProgressState progress, String productId) {
+        Objects.requireNonNull(progress, "progress");
+        Optional<CosmeticCatalog.Entry> product = CosmeticCatalog.find(productId);
+        int price = product.map(CosmeticCatalog.Entry::price).orElse(0);
+        String normalizedId = product.map(CosmeticCatalog.Entry::id).orElse("");
+        ProgressPurchaseResult result = ProgressPolicy.evaluatePurchase(
+                progress.coins(), price, progress.ownsCosmetic(normalizedId), product.isPresent());
+        if (!result.successful()) return result;
+
+        progress.coins(result.currentBalance());
+        progress.addCosmetic(normalizedId);
+        return result;
+    }
+
     ExperienceMutationResult addExperience(
             MutableProgressState progress,
             String classId,

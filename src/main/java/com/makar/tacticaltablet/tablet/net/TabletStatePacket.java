@@ -9,6 +9,7 @@ import net.minecraftforge.network.NetworkEvent;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Supplier;
 
 public class TabletStatePacket {
@@ -29,6 +30,7 @@ public class TabletStatePacket {
     private final Map<String, Integer> classTiers;
     private final Map<String, Integer> unlockedBaseClasses;
     private final Map<String, Integer> purchasedClasses;
+    private final Set<String> purchasedCosmetics;
     private final boolean gameRunning;
     private final int wins;
     private final int kills;
@@ -88,6 +90,7 @@ public class TabletStatePacket {
                 classTiers,
                 unlockedBaseClasses,
                 purchasedClasses,
+                Set.of(),
                 gameRunning,
                 wins,
                 kills,
@@ -127,6 +130,7 @@ public class TabletStatePacket {
             Map<String, Integer> classTiers,
             Map<String, Integer> unlockedBaseClasses,
             Map<String, Integer> purchasedClasses,
+            Set<String> purchasedCosmetics,
             boolean gameRunning,
             int wins,
             int kills,
@@ -163,6 +167,7 @@ public class TabletStatePacket {
         this.classTiers = copyStringIntMap(classTiers, MAX_CLASS_ENTRIES);
         this.unlockedBaseClasses = copyStringIntMap(unlockedBaseClasses, MAX_CLASS_ENTRIES);
         this.purchasedClasses = copyStringIntMap(purchasedClasses, MAX_CLASS_ENTRIES);
+        this.purchasedCosmetics = copyStringSet(purchasedCosmetics, MAX_CLASS_ENTRIES);
         this.gameRunning = gameRunning;
         this.wins = wins;
         this.kills = kills;
@@ -266,6 +271,12 @@ public class TabletStatePacket {
             purchasedClasses.put(buf.readUtf(MAX_CLASS_KEY_LENGTH), buf.readInt());
         }
 
+        this.purchasedCosmetics = new java.util.HashSet<>();
+        int cosmeticSize = readBoundedSize(buf, MAX_CLASS_ENTRIES, "purchasedCosmetics");
+        for (int i = 0; i < cosmeticSize; i++) {
+            purchasedCosmetics.add(buf.readUtf(MAX_CLASS_KEY_LENGTH));
+        }
+
         this.gameRunning = buf.readBoolean();
         this.wins = buf.readInt();
         this.kills = buf.readInt();
@@ -343,6 +354,11 @@ public class TabletStatePacket {
             buf.writeInt(entry.getValue());
         }
 
+        buf.writeInt(purchasedCosmetics.size());
+        for (String productId : purchasedCosmetics) {
+            buf.writeUtf(productId, MAX_CLASS_KEY_LENGTH);
+        }
+
         buf.writeBoolean(gameRunning);
         buf.writeInt(wins);
         buf.writeInt(kills);
@@ -387,6 +403,7 @@ public class TabletStatePacket {
             TabletClientState.updateClassTiers(classTiers);
             TabletClientState.updateUnlockedBaseClasses(unlockedBaseClasses);
             TabletClientState.updatePurchasedClasses(purchasedClasses);
+            TabletClientState.updatePurchasedCosmetics(purchasedCosmetics);
             TabletClientState.updateGameRunning(gameRunning);
             TabletClientState.updateProfileStats(wins, kills, deaths, matchesPlayed, coins, careerProgressPercent);
             TabletClientState.updateLives(lives);
@@ -468,6 +485,18 @@ public class TabletStatePacket {
                 value = value.substring(0, MAX_PLAYER_NAME_LENGTH);
             }
             result.put(key, value);
+        }
+        return result;
+    }
+
+    private static Set<String> copyStringSet(Set<String> input, int maxEntries) {
+        Set<String> result = new java.util.HashSet<>();
+        if (input == null || input.isEmpty()) return result;
+        for (String value : input) {
+            if (result.size() >= maxEntries) break;
+            if (value == null) continue;
+            result.add(value.length() > MAX_CLASS_KEY_LENGTH
+                    ? value.substring(0, MAX_CLASS_KEY_LENGTH) : value);
         }
         return result;
     }

@@ -12,12 +12,14 @@ import com.makar.tacticaltablet.clan.ClanListPacket;
 import com.makar.tacticaltablet.clan.ClanManager;
 import com.makar.tacticaltablet.clan.ClanRejectJoinPacket;
 import com.makar.tacticaltablet.tablet.net.PacketHandler;
+import com.makar.tacticaltablet.tablet.net.CosmeticPurchasePacket;
 import com.makar.tacticaltablet.tablet.net.TabletPacket;
 import com.makar.tacticaltablet.tablet.ClassCategory;
 import com.makar.tacticaltablet.tablet.ClassDefinition;
 import com.makar.tacticaltablet.tablet.ClassDefinitions;
 import com.makar.tacticaltablet.tablet.CompetitiveClassPolicy;
 import com.makar.tacticaltablet.progression.ClassTier;
+import com.makar.tacticaltablet.progression.CosmeticCatalog;
 import com.makar.tacticaltablet.progression.PlayerProgressManager;
 import com.makar.tacticaltablet.tablet.client.ui.TacticalUi;
 import com.makar.tacticaltablet.tablet.client.ui.UiFrameClock;
@@ -774,6 +776,7 @@ public class TabletScreen extends Screen {
     private boolean isClanWarSoloShopRestricted(TabletAction action) {
         return TabletClientState.isClanWarSet()
                 && action.shop()
+                && !action.cosmetic()
                 && !isCurrentPlayerInClan();
     }
 
@@ -914,6 +917,7 @@ public class TabletScreen extends Screen {
             boolean exclusive,
             int price,
             int fixedLevel,
+            boolean cosmetic,
             ResourceLocation icon
     ) {
         private static TabletAction fromDefinition(ClassDefinition definition) {
@@ -927,18 +931,32 @@ public class TabletScreen extends Screen {
                     definition.category() == ClassCategory.EXCLUSIVE,
                     definition.price(),
                     definition.fixedTier(),
+                    false,
                     definition.icon()
             );
         }
 
         private static TabletAction rtp(String label, int actionId) {
-            return new TabletAction(label, "", actionId, true, false, false, false, 0, -1,
+            return new TabletAction(label, "", actionId, true, false, false, false, 0, -1, false,
                     ClassDefinitions.FALLBACK_ICON);
+        }
+
+        private static TabletAction ghillieSuit() {
+            return new TabletAction("screen.tacticaltablet.shop.ghillie_suit", CosmeticCatalog.GHILLIE_SUIT_ID,
+                    -2, false, false, true, false, CosmeticCatalog.GHILLIE_SUIT_PRICE,
+                    ClassTier.MONSTER.id(), true, ClassDefinitions.FALLBACK_ICON);
+        }
+
+        private String displayLabel() {
+            return cosmetic ? Component.translatable(label).getString() : label;
         }
     }
 
     private static List<TabletAction> actionsFor(ClassCategory category) {
-        return ClassDefinitions.byCategory(category).stream().map(TabletAction::fromDefinition).toList();
+        List<TabletAction> actions = new ArrayList<>(
+                ClassDefinitions.byCategory(category).stream().map(TabletAction::fromDefinition).toList());
+        if (category == ClassCategory.SHOP) actions.add(TabletAction.ghillieSuit());
+        return List.copyOf(actions);
     }
 
     private void renderActionCard(GuiGraphics g, TabletAction action, int x, int y, int width, int height,
@@ -952,7 +970,7 @@ public class TabletScreen extends Screen {
                 .map(definition -> ClassIconResolver.resolve(definition,
                         ClientResourcePresenceCache::exists))
                 .orElse(ClassDefinitions.FALLBACK_ICON);
-        String title = fitText(action.label(), 88);
+        String title = fitText(action.displayLabel(), 88);
         String status = fitText(presentation.status(), 92);
         TabletActionCard.render(g, x, y, width, height, hover, resolvedIcon,
                 ClientResourcePresenceCache.exists(resolvedIcon), title,
@@ -962,11 +980,17 @@ public class TabletScreen extends Screen {
 
     private Component actionNarration(TabletAction action) {
         ActionPresentation presentation = describeAction(action);
-        return Component.literal(action.label() + ". " + presentation.detail());
+        return Component.literal(action.displayLabel() + ". " + presentation.detail());
     }
 
     private void pressAction(TabletAction action) {
         if (!isActionActive(action) || action.locked()) return;
+        if (action.cosmetic()) {
+            if (!TabletClientState.ownsCosmetic(action.classKey())) {
+                showActionConfirmation(action, ConfirmAction.COSMETIC_PURCHASE, 0);
+            }
+            return;
+        }
         if (ChaosClientState.isActive() && !action.rtp()) {
             playSound(CLICK);
             PacketHandler.sendToServer(new TabletPacket(action.actionId()));
@@ -1005,6 +1029,10 @@ public class TabletScreen extends Screen {
     }
 
     private boolean isActionActive(TabletAction action) {
+        if (action.cosmetic()) {
+            return !TabletClientState.ownsCosmetic(action.classKey())
+                    && TabletClientState.getCoins() >= action.price();
+        }
         if (ChaosClientState.isActive() && !action.rtp()) {
             return TabletClientState.isGameRunning()
                     && ChaosClientState.requiresSelection()
@@ -1039,6 +1067,16 @@ public class TabletScreen extends Screen {
 
     private ActionPresentation describeAction(TabletAction action) {
         boolean active = isActionActive(action);
+        if (action.cosmetic()) {
+            if (TabletClientState.ownsCosmetic(action.classKey())) {
+                String purchased = Component.translatable("screen.tacticaltablet.shop.purchased").getString();
+                return new ActionPresentation(purchased, purchased, false, 0xFF72D68A, "✓");
+            }
+            boolean enough = TabletClientState.getCoins() >= action.price();
+            return new ActionPresentation(TabletStatusFormatter.purchase(action.price()),
+                    enough ? "Нажмите для покупки" : "Недостаточно монет", active,
+                    enough ? ClassButtonStyle.color(ClassTier.MONSTER) : 0xFFD87575, "¤");
+        }
         if (ChaosClientState.isActive() && !action.rtp()) {
             if (action.classKey().equals(ChaosClientState.selected()))
                 return unavailable("Используется сейчас", "✓");
@@ -1172,7 +1210,7 @@ public class TabletScreen extends Screen {
                 TabletAction action = hovered.get();
                 ActionPresentation presentation = describeAction(action);
                 g.renderComponentTooltip(Minecraft.getInstance().font,
-                        List.of(Component.literal(action.label()), Component.literal(presentation.detail())),
+                        List.of(Component.literal(action.displayLabel()), Component.literal(presentation.detail())),
                         mouseX, mouseY);
                 return;
             }
@@ -1256,10 +1294,11 @@ public class TabletScreen extends Screen {
 
     private void showActionConfirmation(TabletAction action, ConfirmAction confirmAction, int targetTier) {
         int price = confirmationPrice(action, confirmAction, targetTier);
-        Component body = Component.literal(action.label() + "\n" + price + " \u043c\u043e\u043d\u0435\u0442\n"
+        Component body = Component.literal(action.displayLabel() + "\n" + price + " \u043c\u043e\u043d\u0435\u0442\n"
                 + "\u0411\u0430\u043b\u0430\u043d\u0441: " + TabletClientState.getCoins());
         Component confirmLabel = Component.literal(
-                confirmAction == ConfirmAction.SHOP_PURCHASE ? "\u041a\u0443\u043f\u0438\u0442\u044c" : "\u041e\u041a");
+                confirmAction == ConfirmAction.SHOP_PURCHASE || confirmAction == ConfirmAction.COSMETIC_PURCHASE
+                        ? "\u041a\u0443\u043f\u0438\u0442\u044c" : "\u041e\u041a");
         Minecraft.getInstance().setScreen(new TacticalDialog(
                 this,
                 Component.literal(confirmationTitle(confirmAction)),
@@ -1329,15 +1368,21 @@ public class TabletScreen extends Screen {
         if (TabletClientState.getCoins() < price) return;
         int actionId = switch (confirmAction) {
             case SHOP_PURCHASE -> action.actionId();
+            case COSMETIC_PURCHASE -> -1;
             case BASE_UNLOCK -> TabletPacket.unlockBaseActionId(action.actionId());
             case TIER_UPGRADE -> TabletPacket.upgradeActionId(action.actionId(), targetTier);
         };
-        if (actionId >= 0) PacketHandler.sendToServer(new TabletPacket(actionId));
+        if (confirmAction == ConfirmAction.COSMETIC_PURCHASE) {
+            PacketHandler.sendToServer(new CosmeticPurchasePacket(action.classKey()));
+        } else if (actionId >= 0) {
+            PacketHandler.sendToServer(new TabletPacket(actionId));
+        }
     }
 
     private int confirmationPrice(TabletAction action, ConfirmAction confirmAction, int targetTier) {
         return switch (confirmAction) {
             case SHOP_PURCHASE -> action.price();
+            case COSMETIC_PURCHASE -> action.price();
             case BASE_UNLOCK -> PlayerProgressManager.BASE_UNLOCK_COST;
             case TIER_UPGRADE -> PlayerProgressManager.getUpgradeCost(targetTier);
         };
@@ -1346,6 +1391,8 @@ public class TabletScreen extends Screen {
     private static String confirmationTitle(ConfirmAction confirmAction) {
         return switch (confirmAction) {
             case SHOP_PURCHASE -> "\u041a\u0443\u043f\u0438\u0442\u044c \u043a\u043b\u0430\u0441\u0441?";
+            case COSMETIC_PURCHASE -> Component.translatable(
+                    "screen.tacticaltablet.shop.ghillie_suit.confirm").getString();
             case BASE_UNLOCK -> "\u041e\u0442\u043a\u0440\u044b\u0442\u044c \u043a\u043b\u0430\u0441\u0441?";
             case TIER_UPGRADE -> "\u0423\u043b\u0443\u0447\u0448\u0438\u0442\u044c \u043a\u043b\u0430\u0441\u0441?";
         };
@@ -1353,6 +1400,7 @@ public class TabletScreen extends Screen {
 
     private enum ConfirmAction {
         SHOP_PURCHASE,
+        COSMETIC_PURCHASE,
         BASE_UNLOCK,
         TIER_UPGRADE
     }
@@ -1389,7 +1437,8 @@ public class TabletScreen extends Screen {
             ConfirmTextureButton confirmButton = new ConfirmTextureButton(
                     x + CONFIRM_W - CONFIRM_BUTTON_W - 18,
                     buttonY,
-                    Component.literal(confirmAction == ConfirmAction.SHOP_PURCHASE ? "\u041a\u0423\u041f\u0418\u0422\u042c" : "\u041e\u041a"),
+                    Component.literal(confirmAction == ConfirmAction.SHOP_PURCHASE
+                            || confirmAction == ConfirmAction.COSMETIC_PURCHASE ? "\u041a\u0423\u041f\u0418\u0422\u042c" : "\u041e\u041a"),
                     this::confirm
             );
             confirmButton.active = TabletClientState.getCoins() >= getPrice();
@@ -1407,7 +1456,7 @@ public class TabletScreen extends Screen {
                     g, CONFIRM_PANEL, x, y, CONFIRM_W, CONFIRM_H, CONFIRM_W, CONFIRM_H);
 
             g.drawCenteredString(Minecraft.getInstance().font, getConfirmTitle(), x + CONFIRM_W / 2, y + 17, 0xFF72D68A);
-            g.drawCenteredString(Minecraft.getInstance().font, fitText(action.label(), CONFIRM_W - 30), x + CONFIRM_W / 2, y + 44, getShopTitleColor(action));
+            g.drawCenteredString(Minecraft.getInstance().font, fitText(action.displayLabel(), CONFIRM_W - 30), x + CONFIRM_W / 2, y + 44, getShopTitleColor(action));
             g.drawCenteredString(Minecraft.getInstance().font, getPrice() + " \u043c\u043e\u043d\u0435\u0442", x + CONFIRM_W / 2, y + 58, 0xFFFFFFFF);
             boolean enoughCoins = TabletClientState.getCoins() >= getPrice();
             String balance = enoughCoins
@@ -1429,6 +1478,8 @@ public class TabletScreen extends Screen {
             submitting = true;
             if (confirmAction == ConfirmAction.SHOP_PURCHASE) {
                 PacketHandler.sendToServer(new TabletPacket(action.actionId()));
+            } else if (confirmAction == ConfirmAction.COSMETIC_PURCHASE) {
+                PacketHandler.sendToServer(new CosmeticPurchasePacket(action.classKey()));
             } else if (confirmAction == ConfirmAction.BASE_UNLOCK) {
                 PacketHandler.sendToServer(new TabletPacket(TabletPacket.unlockBaseActionId(action.actionId())));
             } else {
@@ -1454,7 +1505,7 @@ public class TabletScreen extends Screen {
         }
 
         private int getPrice() {
-            if (confirmAction == ConfirmAction.SHOP_PURCHASE) {
+            if (confirmAction == ConfirmAction.SHOP_PURCHASE || confirmAction == ConfirmAction.COSMETIC_PURCHASE) {
                 return action.price();
             }
 
@@ -1472,6 +1523,10 @@ public class TabletScreen extends Screen {
 
             if (confirmAction == ConfirmAction.TIER_UPGRADE) {
                 return "\u0423\u043b\u0443\u0447\u0448\u0438\u0442\u044c \u043a\u043b\u0430\u0441\u0441?";
+            }
+
+            if (confirmAction == ConfirmAction.COSMETIC_PURCHASE) {
+                return Component.translatable("screen.tacticaltablet.shop.ghillie_suit.confirm").getString();
             }
 
             return "\u041a\u0443\u043f\u0438\u0442\u044c \u043a\u043b\u0430\u0441\u0441?";

@@ -48,7 +48,7 @@ class PlayerProgressPersistenceTest {
         assertEquals(Set.of(
                 "dataVersion", "name", "uuid", "classes", "classTiers", "unlockedBaseClasses",
                 "wins", "kills", "deaths", "matchesPlayed", "coins", "battlePassXp",
-                "xpBoost", "sadTromboneKills", "purchasedClasses", "donations", "stats",
+                "xpBoost", "sadTromboneKills", "purchasedClasses", "purchasedCosmetics", "donations", "stats",
                 "appliedTransactionReceipts", "firstSeen", "lastSeen"
         ), json.keySet());
     }

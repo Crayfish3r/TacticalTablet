@@ -235,5 +235,12 @@
   "message.tacticaltablet.lobby.dimension_missing": "[WAR] The lobby:lobby dimension is unavailable. Check the installed mod version.",
   "message.tacticaltablet.lobby.welcome.title": "WELCOME",
   "message.tacticaltablet.lobby.welcome.subtitle": "Battle Royale lobby",
-  "message.tacticaltablet.match.joined_team": "[WAR] You joined team %s."
+  "message.tacticaltablet.match.joined_team": "[WAR] You joined team %s.",
+  "screen.tacticaltablet.shop.ghillie_suit": "GHILLIE SUIT",
+  "screen.tacticaltablet.shop.purchased": "PURCHASED",
+  "screen.tacticaltablet.shop.ghillie_suit.confirm": "Purchase ghillie suit?",
+  "message.tacticaltablet.cosmetic.ghillie_suit.purchased": "[WAR] Ghillie suit purchased for %s coins.",
+  "message.tacticaltablet.cosmetic.ghillie_suit.already_owned": "[WAR] Ghillie suit is already purchased.",
+  "message.tacticaltablet.cosmetic.ghillie_suit.not_enough": "[WAR] Not enough coins for the ghillie suit. You need %s coins.",
+  "message.tacticaltablet.cosmetic.invalid": "[WAR] This product cannot be purchased."
 }

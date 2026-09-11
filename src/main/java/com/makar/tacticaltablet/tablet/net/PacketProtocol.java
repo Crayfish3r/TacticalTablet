@@ -14,7 +14,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-/** Immutable protocol-41 map; deliberately independent of Forge channel bootstrap. */
+/** Immutable protocol map; deliberately independent of Forge channel bootstrap. */
 public final class PacketProtocol {
     public record Entry(int id, Class<?> packetClass, NetworkDirection direction) { }
 
@@ -47,7 +47,8 @@ public final class PacketProtocol {
             entry(39, CasinoSpinResultPacket.class, NetworkDirection.PLAY_TO_CLIENT),
             entry(40, CasinoClosePacket.class, NetworkDirection.PLAY_TO_SERVER),
             entry(41, CasinoSpectatorOpenPacket.class, NetworkDirection.PLAY_TO_SERVER),
-            entry(42, CasinoAnimationPacket.class, NetworkDirection.PLAY_TO_CLIENT)
+            entry(42, CasinoAnimationPacket.class, NetworkDirection.PLAY_TO_CLIENT),
+            entry(43, CosmeticPurchasePacket.class, NetworkDirection.PLAY_TO_SERVER)
     );
 
     private PacketProtocol() { }

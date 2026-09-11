@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.function.Predicate;
 
 /** Optional, server-side access to the Curios inventory. */
 public final class CuriosInventoryBridge {
@@ -36,6 +37,18 @@ public final class CuriosInventoryBridge {
         if (player == null || !ModList.get().isLoaded("curios")) return stack;
 
         return CuriosLoaded.equipFirstAvailable(player, stack);
+    }
+
+    public static ItemStack equipInNamedSlot(ServerPlayer player, String identifier, ItemStack stack,
+                                             boolean replaceMatching, Predicate<ItemStack> replacePredicate) {
+        if (stack == null || stack.isEmpty()) return ItemStack.EMPTY;
+        if (player == null || identifier == null || !ModList.get().isLoaded("curios")) return stack;
+        return CuriosLoaded.equipInNamedSlot(player, identifier, stack, replaceMatching, replacePredicate);
+    }
+
+    public static void removeMatching(ServerPlayer player, Predicate<ItemStack> predicate) {
+        if (player == null || predicate == null || !ModList.get().isLoaded("curios")) return;
+        CuriosLoaded.removeMatching(player, predicate);
     }
 
     /** Loaded only after the mod-presence guard, keeping Curios types out of the common bridge API. */
@@ -96,6 +109,63 @@ public final class CuriosInventoryBridge {
             }
 
             return stack;
+        }
+
+        private static ItemStack equipInNamedSlot(ServerPlayer player, String identifier, ItemStack stack,
+                                                  boolean replaceMatching, Predicate<ItemStack> replacePredicate) {
+            var handler = top.theillusivec4.curios.api.CuriosApi.getCuriosInventory(player)
+                    .resolve().orElse(null);
+            if (handler == null) return stack;
+            var stacksHandler = handler.getCurios().get(identifier);
+            if (stacksHandler == null) return stack;
+
+            var functional = stacksHandler.getStacks();
+            var cosmetics = stacksHandler.getCosmeticStacks();
+            for (int slot = 0; slot < functional.getSlots(); slot++) {
+                ItemStack current = functional.getStackInSlot(slot);
+                ItemStack cosmetic = slot < cosmetics.getSlots() ? cosmetics.getStackInSlot(slot) : ItemStack.EMPTY;
+                boolean replaceFunctional = !current.isEmpty() && replaceMatching
+                        && replacePredicate.test(current);
+                boolean replaceCosmetic = !cosmetic.isEmpty() && replaceMatching
+                        && replacePredicate.test(cosmetic);
+                if ((!current.isEmpty() && !replaceFunctional) || (!cosmetic.isEmpty() && !replaceCosmetic)) continue;
+
+                if (replaceFunctional) {
+                    boolean renders = slot < stacksHandler.getRenders().size()
+                            && Boolean.TRUE.equals(stacksHandler.getRenders().get(slot));
+                    clearFunctionalSlot(player, handler,
+                            new FunctionalSlot(identifier, stacksHandler, slot, renders));
+                }
+                if (replaceCosmetic) clearCosmeticSlot(new CosmeticSlot(stacksHandler, slot));
+                ItemStack remainder = functional.insertItem(slot, stack, false);
+                if (remainder.getCount() < stack.getCount()) return remainder;
+            }
+            return stack;
+        }
+
+        private static void removeMatching(ServerPlayer player, Predicate<ItemStack> predicate) {
+            top.theillusivec4.curios.api.CuriosApi.getCuriosInventory(player).ifPresent(handler -> {
+                List<FunctionalSlot> functionalSlots = new ArrayList<>();
+                List<CosmeticSlot> cosmeticSlots = new ArrayList<>();
+                for (var entry : new ArrayList<>(handler.getCurios().entrySet())) {
+                    var stacksHandler = entry.getValue();
+                    var functional = stacksHandler.getStacks();
+                    for (int slot = 0; slot < functional.getSlots(); slot++) {
+                        if (!predicate.test(functional.getStackInSlot(slot))) continue;
+                        boolean renders = slot < stacksHandler.getRenders().size()
+                                && Boolean.TRUE.equals(stacksHandler.getRenders().get(slot));
+                        functionalSlots.add(new FunctionalSlot(entry.getKey(), stacksHandler, slot, renders));
+                    }
+                    var cosmetics = stacksHandler.getCosmeticStacks();
+                    for (int slot = 0; slot < cosmetics.getSlots(); slot++) {
+                        if (predicate.test(cosmetics.getStackInSlot(slot))) {
+                            cosmeticSlots.add(new CosmeticSlot(stacksHandler, slot));
+                        }
+                    }
+                }
+                for (FunctionalSlot slot : functionalSlots) clearFunctionalSlot(player, handler, slot);
+                for (CosmeticSlot slot : cosmeticSlots) clearCosmeticSlot(slot);
+            });
         }
 
         private static void clearFunctionalSlot(

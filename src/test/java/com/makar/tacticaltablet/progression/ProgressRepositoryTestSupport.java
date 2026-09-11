@@ -13,7 +13,7 @@ import java.util.Set;
 final class ProgressRepositoryTestSupport {
     static final Clock CLOCK = Clock.fixed(Instant.parse("2024-01-02T03:04:05Z"), ZoneOffset.UTC);
     static final ProgressRepository.Configuration CONFIGURATION = new ProgressRepository.Configuration(
-            11,
+            12,
             2000,
             Set.of("scout"),
             Set.of("scout", "medic"),
@@ -40,7 +40,7 @@ final class ProgressRepositoryTestSupport {
 
     static ProgressSnapshot snapshot(String key, long revision, int coins) {
         return new ProgressSnapshot(key, revision, new ProgressSnapshot.Data(
-                11,
+                12,
                 key,
                 "123456781234123412341234567890ab",
                 Map.of("scout", 300, "medic", 0, "sniper", 0, "killer", 0),

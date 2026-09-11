@@ -33,6 +33,7 @@ class KeyBindingVisibilityPolicyTest {
         assertVisible("key.disable_voice_chat", "key.categories.voicechat");
         assertVisible("key.thermal_vision.toggle_thermal_vision", "key.categories.thermal_vision");
 
+        assertHidden("key.parcool.HideInBlock", "key.categories.parcool");
         assertHidden("key.parcool.openSetting", "key.categories.parcool");
         assertHidden("key.pingwheel.open_settings", "key.category.pingwheel.name");
         assertHidden("key.tacz.crawl.desc", "key.category.tacz");
@@ -54,8 +55,9 @@ class KeyBindingVisibilityPolicyTest {
     }
 
     @Test
-    void onlyTaczCrawlIsForcedUnbound() {
+    void onlyDedicatedServerRestrictedBindingsAreForcedUnbound() {
         assertTrue(KeyBindingVisibilityPolicy.mustBeUnbound("key.tacz.crawl.desc"));
+        assertTrue(KeyBindingVisibilityPolicy.mustBeUnbound("key.parcool.HideInBlock"));
         assertFalse(KeyBindingVisibilityPolicy.mustBeUnbound("key.parcool.Crawl"));
         assertFalse(KeyBindingVisibilityPolicy.mustBeUnbound("key.tacz.reload.desc"));
     }

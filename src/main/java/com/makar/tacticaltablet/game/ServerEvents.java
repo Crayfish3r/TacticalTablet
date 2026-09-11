@@ -2,6 +2,8 @@ package com.makar.tacticaltablet.game;
 
 import com.makar.tacticaltablet.admin.TestModeManager;
 import com.makar.tacticaltablet.airdrop.AirdropManager;
+import com.makar.tacticaltablet.camouflage.CamouflageCatalogLoader;
+import com.makar.tacticaltablet.camouflage.CamouflageLoadoutService;
 import com.makar.tacticaltablet.client.NameTagManager;
 import com.makar.tacticaltablet.clan.ClanManager;
 import com.makar.tacticaltablet.corpse.CorpseLootManager;
@@ -101,6 +103,7 @@ public class ServerEvents {
             return;
         }
         if (event.getEntity() instanceof ServerPlayer player) {
+            CamouflageLoadoutService.clearTemporary(player);
             PunishmentRecord tempBan = PunishmentManager.getTempBan(player.getUUID());
             if (tempBan != null) {
                 player.connection.disconnect(Component.literal(
@@ -610,6 +613,7 @@ public class ServerEvents {
             return;
         }
         if (event.getEntity() instanceof ServerPlayer player) {
+            CamouflageLoadoutService.clearTemporary(player);
             PostRtpProtectionManager.clear(player);
             PacketHandler.clearC2SRateLimits(player);
             boolean runningMatchParticipant = GameStateManager.isRunning(player.server)
@@ -720,6 +724,7 @@ public class ServerEvents {
         }
 
         DeathTransitionManager.recordDeath(victim, source, killer);
+        CamouflageLoadoutService.clearTemporary(victim);
         CorpseLootManager.createCorpse(victim);
         PlayerProgressManager.addDeath(victim);
         DiscordLeaderboardService.recordMatchDeath(victim);
@@ -829,6 +834,7 @@ public class ServerEvents {
         MapRotationManager.onServerStarted(event.getServer());
         KitRotationManager.onServerStarted(event.getServer());
         MapSetManager.onServerStarted(event.getServer());
+        CamouflageCatalogLoader.load();
         PunishmentManager.load(event.getServer());
         ClanManager.recoverCreateClanTransactions(event.getServer());
         DiscordLeaderboardService.init(event.getServer());
@@ -872,6 +878,7 @@ public class ServerEvents {
         PlayerTabletState.resetAll();
         TabletPacket.resetAll();
         InventoryLockEvents.resetTracking();
+        CamouflageCatalogLoader.reset();
         PlayerProgressManager.resetStorage();
         PrefixManager.clearRuntime();
         CombatAttributionLedger.reset();

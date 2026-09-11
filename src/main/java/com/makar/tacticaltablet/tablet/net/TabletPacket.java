@@ -1,5 +1,6 @@
 package com.makar.tacticaltablet.tablet.net;
 
+import com.makar.tacticaltablet.camouflage.CamouflageLoadoutService;
 import com.makar.tacticaltablet.clan.ClanManager;
 import com.makar.tacticaltablet.core.TacticalTabletMod;
 import com.makar.tacticaltablet.game.GameStateManager;
@@ -335,6 +336,7 @@ public class TabletPacket {
 
         PlayerTabletState.setSelectedClass(player, kit);
         PlayerTabletState.setKitUsed(player);
+        CamouflageLoadoutService.deploy(player);
 
         if (PlayerTabletState.isRtpUsed(player)) {
             InventoryManager.clearTablets(player);
@@ -371,6 +373,7 @@ public class TabletPacket {
         }
         PlayerTabletState.setSelectedClass(player, kit);
         PlayerTabletState.setKitUsed(player);
+        CamouflageLoadoutService.deploy(player);
         RtpTimerManager.start(player);
         if (PlayerTabletState.isRtpUsed(player)) InventoryManager.clearTablets(player);
         LobbyManager.sync(player);

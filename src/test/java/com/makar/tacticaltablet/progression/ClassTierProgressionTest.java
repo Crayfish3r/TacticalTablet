@@ -18,9 +18,9 @@ class ClassTierProgressionTest {
 
     @Test
     void migrationOnlyClampsInvalidValuesAndDoesNotInferTiersFromXp() {
-        assertEquals(new PlayerProgressManager.PersistedClassProgress(11, 0, 0),
+        assertEquals(new PlayerProgressManager.PersistedClassProgress(12, 0, 0),
                 PlayerProgressManager.migrateClassProgress(10, -1, -1));
-        assertEquals(new PlayerProgressManager.PersistedClassProgress(11, 4, 2000),
+        assertEquals(new PlayerProgressManager.PersistedClassProgress(12, 4, 2000),
                 PlayerProgressManager.migrateClassProgress(10, 99, 9999));
         assertEquals(2, PlayerProgressManager.migrateClassProgress(10, 2, 800).tier());
     }
@@ -55,7 +55,7 @@ class ClassTierProgressionTest {
     }
 
     private static void assertMigration(int tier, int xp) {
-        assertEquals(new PlayerProgressManager.PersistedClassProgress(11, tier, xp),
+        assertEquals(new PlayerProgressManager.PersistedClassProgress(12, tier, xp),
                 PlayerProgressManager.migrateClassProgress(10, tier, xp));
     }
 

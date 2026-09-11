@@ -285,6 +285,13 @@ public final class ProgressRepository implements AutoCloseable {
         progress.classTiers = ProgressPolicy.normalizeNonNegativeValues(progress.classTiers);
         progress.unlockedBaseClasses = ProgressPolicy.normalizeNonNegativeValues(progress.unlockedBaseClasses);
         progress.purchasedClasses = ProgressPolicy.normalizeNonNegativeValues(progress.purchasedClasses);
+        progress.purchasedCosmetics = progress.purchasedCosmetics == null
+                ? new java.util.HashSet<>()
+                : progress.purchasedCosmetics.stream()
+                        .filter(Objects::nonNull)
+                        .map(value -> value.trim().toLowerCase(Locale.ROOT))
+                        .filter(value -> !value.isBlank())
+                        .collect(java.util.stream.Collectors.toCollection(java.util.HashSet::new));
         progress.donations = ProgressPolicy.normalizeNonNegativeValues(progress.donations);
         progress.stats = ProgressPolicy.normalizeNonNegativeValues(progress.stats);
         progress.appliedTransactionReceipts = PlayerTransactionReceiptLedger.normalizeReceipts(
@@ -373,6 +380,7 @@ public final class ProgressRepository implements AutoCloseable {
                 progress.xpBoost,
                 progress.sadTromboneKills,
                 progress.purchasedClasses,
+                progress.purchasedCosmetics,
                 progress.donations,
                 progress.stats,
                 progress.appliedTransactionReceipts.stream()
@@ -400,6 +408,7 @@ public final class ProgressRepository implements AutoCloseable {
         stored.xpBoost = data.xpBoost();
         stored.sadTromboneKills = data.sadTromboneKills();
         stored.purchasedClasses = new HashMap<>(data.purchasedClasses());
+        stored.purchasedCosmetics = new java.util.HashSet<>(data.purchasedCosmetics());
         stored.donations = new HashMap<>(data.donations());
         stored.stats = new HashMap<>(data.stats());
         stored.appliedTransactionReceipts = data.appliedTransactionReceipts().stream()
@@ -672,7 +681,7 @@ public final class ProgressRepository implements AutoCloseable {
     }
 
     private static final class StoredProgress {
-        private int dataVersion = 11;
+        private int dataVersion = 12;
         private String name = "";
         private String uuid = "";
         private Map<String, Integer> classes = new HashMap<>();
@@ -687,6 +696,7 @@ public final class ProgressRepository implements AutoCloseable {
         private boolean xpBoost;
         private boolean sadTromboneKills;
         private Map<String, Integer> purchasedClasses = new HashMap<>();
+        private Set<String> purchasedCosmetics = new java.util.HashSet<>();
         private Map<String, Integer> donations = new HashMap<>();
         private Map<String, Integer> stats = new HashMap<>();
         private List<AppliedTransactionReceipt> appliedTransactionReceipts = new ArrayList<>();

@@ -1,6 +1,7 @@
 package com.makar.tacticaltablet.inventory;
 
 import com.makar.tacticaltablet.airdrop.AirdropManager;
+import com.makar.tacticaltablet.camouflage.CamouflageStackMarker;
 import com.makar.tacticaltablet.core.TacticalTabletMod;
 import com.makar.tacticaltablet.game.GameStateManager;
 import com.makar.tacticaltablet.game.lives.LivesManager;
@@ -40,6 +41,10 @@ public class InventoryLockEvents {
     public static void onItemToss(ItemTossEvent event) {
         if (!com.makar.tacticaltablet.game.ServerRules.enabled(event.getPlayer().getServer())) return;
         if (!(event.getPlayer() instanceof ServerPlayer player)) return;
+        if (CamouflageStackMarker.isAutoCamouflage(event.getEntity().getItem())) {
+            event.setCanceled(true);
+            return;
+        }
         if (ModerModeManager.isInModerMode(player)) return;
 
         if (isLobbyOrBattle(player) && !canUseDroppedItems(player)) {

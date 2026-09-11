@@ -1,5 +1,6 @@
 package com.makar.tacticaltablet.game.lifecycle;
 
+import com.makar.tacticaltablet.camouflage.CamouflageLoadoutService;
 import com.makar.tacticaltablet.integration.curios.CuriosInventoryBridge;
 import net.minecraft.server.level.ServerPlayer;
 
@@ -14,6 +15,7 @@ public final class PlayerLifecycleSanitizer {
             return;
         }
 
+        CamouflageLoadoutService.clearTemporary(player);
         CuriosInventoryBridge.clear(player);
         resetTransientState(player);
     }

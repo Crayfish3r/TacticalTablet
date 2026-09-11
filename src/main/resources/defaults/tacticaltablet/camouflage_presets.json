@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "presets": {
+    "acacia": { "pieces": [
+      { "slot": "curios:mask", "item": "fracturepoint:ghillie_balaclava_acacia", "nbt": "{Damage:0}", "policy": "replace_auto_only" },
+      { "slot": "curios:uniform", "item": "fracturepoint:ghillie_uniform_acacia", "nbt": "{Damage:0,PlateData:{}}", "policy": "replace_auto_only" },
+      { "slot": "minecraft:head", "item": "fracturepoint:ghillie_helmet_acacia", "nbt": "{Damage:0}", "policy": "empty_only" },
+      { "slot": "minecraft:chest", "item": "fracturepoint:ghillie_chestplate_acacia", "nbt": "{Damage:0,PlateData:{}}", "policy": "empty_only" },
+      { "slot": "minecraft:legs", "item": "fracturepoint:ghillie_leggings_acacia", "nbt": "{Damage:0}", "policy": "empty_only" },
+      { "slot": "minecraft:feet", "item": "fracturepoint:ghillie_boots_acacia", "nbt": "{Damage:0}", "policy": "empty_only" }
+    ] },
+    "birch": { "pieces": [
+      { "slot": "curios:mask", "item": "fracturepoint:ghillie_balaclava_birch", "nbt": "{Damage:0}", "policy": "replace_auto_only" },
+      { "slot": "curios:uniform", "item": "fracturepoint:ghillie_uniform_birch", "nbt": "{Damage:0,PlateData:{}}", "policy": "replace_auto_only" },
+      { "slot": "minecraft:head", "item": "fracturepoint:ghillie_helmet_birch", "nbt": "{Damage:0}", "policy": "empty_only" },
+      { "slot": "minecraft:chest", "item": "fracturepoint:ghillie_chestplate_birch", "nbt": "{Damage:0,PlateData:{}}", "policy": "empty_only" },
+      { "slot": "minecraft:legs", "item": "fracturepoint:ghillie_leggings_birch", "nbt": "{Damage:0}", "policy": "empty_only" },
+      { "slot": "minecraft:feet", "item": "fracturepoint:ghillie_boots_birch", "nbt": "{Damage:0}", "policy": "empty_only" }
+    ] },
+    "snow": { "pieces": [
+      { "slot": "curios:mask", "item": "fracturepoint:ghillie_balaclava_snow", "nbt": "{Damage:0}", "policy": "replace_auto_only" },
+      { "slot": "curios:uniform", "item": "fracturepoint:ghillie_uniform_snow", "nbt": "{Damage:0,PlateData:{}}", "policy": "replace_auto_only" },
+      { "slot": "minecraft:head", "item": "fracturepoint:ghillie_helmet_snow", "nbt": "{Damage:0}", "policy": "empty_only" },
+      { "slot": "minecraft:chest", "item": "fracturepoint:ghillie_chestplate_snow", "nbt": "{Damage:0,PlateData:{}}", "policy": "empty_only" },
+      { "slot": "minecraft:legs", "item": "fracturepoint:ghillie_leggings_snow", "nbt": "{Damage:0}", "policy": "empty_only" },
+      { "slot": "minecraft:feet", "item": "fracturepoint:ghillie_boots_snow", "nbt": "{Damage:0}", "policy": "empty_only" }
+    ] },
+    "dark_oak": { "pieces": [
+      { "slot": "curios:mask", "item": "fracturepoint:ghillie_balaclava_dark_oak", "nbt": "{Damage:0}", "policy": "replace_auto_only" },
+      { "slot": "curios:uniform", "item": "fracturepoint:ghillie_uniform_dark_oak", "nbt": "{Damage:0,PlateData:{}}", "policy": "replace_auto_only" },
+      { "slot": "minecraft:head", "item": "fracturepoint:ghillie_helmet_dark_oak", "nbt": "{Damage:0}", "policy": "empty_only" },
+      { "slot": "minecraft:chest", "item": "fracturepoint:ghillie_chestplate_dark_oak", "nbt": "{Damage:0,PlateData:{}}", "policy": "empty_only" },
+      { "slot": "minecraft:legs", "item": "fracturepoint:ghillie_leggings_dark_oak", "nbt": "{Damage:0}", "policy": "empty_only" },
+      { "slot": "minecraft:feet", "item": "fracturepoint:ghillie_boots_dark_oak", "nbt": "{Damage:0}", "policy": "empty_only" }
+    ] },
+    "oak": { "pieces": [
+      { "slot": "curios:mask", "item": "fracturepoint:ghillie_balaclava_oak", "nbt": "{Damage:0}", "policy": "replace_auto_only" },
+      { "slot": "curios:uniform", "item": "fracturepoint:ghillie_uniform_oak", "nbt": "{Damage:0,PlateData:{}}", "policy": "replace_auto_only" },
+      { "slot": "minecraft:head", "item": "fracturepoint:ghillie_helmet_oak", "nbt": "{Damage:0}", "policy": "empty_only" },
+      { "slot": "minecraft:chest", "item": "fracturepoint:ghillie_chestplate_oak", "nbt": "{Damage:0,PlateData:{}}", "policy": "empty_only" },
+      { "slot": "minecraft:legs", "item": "fracturepoint:ghillie_leggings_oak", "nbt": "{Damage:0}", "policy": "empty_only" },
+      { "slot": "minecraft:feet", "item": "fracturepoint:ghillie_boots_oak", "nbt": "{Damage:0}", "policy": "empty_only" }
+    ] },
+    "spruce": { "pieces": [
+      { "slot": "curios:mask", "item": "fracturepoint:ghillie_balaclava_spruce", "nbt": "{Damage:0}", "policy": "replace_auto_only" },
+      { "slot": "curios:uniform", "item": "fracturepoint:ghillie_uniform_spruce", "nbt": "{Damage:0,PlateData:{}}", "policy": "replace_auto_only" },
+      { "slot": "minecraft:head", "item": "fracturepoint:ghillie_helmet_spruce", "nbt": "{Damage:0}", "policy": "empty_only" },
+      { "slot": "minecraft:chest", "item": "fracturepoint:ghillie_chestplate_spruce", "nbt": "{Damage:0,PlateData:{}}", "policy": "empty_only" },
+      { "slot": "minecraft:legs", "item": "fracturepoint:ghillie_leggings_spruce", "nbt": "{Damage:0}", "policy": "empty_only" },
+      { "slot": "minecraft:feet", "item": "fracturepoint:ghillie_boots_spruce", "nbt": "{Damage:0}", "policy": "empty_only" }
+    ] }
+  }
+}

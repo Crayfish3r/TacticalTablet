@@ -147,6 +147,7 @@ public class ClassXPManager {
                 PlayerProgressManager.getClassTiers(player),
                 PlayerProgressManager.getUnlockedBaseClasses(player),
                 PlayerProgressManager.getPurchasedClasses(player),
+                PlayerProgressManager.getPurchasedCosmetics(player),
                 GameStateManager.isRunning(player.server),
                 PlayerProgressManager.getWins(player),
                 PlayerProgressManager.getKills(player),

@@ -37,7 +37,7 @@ import java.util.function.Supplier;
 
 public class PlayerProgressManager {
 
-    private static final int DATA_VERSION = 11;
+    private static final int DATA_VERSION = 12;
     private static final String CASINO_OPERATION = "casino_spin";
     private static final int MAX_CASINO_TRANSACTION_ID_LENGTH = 64;
     public static final int BASIC_TIER = ClassTier.BASIC.id();
@@ -1236,6 +1236,45 @@ public class PlayerProgressManager {
                 operation, response, tabletPostLockEffects(player));
     }
 
+    public static synchronized boolean ownsCosmetic(ServerPlayer player, String productId) {
+        Optional<CosmeticCatalog.Entry> product = CosmeticCatalog.find(productId);
+        if (player == null || product.isEmpty()) return false;
+        PlayerProgress progress = getOrLoad(player, getPlayerKey(player));
+        return progress.purchasedCosmetics.contains(product.get().id());
+    }
+
+    public static synchronized PurchaseResult purchaseCosmetic(ServerPlayer player, String productId) {
+        if (player == null || productId == null) return PurchaseResult.NOT_PURCHASABLE;
+        String key = getPlayerKey(player);
+        PlayerProgress progress = getOrLoad(player, key);
+        ProgressPurchaseResult purchase = PROGRESS_SERVICE.purchaseCosmetic(progress, productId);
+        PurchaseResult result = mapPurchaseResult(purchase);
+        if (purchase.successful()) markDirty(key);
+        return result;
+    }
+
+    public static PurchaseResult applyTabletCosmeticPurchase(
+            ServerPlayer player,
+            String productId,
+            Consumer<PurchaseResult> response
+    ) {
+        Objects.requireNonNull(response, "response");
+        PreparedProgressOperation<PurchaseResult> operation = withProgressLock(() -> {
+            if (player == null || productId == null) {
+                return PreparedProgressOperation.withoutSave(PurchaseResult.NOT_PURCHASABLE,
+                        player == null ? ProgressSyncMode.NONE : ProgressSyncMode.TABLET);
+            }
+            String key = getPlayerKey(player);
+            PlayerProgress progress = getOrLoad(player, key);
+            ProgressApplicationResult<ProgressPurchaseResult> application =
+                    PROGRESS_APPLICATION_SERVICE.prepareCosmeticPurchase(progress, productId);
+            return prepareTabletOperation(player, key, progress,
+                    mapPurchaseResult(application.outcome()), application.changed());
+        });
+        return PROGRESS_APPLICATION_SERVICE.executePostLockEffects(
+                operation, response, tabletPostLockEffects(player));
+    }
+
     private static PreparedProgressOperation<PurchaseResult> prepareTabletClassPurchase(
             ServerPlayer player,
             String clazz
@@ -1435,6 +1474,11 @@ public class PlayerProgressManager {
         }
 
         return result;
+    }
+
+    public static synchronized Set<String> getPurchasedCosmetics(ServerPlayer player) {
+        if (player == null) return Set.of();
+        return Set.copyOf(getOrLoad(player, getPlayerKey(player)).purchasedCosmetics);
     }
 
     public static synchronized Map<String, Integer> getUnlockedBaseClasses(ServerPlayer player) {
@@ -1961,6 +2005,7 @@ public class PlayerProgressManager {
                 progress.xpBoost,
                 progress.sadTromboneKills,
                 Map.copyOf(progress.purchasedClasses),
+                Set.copyOf(progress.purchasedCosmetics),
                 Map.copyOf(progress.donations),
                 Map.copyOf(progress.stats),
                 progress.appliedTransactionReceipts.stream()
@@ -1988,6 +2033,7 @@ public class PlayerProgressManager {
         progress.xpBoost = data.xpBoost();
         progress.sadTromboneKills = data.sadTromboneKills();
         progress.purchasedClasses = new HashMap<>(data.purchasedClasses());
+        progress.purchasedCosmetics = new java.util.HashSet<>(data.purchasedCosmetics());
         progress.donations = new HashMap<>(data.donations());
         progress.stats = new HashMap<>(data.stats());
         progress.appliedTransactionReceipts = data.appliedTransactionReceipts().stream()
@@ -2039,6 +2085,13 @@ public class PlayerProgressManager {
         progress.classTiers = normalizeIntegerMap(progress.classTiers);
         progress.unlockedBaseClasses = normalizeIntegerMap(progress.unlockedBaseClasses);
         progress.purchasedClasses = normalizeIntegerMap(progress.purchasedClasses);
+        progress.purchasedCosmetics = progress.purchasedCosmetics == null
+                ? new java.util.HashSet<>()
+                : progress.purchasedCosmetics.stream()
+                        .filter(Objects::nonNull)
+                        .map(value -> value.trim().toLowerCase(Locale.ROOT))
+                        .filter(value -> !value.isBlank())
+                        .collect(java.util.stream.Collectors.toCollection(java.util.HashSet::new));
         progress.donations = normalizeIntegerMap(progress.donations);
         progress.stats = normalizeIntegerMap(progress.stats);
         progress.appliedTransactionReceipts = PlayerTransactionReceiptLedger.normalizeReceipts(progress.appliedTransactionReceipts);
@@ -2264,7 +2317,8 @@ public class PlayerProgressManager {
         return ProgressPolicy.saturatingAdd(current, amount);
     }
 
-    private static final class PlayerProgress implements PlayerTransactionReceiptLedger.State, MutableProgressState {
+    private static final class PlayerProgress implements PlayerTransactionReceiptLedger.State, MutableProgressState,
+            MutableCosmeticProgressState {
         private int dataVersion = DATA_VERSION;
         private String name = "";
         private String uuid = "";
@@ -2280,6 +2334,7 @@ public class PlayerProgressManager {
         private boolean xpBoost;
         private boolean sadTromboneKills;
         private Map<String, Integer> purchasedClasses = new HashMap<>();
+        private Set<String> purchasedCosmetics = new java.util.HashSet<>();
         private Map<String, Integer> donations = new HashMap<>();
         private Map<String, Integer> stats = new HashMap<>();
         private List<AppliedTransactionReceipt> appliedTransactionReceipts = new ArrayList<>();
@@ -2359,6 +2414,16 @@ public class PlayerProgressManager {
         @Override
         public void removePurchase(String classId) {
             purchasedClasses.remove(classId);
+        }
+
+        @Override
+        public boolean ownsCosmetic(String productId) {
+            return purchasedCosmetics.contains(productId);
+        }
+
+        @Override
+        public void addCosmetic(String productId) {
+            purchasedCosmetics.add(productId);
         }
 
         @Override

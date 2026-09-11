@@ -39,11 +39,11 @@ class ProgressionCharacterizationTest {
 
     @Test
     void migrationClampsInvalidValuesWithoutInferringTierFromExperience() {
-        assertEquals(new PlayerProgressManager.PersistedClassProgress(11, ClassTier.BASIC.id(), 0),
+        assertEquals(new PlayerProgressManager.PersistedClassProgress(12, ClassTier.BASIC.id(), 0),
                 PlayerProgressManager.migrateClassProgress(1, -10, -100));
-        assertEquals(new PlayerProgressManager.PersistedClassProgress(11, ClassTier.BASIC.id(), 1300),
+        assertEquals(new PlayerProgressManager.PersistedClassProgress(12, ClassTier.BASIC.id(), 1300),
                 PlayerProgressManager.migrateClassProgress(10, ClassTier.BASIC.id(), 1300));
-        assertEquals(new PlayerProgressManager.PersistedClassProgress(11, ClassTier.MONSTER.id(), 2000),
+        assertEquals(new PlayerProgressManager.PersistedClassProgress(12, ClassTier.MONSTER.id(), 2000),
                 PlayerProgressManager.migrateClassProgress(10, 99, Integer.MAX_VALUE));
     }
 
@@ -133,6 +133,7 @@ class ProgressionCharacterizationTest {
         setField(progressType, progress, "classTiers", null);
         setField(progressType, progress, "unlockedBaseClasses", unlocks);
         setField(progressType, progress, "purchasedClasses", null);
+        setField(progressType, progress, "purchasedCosmetics", null);
         setField(progressType, progress, "donations", null);
         setField(progressType, progress, "stats", null);
         setField(progressType, progress, "appliedTransactionReceipts", null);
@@ -144,7 +145,7 @@ class ProgressionCharacterizationTest {
         normalize.setAccessible(true);
         normalize.invoke(null, progress);
 
-        assertEquals(11, getField(progressType, progress, "dataVersion"));
+        assertEquals(12, getField(progressType, progress, "dataVersion"));
         assertEquals(0, getField(progressType, progress, "coins"));
         assertEquals(7, getField(progressType, progress, "wins"));
         assertEquals(0, getField(progressType, progress, "battlePassXp"));
@@ -153,6 +154,7 @@ class ProgressionCharacterizationTest {
         assertEquals(0, integerMap(progressType, progress, "unlockedBaseClasses").get("droneoperator"));
         assertTrue(integerMap(progressType, progress, "classTiers").containsKey("scout"));
         assertTrue(integerMap(progressType, progress, "purchasedClasses").containsKey("boomguy"));
+        assertTrue(((java.util.Set<?>) getField(progressType, progress, "purchasedCosmetics")).isEmpty());
         assertTrue(integerMap(progressType, progress, "donations").isEmpty());
         assertTrue(integerMap(progressType, progress, "stats").isEmpty());
     }

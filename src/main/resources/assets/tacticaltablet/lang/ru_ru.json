@@ -230,5 +230,12 @@
   "message.tacticaltablet.lobby.dimension_missing": "[WAR] Измерение lobby:lobby недоступно. Проверьте установленную версию мода.",
   "message.tacticaltablet.lobby.welcome.title": "ДОБРО ПОЖАЛОВАТЬ",
   "message.tacticaltablet.lobby.welcome.subtitle": "Лобби Battle Royale",
-  "message.tacticaltablet.match.joined_team": "[WAR] Вы присоединены к команде %s."
+  "message.tacticaltablet.match.joined_team": "[WAR] Вы присоединены к команде %s.",
+  "screen.tacticaltablet.shop.ghillie_suit": "МАСКХАЛАТ",
+  "screen.tacticaltablet.shop.purchased": "КУПЛЕНО",
+  "screen.tacticaltablet.shop.ghillie_suit.confirm": "Купить маскхалат?",
+  "message.tacticaltablet.cosmetic.ghillie_suit.purchased": "[WAR] Маскхалат куплен за %s монет.",
+  "message.tacticaltablet.cosmetic.ghillie_suit.already_owned": "[WAR] Маскхалат уже куплен.",
+  "message.tacticaltablet.cosmetic.ghillie_suit.not_enough": "[WAR] Не хватает монет для маскхалата. Нужно %s монет.",
+  "message.tacticaltablet.cosmetic.invalid": "[WAR] Этот товар нельзя купить."
 }

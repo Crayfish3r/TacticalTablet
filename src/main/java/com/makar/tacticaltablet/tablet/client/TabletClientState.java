@@ -10,6 +10,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 public class TabletClientState {
 
@@ -26,6 +27,7 @@ public class TabletClientState {
     private static Map<String, Integer> classTiers = new HashMap<>();
     private static Map<String, Integer> unlockedBaseClasses = new HashMap<>();
     private static Map<String, Integer> purchasedClasses = new HashMap<>();
+    private static Set<String> purchasedCosmetics = Set.of();
 
     private static int wins;
     private static int kills;
@@ -140,6 +142,14 @@ public class TabletClientState {
 
     public static boolean isClassPurchased(String clazz) {
         return purchasedClasses.getOrDefault(clazz, 0) > 0;
+    }
+
+    public static void updatePurchasedCosmetics(Set<String> purchased) {
+        purchasedCosmetics = purchased == null ? Set.of() : Set.copyOf(purchased);
+    }
+
+    public static boolean ownsCosmetic(String productId) {
+        return productId != null && purchasedCosmetics.contains(productId);
     }
 
     public static void updateGameRunning(boolean running) {

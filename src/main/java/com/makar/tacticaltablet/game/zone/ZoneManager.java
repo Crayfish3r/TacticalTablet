@@ -3,6 +3,8 @@ package com.makar.tacticaltablet.game.zone;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonSyntaxException;
+import com.makar.tacticaltablet.camouflage.CamouflageCatalogLoader;
+import com.makar.tacticaltablet.camouflage.CamouflageMapSelection;
 import com.makar.tacticaltablet.core.TacticalTabletMod;
 import com.makar.tacticaltablet.game.GameStateManager;
 import com.makar.tacticaltablet.game.lives.LivesManager;
@@ -28,6 +30,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Random;
 import java.util.OptionalInt;
+import java.util.Optional;
+import java.util.function.Predicate;
 
 public final class ZoneManager {
 
@@ -64,6 +68,7 @@ public final class ZoneManager {
             new ZoneFinalRevealScheduler(FINAL_REVEAL_INTERVAL_SECONDS);
     private static ServerBossEvent zoneBossBar;
     private static volatile RtpSettings activeRtpSettings = RtpSettings.surfaceDefaults();
+    private static volatile Optional<String> activeCamouflagePreset = Optional.empty();
 
     private ZoneManager() {
     }
@@ -82,6 +87,7 @@ public final class ZoneManager {
         FINAL_REVEAL_SCHEDULER.reset();
         ZoneSettings settings = loadSettings(server);
         activateRtpSettings(settings.rtpSettings);
+        activateCamouflagePreset(server, settings.camouflagePreset);
         RtpValidation rtpValidation = validateActiveRtpSettings(GameStateManager.getOverworld(server));
         if (!rtpValidation.valid()) {
             throw new IllegalStateException("Invalid RTP configuration: " + rtpValidation.reason());
@@ -107,10 +113,14 @@ public final class ZoneManager {
         hideBossBar();
 
         ServerLevel overworld = GameStateManager.getOverworld(server);
-        if (overworld == null) return;
+        if (overworld == null) {
+            activeCamouflagePreset = Optional.empty();
+            return;
+        }
 
         ZoneSettings settings = loadSettings(server);
         activateRtpSettings(settings.rtpSettings);
+        activateCamouflagePreset(server, settings.camouflagePreset);
         WorldBorder border = overworld.getWorldBorder();
         border.setCenter(settings.zoneCenterX, settings.zoneCenterZ);
         border.setSize(360.0D);
@@ -340,10 +350,19 @@ public final class ZoneManager {
         return activeRtpSettings;
     }
 
+    public static Optional<String> getActiveCamouflagePreset() {
+        return activeCamouflagePreset;
+    }
+
     // Package-private for parser regression tests; production loading uses the same DTO normalization path.
     static RtpSettings parseRtpSettingsJson(String json) {
         ZoneSettings settings = GSON.fromJson(json, ZoneSettings.class);
         return normalize(settings).rtpSettings;
+    }
+
+    static CamouflageMapSelection.Result parseCamouflagePresetJson(String json, Predicate<String> presetExists) {
+        ZoneSettings settings = normalize(GSON.fromJson(json, ZoneSettings.class));
+        return CamouflageMapSelection.resolve(settings.camouflagePreset, presetExists);
     }
 
     public static RtpValidation validateActiveRtpSettings(ServerLevel level) {
@@ -383,6 +402,19 @@ public final class ZoneManager {
             );
         } else if (!activeRtpSettings.valid()) {
             TacticalTabletMod.LOGGER.error("[TacticalTablet] Invalid FIXED_Y_BOX RTP configuration: {}", activeRtpSettings.validationError());
+        }
+    }
+
+    private static void activateCamouflagePreset(MinecraftServer server, String configuredPreset) {
+        CamouflageMapSelection.Result result = CamouflageMapSelection.resolve(
+                configuredPreset, id -> CamouflageCatalogLoader.catalog().find(id).isPresent());
+        activeCamouflagePreset = result.preset();
+        if (result.unknown()) {
+            Path root = server.getWorldPath(LevelResource.ROOT).toAbsolutePath().normalize();
+            String mapName = root.getFileName() == null ? root.toString() : root.getFileName().toString();
+            TacticalTabletMod.LOGGER.warn(
+                    "Unknown camouflage preset '{}' for map '{}'; camouflage is disabled",
+                    result.unknownPreset(), mapName);
         }
     }
 
@@ -431,6 +463,7 @@ public final class ZoneManager {
         Double zoneCenterX;
         Double zoneCenterZ;
         Integer zoneRandomRadius;
+        String camouflagePreset;
         RtpSettingsJson rtp;
         transient RtpSettings rtpSettings;
 
