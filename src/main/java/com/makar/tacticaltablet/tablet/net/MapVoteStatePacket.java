@@ -22,6 +22,9 @@ public final class MapVoteStatePacket {
     private final boolean nextSetCompetitive;
     private final boolean nextSetClanWar;
     private final boolean ordinaryModesEnabled;
+    private final int availableModesMask;
+    private final int chaosCooldownRemaining;
+    private final int consecutiveCompetitiveSets;
     private final SetGameMode selectedMode;
     private final Map<SetGameMode, Integer> modeVoteCounts;
     private final int secondsLeft;
@@ -36,6 +39,9 @@ public final class MapVoteStatePacket {
             boolean nextSetCompetitive,
             boolean nextSetClanWar,
             boolean ordinaryModesEnabled,
+            int availableModesMask,
+            int chaosCooldownRemaining,
+            int consecutiveCompetitiveSets,
             SetGameMode selectedMode,
             Map<SetGameMode, Integer> modeVoteCounts,
             int secondsLeft,
@@ -49,6 +55,9 @@ public final class MapVoteStatePacket {
         this.nextSetCompetitive = nextSetCompetitive;
         this.nextSetClanWar = nextSetClanWar;
         this.ordinaryModesEnabled = ordinaryModesEnabled;
+        this.availableModesMask = availableModesMask;
+        this.chaosCooldownRemaining = Math.max(0, chaosCooldownRemaining);
+        this.consecutiveCompetitiveSets = Math.max(0, consecutiveCompetitiveSets);
         this.selectedMode = selectedMode;
         this.modeVoteCounts = sanitizeModeCounts(modeVoteCounts);
         this.secondsLeft = Math.max(0, secondsLeft);
@@ -64,6 +73,9 @@ public final class MapVoteStatePacket {
         nextSetCompetitive = buf.readBoolean();
         nextSetClanWar = buf.readBoolean();
         ordinaryModesEnabled = buf.readBoolean();
+        availableModesMask = buf.readVarInt();
+        chaosCooldownRemaining = Math.max(0, buf.readVarInt());
+        consecutiveCompetitiveSets = Math.max(0, buf.readVarInt());
         selectedMode = PacketCodecs.readOptionalEnumOrdinal(buf, SetGameMode.values(), "set mode vote");
         Map<SetGameMode, Integer> decodedModeCounts = new LinkedHashMap<>();
         for (SetGameMode mode : SetGameMode.values()) if (mode.selectable()) decodedModeCounts.put(mode, Math.max(0, buf.readInt()));
@@ -91,6 +103,9 @@ public final class MapVoteStatePacket {
         buf.writeBoolean(nextSetCompetitive);
         buf.writeBoolean(nextSetClanWar);
         buf.writeBoolean(ordinaryModesEnabled);
+        buf.writeVarInt(availableModesMask);
+        buf.writeVarInt(chaosCooldownRemaining);
+        buf.writeVarInt(consecutiveCompetitiveSets);
         buf.writeByte(selectedMode == null ? -1 : selectedMode.ordinal());
         for (SetGameMode mode : SetGameMode.values()) if (mode.selectable()) buf.writeInt(modeVoteCounts.getOrDefault(mode, 0));
         buf.writeInt(secondsLeft);
@@ -111,6 +126,9 @@ public final class MapVoteStatePacket {
                 nextSetCompetitive,
                 nextSetClanWar,
                 ordinaryModesEnabled,
+                availableModesMask,
+                chaosCooldownRemaining,
+                consecutiveCompetitiveSets,
                 selectedMode,
                 modeVoteCounts,
                 secondsLeft,

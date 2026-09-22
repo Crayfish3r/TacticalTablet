@@ -28,7 +28,7 @@ import java.util.function.Supplier;
 
 /** Tactical Tablet protocol registry. */
 public final class PacketHandler {
-    public static final String VERSION = "43";
+    public static final String VERSION = "44";
 
     public static final int TABLET = 0, TABLET_STATE = 1, VOTE_MODE = 2, JOIN_TEAM = 3, VOTE_MAP = 4,
             MAP_VOTE_STATE = 5, SET_COMPETITIVE = 6, SET_CLAN_WAR = 7, CONTRACT_SELECTION_STATE = 8,

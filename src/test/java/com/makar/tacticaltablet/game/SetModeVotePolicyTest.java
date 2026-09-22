@@ -22,4 +22,23 @@ class SetModeVotePolicyTest {
         assertFalse(SetModeVotePolicy.ordinaryModesEnabled(true, false));
         assertFalse(SetModeVotePolicy.ordinaryModesEnabled(false, true));
     }
+
+    @Test
+    void winnerIsSelectedOnlyFromServerAvailableModes() {
+        Map<SetGameMode, Integer> counts = Map.of(
+                SetGameMode.CASUAL, 1,
+                SetGameMode.CHAOS, 100,
+                SetGameMode.COMPETITIVE, 100
+        );
+        assertEquals(SetGameMode.CASUAL, SetModeVotePolicy.selectWinner(
+                counts, java.util.Set.of(SetGameMode.CASUAL), new Random(1)));
+    }
+
+    @Test
+    void existingOrdinalsRemainStableWhenCompetitiveIsAppended() {
+        assertEquals(0, SetGameMode.CASUAL.ordinal());
+        assertEquals(1, SetGameMode.CHAOS.ordinal());
+        assertEquals(2, SetGameMode.RACE.ordinal());
+        assertEquals(3, SetGameMode.COMPETITIVE.ordinal());
+    }
 }

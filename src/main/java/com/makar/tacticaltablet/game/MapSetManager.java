@@ -55,6 +55,7 @@ public final class MapSetManager {
 
     private static final Map<UUID, String> votes = new HashMap<>();
     private static final Map<UUID, SetGameMode> modeVotes = new HashMap<>();
+    private static Set<SetGameMode> availableSetModes = Set.of(SetGameMode.CASUAL);
     private static SetState state = new SetState();
     private static Path statePath;
     private static boolean voting;
@@ -138,8 +139,15 @@ public final class MapSetManager {
 
     public static synchronized boolean onGameCompleted(MinecraftServer server) {
         initStorage(server);
+        int previousCompletedGames = state.completedGames;
+        SetModeRotationPolicy.RotationState previousRotation = rotationState();
         state.completedGames = MapSetProgressionPolicy.completedAfterGame(state.completedGames, GAMES_PER_MAP);
-        saveState();
+        recordRotationIfSetJustCompleted(previousCompletedGames);
+        if (!saveState()) {
+            state.completedGames = previousCompletedGames;
+            applyRotationState(previousRotation);
+            return false;
+        }
         return MapSetProgressionPolicy.isComplete(state.completedGames, GAMES_PER_MAP);
     }
 
@@ -147,9 +155,12 @@ public final class MapSetManager {
         initStorage(server);
         if (state.completedGames >= GAMES_PER_MAP) return true;
         int previous = state.completedGames;
+        SetModeRotationPolicy.RotationState previousRotation = rotationState();
         state.completedGames = GAMES_PER_MAP;
+        recordRotationIfSetJustCompleted(previous);
         if (saveState()) return true;
         state.completedGames = previous;
+        applyRotationState(previousRotation);
         return false;
     }
 
@@ -319,7 +330,31 @@ public final class MapSetManager {
     }
 
     public static synchronized SetGameMode getSetMode() {
+        if (state.competitiveSet) return SetGameMode.COMPETITIVE;
         return isChaosSet() ? SetGameMode.CHAOS : SetGameMode.CASUAL;
+    }
+
+    public static synchronized int getChaosCooldownRemaining() {
+        return state.chaosCooldownRemaining;
+    }
+
+    public static synchronized int getConsecutiveCompetitiveSets() {
+        return state.consecutiveCompetitiveSets;
+    }
+
+    public static synchronized boolean fallbackCompetitiveToCasual(MinecraftServer server) {
+        if (server == null) return false;
+        if (!state.competitiveSet) return true;
+        state.competitiveSet = false;
+        state.setMode = SetGameMode.CASUAL;
+        if (!saveState()) {
+            state.competitiveSet = true;
+            TacticalTabletMod.LOGGER.error("Failed to persist Competitive fallback to Casual");
+            return false;
+        }
+        Component message = Component.translatable("message.tacticaltablet.competitive.fallback_casual");
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) player.sendSystemMessage(message);
+        return true;
     }
 
     public static synchronized void fallbackChaosToCasual(MinecraftServer server) {
@@ -447,6 +482,8 @@ public final class MapSetManager {
         voteSecondsLeft = MAP_VOTE_SECONDS;
         voting = true;
         stopIssued = false;
+        availableSetModes = SetModeRotationPolicy.availableModes(
+                rotationState(), GameStateManager.getMatchParticipantCandidateCount(server));
 
         broadcast(server, debug
                 ? "[WAR] Отладочное голосование за следующую карту началось. После выбора сервер будет перезапущен."
@@ -468,7 +505,10 @@ public final class MapSetManager {
     public static synchronized void voteSetMode(ServerPlayer player, SetGameMode mode) {
         if (player == null || !voting || !GameStateManager.isInLobby(player)) return;
         if (!SetModeVotePolicy.ordinaryModesEnabled(state.nextSetCompetitive, state.nextSetClanWar)) return;
-        if (mode == null || !mode.selectable()) return;
+        if (!SetModeRotationPolicy.isAvailable(availableSetModes, mode)) {
+            sync(player, false);
+            return;
+        }
         modeVotes.put(player.getUUID(), mode);
         syncAll(player.server, false);
     }
@@ -521,12 +561,21 @@ public final class MapSetManager {
 
         String winner = selectedMap.isBlank() ? resolveWinner() : selectedMap;
         selectedMap = winner;
-        state.nextSetMode = SetModeVotePolicy.ordinaryModesEnabled(
-                state.nextSetCompetitive, state.nextSetClanWar)
-                ? SetModeVotePolicy.selectWinner(modeVoteCounts(), RANDOM)
-                : SetGameMode.CASUAL;
+        boolean previousNextSetCompetitive = state.nextSetCompetitive;
+        SetGameMode previousNextSetMode = state.nextSetMode;
+        if (SetModeVotePolicy.ordinaryModesEnabled(state.nextSetCompetitive, state.nextSetClanWar)) {
+            SetGameMode modeWinner = SetModeVotePolicy.selectWinner(
+                    modeVoteCounts(), availableSetModes, RANDOM);
+            state.nextSetCompetitive = modeWinner == SetGameMode.COMPETITIVE;
+            state.nextSetMode = modeWinner == SetGameMode.CHAOS
+                    ? SetGameMode.CHAOS : SetGameMode.CASUAL;
+        } else {
+            state.nextSetMode = SetGameMode.CASUAL;
+        }
         if (!saveState()) {
             TacticalTabletMod.LOGGER.error("Failed to persist selected set mode {}", state.nextSetMode);
+            state.nextSetCompetitive = previousNextSetCompetitive;
+            state.nextSetMode = previousNextSetMode;
             voteSecondsLeft = 10;
             return VoteTickResult.FAILED;
         }
@@ -593,6 +642,9 @@ public final class MapSetManager {
                 state.nextSetCompetitive,
                 state.nextSetClanWar,
                 SetModeVotePolicy.ordinaryModesEnabled(state.nextSetCompetitive, state.nextSetClanWar),
+                SetModeRotationPolicy.availabilityMask(availableSetModes),
+                state.chaosCooldownRemaining,
+                state.consecutiveCompetitiveSets,
                 modeVotes.get(player.getUUID()),
                 modeVoteCounts(),
                 voteSecondsLeft,
@@ -720,6 +772,10 @@ public final class MapSetManager {
         );
         candidate.completedGames = migration.completedGames();
         candidate.dataVersion = migration.dataVersion();
+        SetModeRotationPolicy.RotationState rotation = new SetModeRotationPolicy.RotationState(
+                candidate.chaosCooldownRemaining, candidate.consecutiveCompetitiveSets);
+        candidate.chaosCooldownRemaining = rotation.chaosCooldownRemaining();
+        candidate.consecutiveCompetitiveSets = rotation.consecutiveCompetitiveSets();
         if (candidate.setId == null || candidate.setId.isBlank()) {
             candidate.setId = UUID.randomUUID().toString();
         }
@@ -789,7 +845,24 @@ public final class MapSetManager {
         restartSecondsLeft = -1;
         selectedMap = "";
         votingMaps = List.of();
+        availableSetModes = Set.of(SetGameMode.CASUAL);
         stopIssued = false;
+    }
+
+    private static SetModeRotationPolicy.RotationState rotationState() {
+        return new SetModeRotationPolicy.RotationState(
+                state.chaosCooldownRemaining, state.consecutiveCompetitiveSets);
+    }
+
+    private static void applyRotationState(SetModeRotationPolicy.RotationState rotation) {
+        state.chaosCooldownRemaining = rotation.chaosCooldownRemaining();
+        state.consecutiveCompetitiveSets = rotation.consecutiveCompetitiveSets();
+    }
+
+    private static void recordRotationIfSetJustCompleted(int previousCompletedGames) {
+        if (!SetModeRotationPolicy.shouldRecordCompletion(
+                previousCompletedGames, state.completedGames, GAMES_PER_MAP)) return;
+        applyRotationState(SetModeRotationPolicy.recordCompletedSet(rotationState(), getSetMode()));
     }
 
     private static void broadcast(MinecraftServer server, String message) {
@@ -814,6 +887,8 @@ public final class MapSetManager {
         String lastRotation = "";
         List<String> recentPlayedMaps = new ArrayList<>();
         int completedGames;
+        int chaosCooldownRemaining;
+        int consecutiveCompetitiveSets;
         boolean competitiveSet;
         boolean nextSetCompetitive;
         boolean clanWarSet;

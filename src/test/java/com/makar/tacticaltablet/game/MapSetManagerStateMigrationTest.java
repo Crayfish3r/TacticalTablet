@@ -93,6 +93,38 @@ class MapSetManagerStateMigrationTest {
         assertEquals(5, restored.completedGames);
     }
 
+    @Test
+    void rotationCountersSurviveJsonRoundTripAndAreClamped() {
+        MapSetManager.SetState state = legacyState(5);
+        state.chaosCooldownRemaining = 2;
+        state.consecutiveCompetitiveSets = 1;
+
+        MapSetManager.SetState restored = GSON.fromJson(GSON.toJson(state), MapSetManager.SetState.class);
+        MapSetManager.normalizeState(restored);
+
+        assertEquals(2, restored.chaosCooldownRemaining);
+        assertEquals(1, restored.consecutiveCompetitiveSets);
+
+        restored.chaosCooldownRemaining = 99;
+        restored.consecutiveCompetitiveSets = -4;
+        MapSetManager.normalizeState(restored);
+        assertEquals(3, restored.chaosCooldownRemaining);
+        assertEquals(0, restored.consecutiveCompetitiveSets);
+    }
+
+    @Test
+    void legacyJsonWithoutRotationCountersDefaultsToUnlockedState() {
+        MapSetManager.SetState restored = GSON.fromJson(
+                "{\"dataVersion\":5,\"mapName\":\"Alpha\",\"completedGames\":5}",
+                MapSetManager.SetState.class
+        );
+
+        MapSetManager.normalizeState(restored);
+
+        assertEquals(0, restored.chaosCooldownRemaining);
+        assertEquals(0, restored.consecutiveCompetitiveSets);
+    }
+
     private static MapSetManager.SetState legacyState(int completedGames) {
         MapSetManager.SetState state = new MapSetManager.SetState();
         state.dataVersion = 4;

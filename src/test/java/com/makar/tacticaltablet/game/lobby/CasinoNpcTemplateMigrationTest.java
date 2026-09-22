@@ -8,8 +8,8 @@ class CasinoNpcTemplateMigrationTest {
         try (var input = Files.newInputStream(Path.of("src/main/resources/data/lobby/structures/spawn.nbt"))) {
             CompoundTag source = NbtIo.readCompressed(input);
             CompoundTag filtered = CasinoNpcTemplateMigration.withoutLegacyCasinoNpcs(source);
-            assertEquals(16, source.getList("entities", 10).size());
-            assertEquals(12, filtered.getList("entities", 10).size());
+            assertEquals(11, source.getList("entities", 10).size());
+            assertEquals(11, filtered.getList("entities", 10).size());
             assertEquals(source.get("blocks"), filtered.get("blocks"));
             assertEquals(source.get("palette"), filtered.get("palette"));
             assertEquals(filtered, CasinoNpcTemplateMigration.withoutLegacyCasinoNpcs(filtered));

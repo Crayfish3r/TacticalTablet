@@ -83,6 +83,7 @@ public class GameStateManager {
 
     private static final int MIN_PLAYERS = 2;
     private static final int START_DELAY_SECONDS = 10;
+    private static final int COMPETITIVE_PRESTART_SECONDS = 60;
     private static final int POST_GAME_DELAY_SECONDS = 3;
     private static final int WIN_XP_ALL_CLASSES = 10;
     private static final SetReportDispatchCoordinator SET_REPORT_DISPATCH =
@@ -92,6 +93,8 @@ public class GameStateManager {
     private static int matchStartingParticipants = 0;
     private static int tickCounter = 0;
     private static int startCountdown = -1;
+    private static int competitivePreStartSeconds = -1;
+    private static boolean competitivePreStartValidated;
     private static int postGameDelay = 0;
     private static boolean cleanupPending = false;
     private static final SetRewardCountdown SET_REWARD_COUNTDOWN = new SetRewardCountdown();
@@ -191,13 +194,17 @@ public class GameStateManager {
         return server == null ? 0 : server.getPlayerList().getPlayerCount();
     }
 
-    private static int matchParticipantCandidates(MinecraftServer server) {
+    public static int getMatchParticipantCandidateCount(MinecraftServer server) {
         if (server == null) return 0;
         int count = 0;
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
             if (LobbyManager.isMatchParticipantCandidate(player)) count++;
         }
         return count;
+    }
+
+    private static int matchParticipantCandidates(MinecraftServer server) {
+        return getMatchParticipantCandidateCount(server);
     }
 
     public static int playingPlayers(MinecraftServer server) {
@@ -308,6 +315,20 @@ public class GameStateManager {
 
     public static void startGame(MinecraftServer server) {
         if (server == null) return;
+        if (MapSetManager.isCompetitiveSet()
+                && MapSetManager.getCompletedGames() == 0
+                && !competitivePreStartValidated) {
+            if (competitivePreStartSeconds < 0) {
+                competitivePreStartSeconds = COMPETITIVE_PRESTART_SECONDS;
+                matchPhase = MatchPhase.STARTING;
+                broadcastCompetitivePreStart(server, competitivePreStartSeconds);
+            }
+            return;
+        }
+        startGameNow(server);
+    }
+
+    private static void startGameNow(MinecraftServer server) {
         MatchStartResult result = MATCH_START_COORDINATOR.start(server);
         handleStartResult(server, result);
         if (MatchStartRecoveryPolicy.shouldRecover(result.status())) {
@@ -507,6 +528,8 @@ public class GameStateManager {
         startCountdown = -1;
         postGameDelay = 0;
         cleanupPending = false;
+        competitivePreStartSeconds = -1;
+        competitivePreStartValidated = false;
         SET_REWARD_COUNTDOWN.reset();
         SET_REPORT_DISPATCH.reset();
         matchPhase = MatchPhase.WAITING;
@@ -539,6 +562,8 @@ public class GameStateManager {
         matchStartingParticipants = 0;
         tickCounter = 0;
         startCountdown = -1;
+        competitivePreStartSeconds = -1;
+        competitivePreStartValidated = false;
         postGameDelay = 0;
         SET_REWARD_COUNTDOWN.reset();
         matchPhase = MatchPhase.WAITING;
@@ -801,6 +826,11 @@ public class GameStateManager {
             return;
         }
 
+        if (competitivePreStartSeconds >= 0) {
+            tickCompetitivePreStart(server);
+            return;
+        }
+
         if (matchPhase == MatchPhase.SET_REWARDING) {
             if (SET_REWARD_COUNTDOWN.tickSecond()) {
                 MapSetManager.completeRewarding(server);
@@ -955,6 +985,38 @@ public class GameStateManager {
                 || TestModeManager.canBypassTeamModeMinimums();
     }
 
+    private static void tickCompetitivePreStart(MinecraftServer server) {
+        if (competitivePreStartSeconds > 0) {
+            competitivePreStartSeconds--;
+            if (competitivePreStartSeconds > 0 && isCompetitivePreStartCheckpoint(competitivePreStartSeconds)) {
+                broadcastCompetitivePreStart(server, competitivePreStartSeconds);
+            }
+            if (competitivePreStartSeconds > 0) return;
+        }
+
+        int eligiblePlayers = getMatchParticipantCandidateCount(server);
+        SetGameMode actualMode = SetModeRotationPolicy.resolveCompetitivePreStart(
+                SetGameMode.COMPETITIVE, eligiblePlayers);
+        if (actualMode == SetGameMode.CASUAL
+                && !MapSetManager.fallbackCompetitiveToCasual(server)) {
+            return;
+        }
+        competitivePreStartSeconds = -1;
+        competitivePreStartValidated = true;
+        startGameNow(server);
+    }
+
+    private static boolean isCompetitivePreStartCheckpoint(int seconds) {
+        return seconds == 30 || seconds == 10 || seconds <= 5;
+    }
+
+    private static void broadcastCompetitivePreStart(MinecraftServer server, int seconds) {
+        broadcast(server, Component.translatable(
+                "message.tacticaltablet.competitive.prestart",
+                seconds,
+                SetModeRotationPolicy.COMPETITIVE_MIN_PLAYERS));
+    }
+
     private static void showWinnerTitle(MinecraftServer server, String winnerName, TeamId winnerTeam) {
         boolean noWinner = winnerName == null
                 || winnerName.isBlank()
@@ -982,8 +1044,10 @@ public class GameStateManager {
     }
 
     private static void broadcast(MinecraftServer server, String message) {
-        Component component = Component.literal(message);
+        broadcast(server, Component.literal(message));
+    }
 
+    private static void broadcast(MinecraftServer server, Component component) {
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
             player.sendSystemMessage(component);
         }

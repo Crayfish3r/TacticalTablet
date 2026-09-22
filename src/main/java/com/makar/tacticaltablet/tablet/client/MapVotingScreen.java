@@ -2,6 +2,7 @@ package com.makar.tacticaltablet.tablet.client;
 
 import com.makar.tacticaltablet.game.MatchPhase;
 import com.makar.tacticaltablet.game.SetGameMode;
+import com.makar.tacticaltablet.game.SetModeRotationPolicy;
 import com.makar.tacticaltablet.tablet.client.ui.TacticalLayout;
 import com.makar.tacticaltablet.tablet.client.ui.TacticalTheme;
 import com.makar.tacticaltablet.tablet.client.ui.TacticalUi;
@@ -89,7 +90,8 @@ public final class MapVotingScreen extends TacticalPhaseScreen {
         int width = Math.max(1, (panel.width() - 24 - gap * 2) / 3);
         int y = panel.bottom() - (MapVoteClientState.isOperator() ? 86 : 48);
         int index = 0;
-        for (SetGameMode mode : SetGameMode.values()) {
+        for (SetGameMode mode : List.of(
+                SetGameMode.CASUAL, SetGameMode.CHAOS, SetGameMode.COMPETITIVE)) {
             ModeButton button = new ModeButton(panel.x() + 12 + index * (width + gap), y, width, mode);
             modeButtons.add(addRenderableWidget(button));
             index++;
@@ -157,8 +159,12 @@ public final class MapVotingScreen extends TacticalPhaseScreen {
         if (competitiveToggleButton != null) competitiveToggleButton.render(graphics, mouseX, mouseY, partialTick);
         if (clanWarToggleButton != null) clanWarToggleButton.render(graphics, mouseX, mouseY, partialTick);
         for (ModeButton button : modeButtons) button.render(graphics, mouseX, mouseY, partialTick);
-        for (ModeButton button : modeButtons) if (button.isHovered() && button.mode == SetGameMode.RACE)
-            graphics.renderTooltip(font, Component.literal("Режим появится позже"), mouseX, mouseY);
+        for (ModeButton button : modeButtons) {
+            Component reason = button.unavailableReason();
+            if (button.isHovered() && reason != null) {
+                graphics.renderTooltip(font, reason, mouseX, mouseY);
+            }
+        }
         renderFooterStatus(graphics, panel);
     }
 
@@ -282,7 +288,8 @@ public final class MapVotingScreen extends TacticalPhaseScreen {
 
     private void submitMode(SetGameMode mode) {
         if (pendingMode != null || mode == null || !mode.selectable()
-                || !MapVoteClientState.areOrdinaryModesEnabled()) return;
+                || !MapVoteClientState.areOrdinaryModesEnabled()
+                || !MapVoteClientState.isModeAvailable(mode)) return;
         playClick();
         pendingMode = mode;
         pendingModeTicks = 0;
@@ -387,22 +394,48 @@ public final class MapVotingScreen extends TacticalPhaseScreen {
         private final SetGameMode mode;
 
         private ModeButton(int x, int y, int width, SetGameMode mode) {
-            super(x, y, width, 24, Component.literal(mode.displayName()), ignored -> submitMode(mode));
+            super(x, y, width, 24, Component.translatable(mode.translationKey()), ignored -> submitMode(mode));
             this.mode = mode;
             selectedWhen(() -> MapVoteClientState.getSelectedMode() == mode);
             withFocusKey("map_voting.set_mode." + mode.name().toLowerCase());
             onHover(TacticalPhaseScreen::playHover);
-            active = mode.selectable() && MapVoteClientState.areOrdinaryModesEnabled();
+            active = mode.selectable() && MapVoteClientState.areOrdinaryModesEnabled()
+                    && MapVoteClientState.isModeAvailable(mode);
         }
 
         @Override
         protected void renderContent(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
-            active = pendingMode == null && mode.selectable() && MapVoteClientState.areOrdinaryModesEnabled();
+            active = pendingMode == null && mode.selectable()
+                    && MapVoteClientState.areOrdinaryModesEnabled()
+                    && MapVoteClientState.isModeAvailable(mode);
             int color = active ? TacticalTheme.TEXT_PRIMARY : TacticalTheme.TEXT_DISABLED;
-            graphics.drawCenteredString(font, mode.displayName(), getX() + width / 2, getY() + 5, color);
+            graphics.drawCenteredString(font, Component.translatable(mode.translationKey()),
+                    getX() + width / 2, getY() + 5, color);
             if (mode.selectable()) graphics.drawCenteredString(font,
                     Component.literal(String.valueOf(MapVoteClientState.getModeVoteCount(mode))),
                     getX() + width / 2, getY() + 14, color);
+        }
+
+        private Component unavailableReason() {
+            if (!MapVoteClientState.areOrdinaryModesEnabled()
+                    || MapVoteClientState.isModeAvailable(mode)) return null;
+            if (mode == SetGameMode.CHAOS) {
+                return Component.translatable(
+                        "screen.tacticaltablet.map_voting.mode.chaos_locked",
+                        MapVoteClientState.getChaosCooldownRemaining());
+            }
+            if (mode == SetGameMode.COMPETITIVE
+                    && MapVoteClientState.getConsecutiveCompetitiveSets()
+                    >= SetModeRotationPolicy.MAX_CONSECUTIVE_COMPETITIVE) {
+                return Component.translatable(
+                        "screen.tacticaltablet.map_voting.mode.competitive_streak_locked");
+            }
+            if (mode == SetGameMode.COMPETITIVE) {
+                return Component.translatable(
+                        "screen.tacticaltablet.map_voting.mode.competitive_players_required",
+                        SetModeRotationPolicy.COMPETITIVE_MIN_PLAYERS);
+            }
+            return null;
         }
     }
 }

@@ -1,6 +1,7 @@
 package com.makar.tacticaltablet.tablet.client;
 
 import com.makar.tacticaltablet.game.SetGameMode;
+import com.makar.tacticaltablet.game.SetModeRotationPolicy;
 import net.minecraft.client.Minecraft;
 
 import java.util.LinkedHashMap;
@@ -14,6 +15,9 @@ public final class MapVoteClientState {
     private static boolean nextSetCompetitive;
     private static boolean nextSetClanWar;
     private static boolean ordinaryModesEnabled;
+    private static int availableModesMask = 1 << SetGameMode.CASUAL.ordinal();
+    private static int chaosCooldownRemaining;
+    private static int consecutiveCompetitiveSets;
     private static SetGameMode selectedMode;
     private static Map<SetGameMode, Integer> modeVoteCounts = Map.of();
     private static int secondsLeft;
@@ -31,6 +35,9 @@ public final class MapVoteClientState {
             boolean competitive,
             boolean clanWar,
             boolean modesEnabled,
+            int modesMask,
+            int chaosCooldown,
+            int competitiveStreak,
             SetGameMode mode,
             Map<SetGameMode, Integer> modeCounts,
             int remainingSeconds,
@@ -43,6 +50,9 @@ public final class MapVoteClientState {
         nextSetCompetitive = competitive;
         nextSetClanWar = clanWar;
         ordinaryModesEnabled = modesEnabled;
+        availableModesMask = modesMask | (1 << SetGameMode.CASUAL.ordinal());
+        chaosCooldownRemaining = Math.max(0, chaosCooldown);
+        consecutiveCompetitiveSets = Math.max(0, competitiveStreak);
         selectedMode = mode;
         modeVoteCounts = modeCounts == null ? Map.of() : Map.copyOf(modeCounts);
         secondsLeft = Math.max(0, remainingSeconds);
@@ -78,6 +88,11 @@ public final class MapVoteClientState {
     }
 
     public static boolean areOrdinaryModesEnabled() { return ordinaryModesEnabled; }
+    public static boolean isModeAvailable(SetGameMode mode) {
+        return SetModeRotationPolicy.isAvailable(availableModesMask, mode);
+    }
+    public static int getChaosCooldownRemaining() { return chaosCooldownRemaining; }
+    public static int getConsecutiveCompetitiveSets() { return consecutiveCompetitiveSets; }
     public static SetGameMode getSelectedMode() { return selectedMode; }
     public static int getModeVoteCount(SetGameMode mode) { return modeVoteCounts.getOrDefault(mode, 0); }
 

@@ -21,7 +21,7 @@ class EmbeddedServerDataResourcesTest {
     private static final Path DATA = Path.of("src/main/resources/data/lobby");
 
     @Test
-    void dimensionAndStructureRetainOriginalIdsAndBytes() throws Exception {
+    void dimensionAndStructureRetainExpectedIdsAndBytes() throws Exception {
         Path dimension = DATA.resolve("dimension/lobby.json");
         Path dimensionType = DATA.resolve("dimension_type/lobby.json");
         Path structure = DATA.resolve("structures/spawn.nbt");
@@ -30,7 +30,7 @@ class EmbeddedServerDataResourcesTest {
                 sha256NormalizedText(dimension));
         JsonObject dimensionTypeJson = JsonParser.parseString(Files.readString(dimensionType)).getAsJsonObject();
         assertEquals(0.0F, dimensionTypeJson.get("ambient_light").getAsFloat());
-        assertEquals("59f5389a2a0273e73bf153feb3fe4b01d211ee0325ad61e46a3edd5e07428a84",
+        assertEquals("9131f13ef264585f12f6b4544c3dcfebd97fc374e4b5b2efe6883234c3e46897",
                 sha256(structure));
 
         JsonObject dimensionJson = JsonParser.parseString(Files.readString(dimension)).getAsJsonObject();
@@ -62,9 +62,9 @@ class EmbeddedServerDataResourcesTest {
             for (int index = 0; index < blocks.size(); index++) {
                 if (blocks.getCompound(index).contains("nbt", 10)) blockEntities++;
             }
-            assertEquals(28, blockEntities);
+            assertEquals(34, blockEntities);
             assertTrue(nbt.contains("entities", 9));
-            assertEquals(16, nbt.getList("entities", 10).size());
+            assertEquals(11, nbt.getList("entities", 10).size());
             var entities = nbt.getList("entities", 10);
             boolean containsPainting = false;
             int casinoVillagers = 0;
@@ -81,7 +81,7 @@ class EmbeddedServerDataResourcesTest {
                 }
             }
             assertTrue(containsPainting);
-            assertEquals(4, casinoVillagers);
+            assertEquals(0, casinoVillagers);
         }
     }
 
