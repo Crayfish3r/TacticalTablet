@@ -3,3 +3,14 @@
 # are changed when only line endings change.
 src/generated/**/.cache/cache text eol=lf
 src/generated/**/*.json text eol=lf
+
+# Resource manifests verify exact bytes, including original mixed line endings.
+src/main/resources/** -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+# Architecture checks read Java sources directly on Windows too.
+*.java text eol=lf
+# Preserve the archived authoring material byte for byte outside the build.
+legacy/** -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+
+# Source digests and generated TT01 resources must be stable on Windows checkouts.
+model-sources/tablet/*.bbmodel -text
+src/main/resources/assets/tacticaltablet/tablet/*.json -text

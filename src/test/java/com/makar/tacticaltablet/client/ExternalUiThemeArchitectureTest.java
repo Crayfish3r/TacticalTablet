@@ -23,15 +23,15 @@ class ExternalUiThemeArchitectureTest {
     }
 
     @Test
-    void nonTabletScreensUseScopedPaletteWhileTabletScreensKeepDefaultScope() throws IOException {
+    void independentScreensKeepTheirPaletteWhileThePrototypeRendersGeometry() throws IOException {
         String mainMenu = source("client/gui/CustomMainMenu.java");
         String settings = source("client/gui/CustomSettingsScreen.java");
-        String tablet = source("tablet/client/TabletScreen.java");
+        String tablet = source("tablet/client/prototype/TabletPrototypeRenderer.java");
 
         assertTrue(mainMenu.contains("openFrame(frame, ExternalUiTheme.PALETTE)"));
         assertTrue(settings.contains("ExternalUiTheme.PALETTE"));
         assertFalse(tablet.contains("ExternalUiTheme"));
-        assertTrue(tablet.contains("TacticalUi.openFrame("));
+        assertTrue(tablet.contains("RenderType.entityCutoutNoCull(model.texture())"));
     }
 
     @Test

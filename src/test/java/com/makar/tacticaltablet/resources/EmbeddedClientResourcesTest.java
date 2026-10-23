@@ -37,12 +37,12 @@ class EmbeddedClientResourcesTest {
     void everyMigratedRuntimeAssetMatchesTheRepositoryManifest() throws Exception {
         List<ManifestEntry> entries = manifest();
 
-        assertEquals(158, entries.size());
+        assertEquals(94, entries.size());
         assertEquals(Map.of(
                 "curios", 2L,
                 "minecraft", 10L,
                 "moderndamage", 1L,
-                "tacticaltablet", 145L
+                "tacticaltablet", 81L
         ), entries.stream().collect(java.util.stream.Collectors.groupingBy(
                 entry -> entry.path().substring(0, entry.path().indexOf('/')),
                 java.util.stream.Collectors.counting()
@@ -64,7 +64,7 @@ class EmbeddedClientResourcesTest {
     }
 
     @Test
-    void guiPngsRetainTransparencyAndButtonsContainPartialAlpha() throws IOException {
+    void remainingGuiPngsRetainTransparency() throws IOException {
         Path guiRoot = asset("tacticaltablet/textures/gui");
         List<Path> guiPngs = pngs(guiRoot);
         Path mainMenuRoot = guiRoot.resolve("main_menu");
@@ -80,9 +80,6 @@ class EmbeddedClientResourcesTest {
             assertTrue(hasTransparentPixel(image), relative(png));
         }
 
-        for (Path button : pngs(guiRoot.resolve("buttons"))) {
-            assertTrue(hasPartiallyTransparentPixel(readImage(button)), relative(button));
-        }
     }
 
     @Test
@@ -119,23 +116,7 @@ class EmbeddedClientResourcesTest {
     }
 
     @Test
-    void classButtonRemainsNeutralGrayscaleAndClassIconsAreComplete() throws IOException {
-        BufferedImage classButton = readImage(
-                asset("tacticaltablet/textures/gui/buttons/class_button.png")
-        );
-        for (int y = 0; y < classButton.getHeight(); y++) {
-            for (int x = 0; x < classButton.getWidth(); x++) {
-                int argb = classButton.getRGB(x, y);
-                if ((argb >>> 24) == 0) {
-                    continue;
-                }
-                int red = (argb >>> 16) & 0xFF;
-                int green = (argb >>> 8) & 0xFF;
-                int blue = argb & 0xFF;
-                assertTrue(red == green && green == blue, "colored pixel at " + x + "," + y);
-            }
-        }
-
+    void sharedClassRegistryIconsAreComplete() throws IOException {
         List<String> icons = List.of(
                 "stormtrooper", "sniper", "scout", "droneoperator", "machinegunner",
                 "mortarman", "rpgtrooper", "boomguy", "dream", "tagilla", "blackops",
@@ -238,7 +219,7 @@ class EmbeddedClientResourcesTest {
 
         String registration = Files.readString(Path.of(
                 "src/main/java/com/makar/tacticaltablet/client/EmbeddedClientResourcePack.java"
-        ));
+        )).replace("\r\n", "\n");
         assertTrue(registration.contains("event.getPackType() != PackType.CLIENT_RESOURCES"));
         assertTrue(registration.contains("Pack.Position.TOP"));
         assertTrue(registration.contains("PackSource.BUILT_IN"));

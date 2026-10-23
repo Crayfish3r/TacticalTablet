@@ -37,9 +37,9 @@ class CompetitiveClassTierArchitectureTest {
         assertTrue(classXpManager.contains("PlayerProgressManager.getAllClassLevels(player)"));
         assertTrue(classXpManager.contains("PlayerProgressManager.getAllClassXP(player)"));
 
-        String tabletScreen = source("tablet/client/TabletScreen.java");
-        assertTrue(tabletScreen.contains("TabletClientState.getClassTier(action.classKey())"));
-        assertTrue(tabletScreen.contains("ClassButtonStyle.actualTier("));
+        String tabletPacket = source("tablet/net/TabletStatePacket.java");
+        assertTrue(tabletPacket.contains("TabletClientState.updateClassTiers(classTiers)"));
+        assertTrue(source("tablet/client/TabletClientState.java").contains("classTiers.getOrDefault(clazz, getLevel(clazz))"));
     }
 
     @Test

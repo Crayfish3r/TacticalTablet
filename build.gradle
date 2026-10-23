@@ -289,6 +289,7 @@ tasks.register('verifyEmbeddedClientResourceSources') {
 
         File resources = layout.projectDirectory.dir('src/main/resources').asFile
         def forbidden = fileTree(resources) {
+            include '**/*.bbmodel'
             include '**/*.zip'
             include '**/pack.png'
             include '**/README_RU.txt'
@@ -304,6 +305,22 @@ tasks.register('verifyEmbeddedClientResourceSources') {
         }
     }
 }
+
+// No Node dependency during a normal mod build. The converter records its source
+// digest; edits to the authoring model must be regenerated before packaging.
+tasks.register('verifyTabletPrototypeSource') {
+    def source = layout.projectDirectory.file('model-sources/tablet/TacticalTablet_TT01.bbmodel')
+    def generated = layout.projectDirectory.file('src/main/resources/assets/tacticaltablet/tablet/tt01.json')
+    inputs.file(source)
+    inputs.file(generated)
+    doLast {
+        def model = new groovy.json.JsonSlurper().parse(generated.asFile, 'UTF-8')
+        if (model.sourceSha256 != sha256(source.asFile.bytes)) {
+            throw new GradleException('TT01 source changed: run node tools/tablet/prepare-tablet.mjs')
+        }
+    }
+}
+tasks.named('check').configure { dependsOn 'verifyTabletPrototypeSource' }
 
 tasks.register('verifyJarEmbeddedClientResources') {
     dependsOn 'reobfJar'
@@ -336,6 +353,15 @@ tasks.register('verifyJarEmbeddedClientResources') {
             }
 
             [
+                    'com/makar/tacticaltablet/tablet/client/TabletScreen.class',
+                    'com/makar/tacticaltablet/tablet/client/MapVotingScreen.class',
+                    'com/makar/tacticaltablet/tablet/client/TeamSelectScreen.class',
+                    'com/makar/tacticaltablet/tablet/client/VotingScreen.class',
+                    'assets/tacticaltablet/textures/gui/tablet.png',
+                    'assets/tacticaltablet/textures/gui/tablet_epic.png',
+                    'assets/tacticaltablet/textures/gui/tablet_legend.png',
+                    'assets/tacticaltablet/textures/gui/vote_panel.png',
+                    'assets/tacticaltablet/textures/gui/confirm_panel.png',
                     'resourcepacks/tacticaltablet_overrides/assets/minecraft/font/default.json',
                     'resourcepacks/tacticaltablet_overrides/assets/deluxewarfare/font/jetbrains_mono_medium.ttf',
                     'META-INF/licenses/JetBrains-Mono-Apache-2.0.txt'
@@ -348,6 +374,9 @@ tasks.register('verifyJarEmbeddedClientResources') {
             def forbidden = archive.entries().findAll { entry ->
                 String path = entry.name
                 path.endsWith('.zip')
+                        || path.endsWith('.bbmodel')
+                        || path.startsWith('legacy/')
+                        || path.startsWith('assets/tacticaltablet/textures/gui/buttons/')
                         || path == 'pack.png'
                         || path == 'README_RU.txt'
                         || path == 'EDITING_GUIDE_RU.md'

@@ -2,7 +2,6 @@ package com.makar.tacticaltablet.tablet.client;
 
 import com.makar.tacticaltablet.game.SetGameMode;
 import com.makar.tacticaltablet.game.SetModeRotationPolicy;
-import net.minecraft.client.Minecraft;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -60,11 +59,7 @@ public final class MapVoteClientState {
         maps = mapPool == null ? List.of() : List.copyOf(mapPool);
         voteCounts = counts == null ? Map.of() : Map.copyOf(new LinkedHashMap<>(counts));
 
-        Minecraft minecraft = Minecraft.getInstance();
-        if (active && openScreen && minecraft.level != null && minecraft.player != null
-                && !(minecraft.screen instanceof MapVotingScreen)) {
-            minecraft.setScreen(new MapVotingScreen());
-        }
+        // Keep the packet/state contract; the archived GUI no longer owns presentation.
     }
 
     public static boolean isActive() {

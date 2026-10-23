@@ -1,104 +1,23 @@
 package com.makar.tacticaltablet.tablet.client;
 
-import com.makar.tacticaltablet.client.DeathScreenOverlay;
 import com.makar.tacticaltablet.client.SpectatorCameraClientState;
 import com.makar.tacticaltablet.client.SpectatorHudClientState;
 import com.makar.tacticaltablet.core.TacticalTabletMod;
-import com.makar.tacticaltablet.game.GameStateManager;
-import com.makar.tacticaltablet.game.MatchPhase;
-import com.makar.tacticaltablet.prefix.PrefixClientState;
 import com.makar.tacticaltablet.integration.moderndamage.client.ModernDamageClientState;
-import com.makar.tacticaltablet.tablet.TacticalTabletItem;
-
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.world.InteractionHand;
-import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.GameType;
+import com.makar.tacticaltablet.prefix.PrefixClientState;
+import com.makar.tacticaltablet.tablet.client.prototype.TabletPrototypeClient;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
 import net.minecraftforge.client.event.InputEvent;
-import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
+/** Tablet input now has one owner; match snapshots never open a functional GUI. */
 @Mod.EventBusSubscriber(modid = TacticalTabletMod.MODID, value = Dist.CLIENT)
 public class ClientEvents {
-
     @SubscribeEvent
     public static void onUse(InputEvent.InteractionKeyMappingTriggered event) {
-
-        if (!event.isUseItem()) return;
-
-        Minecraft mc = Minecraft.getInstance();
-        if (mc.hasSingleplayerServer()) return;
-        Player player = mc.player;
-
-        if (player == null) return;
-        if (DeathScreenOverlay.isActive()) return;
-        if (ChaosClientState.isActive() && !isChaosLobbyReady(mc)) return;
-
-        if (hasTabletInHand(player)) {
-            mc.setScreen(createScreenForCurrentPhase());
-        }
-    }
-
-    @SubscribeEvent
-    public static void onClientTick(TickEvent.ClientTickEvent event) {
-        if (event.phase != TickEvent.Phase.END) return;
-
-        Minecraft mc = Minecraft.getInstance();
-        if (mc.hasSingleplayerServer()) return;
-        if (mc.level == null || mc.player == null) return;
-
-        Screen current = mc.screen;
-        boolean deathOverlayActive = DeathScreenOverlay.isActive();
-        boolean chaosLobbyReady = isChaosLobbyReady(mc);
-        if (ChaosClientState.isActive() && current instanceof TabletScreen && !chaosLobbyReady) {
-            mc.setScreen(null);
-            return;
-        }
-        if (ChaosAutoOpenPolicy.shouldOpen(
-                ChaosClientState.requiresSelection(),
-                deathOverlayActive,
-                mc.player.level().dimension().equals(GameStateManager.LOBBY_DIMENSION),
-                mc.gameMode != null && mc.gameMode.getPlayerMode() == GameType.SURVIVAL,
-                hasTabletInInventory(mc.player),
-                current instanceof TabletScreen)) {
-            mc.setScreen(new TabletScreen());
-            return;
-        }
-        if (deathOverlayActive) return;
-
-        boolean voting = TabletClientState.getMatchPhase() == MatchPhase.VOTING;
-        boolean teamSelect = TabletClientState.getMatchPhase() == MatchPhase.TEAM_SELECT;
-        boolean mapVoting = TabletClientState.getMatchPhase() == MatchPhase.MAP_VOTING
-                && MapVoteClientState.isActive();
-
-        if (mapVoting && (current instanceof VotingScreen || current instanceof TeamSelectScreen)) {
-            mc.setScreen(new MapVotingScreen());
-            return;
-        }
-
-        if (current instanceof MapVotingScreen && !mapVoting) {
-            mc.setScreen(null);
-            return;
-        }
-
-        if (current instanceof VotingScreen && teamSelect) {
-            mc.setScreen(new TeamSelectScreen());
-            return;
-        }
-
-        if (current instanceof TeamSelectScreen && voting) {
-            mc.setScreen(new VotingScreen());
-            return;
-        }
-
-        if (!voting && !teamSelect && (current instanceof VotingScreen || current instanceof TeamSelectScreen)) {
-            mc.setScreen(null);
-        }
+        if (event.isUseItem()) TabletPrototypeClient.onUse(event);
     }
 
     @SubscribeEvent
@@ -108,39 +27,5 @@ public class ClientEvents {
         SpectatorCameraClientState.clear();
         SpectatorHudClientState.clear();
         ModernDamageClientState.clear();
-    }
-
-    private static boolean hasTabletInHand(Player player) {
-        if (player == null) return false;
-        return isTablet(player.getItemInHand(InteractionHand.MAIN_HAND))
-                || isTablet(player.getItemInHand(InteractionHand.OFF_HAND));
-    }
-
-    private static boolean isChaosLobbyReady(Minecraft minecraft) {
-        return minecraft != null
-                && minecraft.player != null
-                && minecraft.gameMode != null
-                && minecraft.player.level().dimension().equals(GameStateManager.LOBBY_DIMENSION)
-                && minecraft.gameMode.getPlayerMode() == GameType.SURVIVAL;
-    }
-
-    private static boolean hasTabletInInventory(Player player) {
-        if (player == null) return false;
-        for (int slot = 0; slot < player.getInventory().getContainerSize(); slot++) {
-            if (isTablet(player.getInventory().getItem(slot))) return true;
-        }
-        return false;
-    }
-
-    private static boolean isTablet(ItemStack stack) {
-        return !stack.isEmpty() && stack.getItem() instanceof TacticalTabletItem;
-    }
-
-    private static Screen createScreenForCurrentPhase() {
-        MatchPhase phase = TabletClientState.getMatchPhase();
-        if (phase == MatchPhase.MAP_VOTING) return new MapVotingScreen();
-        if (phase == MatchPhase.VOTING) return new VotingScreen();
-        if (phase == MatchPhase.TEAM_SELECT) return new TeamSelectScreen();
-        return new TabletScreen();
     }
 }

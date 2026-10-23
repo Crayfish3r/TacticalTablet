@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="320" height="180" viewBox="0 0 320 180">
+<title>TacticalTablet: 14-compact-320x180.svg</title>
+<rect id="compact-surface" x="0" y="0" width="320" height="180" fill="#12181D" stroke="#59E0B7" stroke-width="1"/>
+<text id="compact-title" x="8" y="18" font-family="Pixelify Sans, monospace" font-size="12" fill="#F2F7F8" text-anchor="start">КЛАССЫ · компактный режим</text>
+<rect id="compact-nav-0" x="8" y="24" width="58" height="20" fill="#1D3533" stroke="#59E0B7" stroke-width="2"/>
+<text id="compact-nav-0-label" x="37" y="38" font-family="Pixelify Sans, monospace" font-size="10" fill="#F2F7F8" text-anchor="middle">КЛАССЫ</text>
+<rect id="compact-nav-1" x="69" y="24" width="58" height="20" fill="#192228" stroke="#344249" stroke-width="1"/>
+<text id="compact-nav-1-label" x="98" y="38" font-family="Pixelify Sans, monospace" font-size="10" fill="#F2F7F8" text-anchor="middle">МАГАЗИН</text>
+<rect id="compact-nav-2" x="130" y="24" width="58" height="20" fill="#192228" stroke="#344249" stroke-width="1"/>
+<text id="compact-nav-2-label" x="159" y="38" font-family="Pixelify Sans, monospace" font-size="10" fill="#F2F7F8" text-anchor="middle">VIP</text>
+<rect id="compact-nav-3" x="191" y="24" width="58" height="20" fill="#192228" stroke="#344249" stroke-width="1"/>
+<text id="compact-nav-3-label" x="220" y="38" font-family="Pixelify Sans, monospace" font-size="10" fill="#F2F7F8" text-anchor="middle">КЛАНЫ</text>
+<rect id="compact-nav-4" x="252" y="24" width="58" height="20" fill="#192228" stroke="#344249" stroke-width="1"/>
+<text id="compact-nav-4-label" x="281" y="38" font-family="Pixelify Sans, monospace" font-size="10" fill="#F2F7F8" text-anchor="middle">ПРОФИЛЬ</text>
+<rect id="compact-class-0" x="8" y="48" width="298" height="34" fill="#192228" stroke="#344249" stroke-width="1"/>
+<text id="compact-class-0-label" x="157" y="69" font-family="Pixelify Sans, monospace" font-size="10" fill="#F2F7F8" text-anchor="middle">Штурмовик</text>
+<rect id="compact-class-1" x="8" y="86" width="298" height="34" fill="#192228" stroke="#344249" stroke-width="1"/>
+<text id="compact-class-1-label" x="157" y="107" font-family="Pixelify Sans, monospace" font-size="10" fill="#F2F7F8" text-anchor="middle">Снайпер</text>
+<rect id="compact-class-2" x="8" y="124" width="298" height="34" fill="#192228" stroke="#344249" stroke-width="1"/>
+<text id="compact-class-2-label" x="157" y="145" font-family="Pixelify Sans, monospace" font-size="10" fill="#F2F7F8" text-anchor="middle">Разведчик</text>
+<rect id="compact-scrollbar" x="309" y="48" width="3" height="116" fill="#59E0B7"/>
+<text id="compact-footer" x="8" y="176" font-family="Pixelify Sans, monospace" font-size="9" fill="#A5B3B9" text-anchor="start">1:1 GUI px · корпус скрыт · список прокручивается</text>
+</svg>
