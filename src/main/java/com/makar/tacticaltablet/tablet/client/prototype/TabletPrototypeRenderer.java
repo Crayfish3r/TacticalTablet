@@ -126,6 +126,12 @@ public final class TabletPrototypeRenderer extends BlockEntityWithoutLevelRender
                 minY = Math.min(minY, v.y()); maxY = Math.max(maxY, v.y());
                 minZ = Math.min(minZ, v.z()); maxZ = Math.max(maxZ, v.z());
             }
+            // Indicators are now a separate render part, but still belong to the original framing bounds.
+            for (var indicator : model.indicators().values()) for (TabletPrototypeModel.Vertex v : indicator) {
+                minX = Math.min(minX, v.x()); maxX = Math.max(maxX, v.x());
+                minY = Math.min(minY, v.y()); maxY = Math.max(maxY, v.y());
+                minZ = Math.min(minZ, v.z()); maxZ = Math.max(maxZ, v.z());
+            }
             framedBounds = new Bounds((minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2,
                     (maxX - minX) / 2, (maxY - minY) / 2, (maxZ - minZ) / 2);
             framedModel = model; // A resource reload supplies a different immutable model.
@@ -152,12 +158,12 @@ public final class TabletPrototypeRenderer extends BlockEntityWithoutLevelRender
         }
         float radians = (float) (Math.PI / 180);
         pose.mulPose(new Quaternionf().rotationZYX(rotation.z() * radians, rotation.y() * radians, rotation.x() * radians));
-        TabletPreparationPage page = animation != null && Minecraft.getInstance().screen instanceof TabletPrototypeScreen screen
-                ? screen.page() : null;
+        TabletPageShell page = animation != null && Minecraft.getInstance().screen instanceof TabletPrototypeScreen screen
+                ? screen.shell() : null;
         if (page != null) {
             page.interactive(TabletPrototypeClient.isOpen());
             TabletDisplayTarget.update(page, model.display(), buffers);
-            TabletDisplayProjection.capture(pose.last().pose(), model.display());
+            TabletDisplayProjection.capture(pose.last().pose(), model);
         }
         VertexConsumer consumer = buffers.getBuffer(RenderType.entityCutoutNoCull(model.texture()));
         PoseStack.Pose transform = pose.last();
@@ -172,6 +178,17 @@ public final class TabletPrototypeRenderer extends BlockEntityWithoutLevelRender
                         .uv(v.u(), v.v()).overlayCoords(overlay).uv2(light)
                         .normal(transform.normal(), v.nx(), v.ny(), v.nz()).endVertex();
             }
-        } else if (page != null) TabletDisplayTarget.draw(transform.pose(), model.display(), buffers);
+        }
+        if (animation == null || page == null) {
+            // Static contexts keep the authored indicator texture and normal world lighting.
+            for (var indicator : model.indicators().values()) for (TabletPrototypeModel.Vertex v : indicator) {
+                consumer.vertex(transform.pose(), v.x(), v.y(), v.z()).color(255,255,255,255)
+                        .uv(v.u(), v.v()).overlayCoords(overlay).uv2(light)
+                        .normal(transform.normal(), v.nx(), v.ny(), v.nz()).endVertex();
+            }
+        } else {
+            TabletDisplayTarget.draw(transform.pose(), model.display(), buffers);
+            TabletHardwareIndicators.draw(transform.pose(), model, page.selected(), TabletPrototypeClient.isOpen());
+        }
     }
 }

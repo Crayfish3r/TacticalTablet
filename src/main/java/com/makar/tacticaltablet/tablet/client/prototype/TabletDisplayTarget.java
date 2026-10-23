@@ -14,10 +14,10 @@ import org.lwjgl.opengl.GL11;
 final class TabletDisplayTarget {
     private static TextureTarget target;
     private static GuiGraphics graphics;
-    private static TabletPreparationPage renderedPage;
+    private static TabletPageShell renderedPage;
     private TabletDisplayTarget() { }
 
-    static void update(TabletPreparationPage page, TabletPrototypeModel.DisplaySurface display, MultiBufferSource worldBuffers) {
+    static void update(TabletPageShell page, TabletPrototypeModel.DisplaySurface display, MultiBufferSource worldBuffers) {
         if (page == null) return;
         int limit = Math.min(TabletTerminalTheme.MAX_TEXTURE_SIZE, RenderSystem.maxSupportedTextureSize());
         float aspect = display.height() / display.width();
@@ -47,7 +47,7 @@ final class TabletDisplayTarget {
                     TabletTerminalTheme.logicalHeight(display), 0, -1000, 1000), VertexSorting.ORTHOGRAPHIC_Z);
             RenderSystem.getModelViewStack().setIdentity(); RenderSystem.applyModelViewMatrix();
             graphics.pose().setIdentity(); RenderSystem.setShaderColor(1, 1, 1, 1);
-            try { TabletPreparationView.render(graphics, page); }
+            try { page.render(graphics); }
             finally { graphics.flush(); } // Never let GUI vertices escape into the world framebuffer.
             renderedPage = page; page.rendered();
         }

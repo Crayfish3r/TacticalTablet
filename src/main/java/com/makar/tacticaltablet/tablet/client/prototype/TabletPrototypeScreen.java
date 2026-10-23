@@ -7,19 +7,19 @@ import org.lwjgl.glfw.GLFW;
 
 /** Owns the session; all presentation, confirmation and input remain on the model surface. */
 final class TabletPrototypeScreen extends Screen {
-    private TabletPreparationPage page;
+    private TabletPageShell shell;
     TabletPrototypeScreen() { super(Component.literal("Tablet visual prototype")); }
-    TabletPreparationPage page() { return page; }
+    TabletPageShell shell() { return shell; }
     @Override protected void init() {
         var model = TabletPrototypeModel.INSTANCE.model();
-        if (page == null && model != null) page = new TabletPreparationPage(model.display());
+        if (shell == null && model != null) shell = new TabletPageShell(model.display());
     }
-    @Override public void tick() { if (page != null) page.tick(); }
+    @Override public void tick() { if (shell != null) shell.tick(); }
     @Override public boolean isPauseScreen() { return false; }
     @Override public void render(GuiGraphics graphics, int x, int y, float partialTick) {
-        if (page != null) {
-            page.interactive(TabletPrototypeClient.isOpen());
-            page.hover(TabletDisplayProjection.hit(x, y), TabletPrototypeClient.isOpen());
+        if (shell != null) {
+            shell.interactive(TabletPrototypeClient.isOpen());
+            shell.hover(x, y);
         }
     }
     @Override public void onClose() { TabletPrototypeClient.close(); }
@@ -31,19 +31,21 @@ final class TabletPrototypeScreen extends Screen {
     }
     @Override public boolean mouseClicked(double x, double y, int button) {
         if (minecraft.options.keyUse.matchesMouse(button)) TabletPrototypeClient.pressUse();
-        else if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT && page != null && TabletPrototypeClient.isOpen())
-            page.press(TabletDisplayProjection.hit(x, y));
+        else if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT && shell != null && TabletPrototypeClient.isOpen()) {
+            shell.interactive(true);
+            shell.press(x, y);
+        }
         return true;
     }
     @Override public boolean mouseReleased(double x, double y, int button) {
-        if (page != null && button == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
-            if (TabletPrototypeClient.isOpen()) page.release(TabletDisplayProjection.hit(x, y));
-            else page.cancelPress();
+        if (shell != null && button == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
+            if (TabletPrototypeClient.isOpen()) shell.release(x, y);
+            else shell.cancelPress();
         }
         return true;
     }
     @Override public boolean mouseScrolled(double x, double y, double delta) {
-        if (page != null && TabletPrototypeClient.isOpen()) page.scroll(TabletDisplayProjection.hit(x, y), delta);
+        if (shell != null && TabletPrototypeClient.isOpen()) shell.scroll(x, y, delta);
         return true;
     }
 }

@@ -63,11 +63,11 @@ public final class TabletPreparationPage {
     }
 
     public static void acceptSnapshot(PreparationSnapshot snapshot) {
-        if (Minecraft.getInstance().screen instanceof TabletPrototypeScreen screen && screen.page() != null)
-            screen.page().accept(snapshot);
+        if (Minecraft.getInstance().screen instanceof TabletPrototypeScreen screen && screen.shell() != null)
+            screen.shell().acceptSnapshot(snapshot);
     }
 
-    private void accept(PreparationSnapshot snapshot) {
+    void accept(PreparationSnapshot snapshot) {
         if (snapshot.requestId() != requestId) return; // Ignore late replies from previous requests/sessions.
         boolean firstSnapshot = !ready;
         ready = true;
@@ -229,6 +229,7 @@ public final class TabletPreparationPage {
         dirty = true;
     }
     boolean dirty() { return dirty; }
+    boolean navigationLocked() { return confirmation >= 0 || awaiting && pendingAction >= 0 || rtpPending; }
     void rendered() { dirty = false; }
     void interactive(boolean value) {
         if (interactive != value) { interactive = value; cancelPress(); hover = -1; dirty = true; }

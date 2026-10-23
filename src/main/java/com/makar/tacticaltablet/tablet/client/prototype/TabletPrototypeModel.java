@@ -12,6 +12,8 @@ import net.minecraft.util.profiling.ProfilerFiller;
 import java.io.Reader;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.HashMap;
 
 /** Resource-worker preparation touches only JSON/immutable DTOs, never world objects. */
 public final class TabletPrototypeModel extends SimplePreparableReloadListener<TabletPrototypeModel.Model> {
@@ -42,8 +44,12 @@ public final class TabletPrototypeModel extends SimplePreparableReloadListener<T
         }
     }
     public record Model(ResourceLocation texture, Vec rootRotation, List<Vertex> vertices, Clip draw, Clip holster,
-                        DisplaySurface display, List<Vertex> staticDisplay) {
-        public Model { vertices = List.copyOf(vertices); staticDisplay = List.copyOf(staticDisplay); }
+                        DisplaySurface display, List<Vertex> staticDisplay,
+                        Map<String, List<Vertex>> hardwareKeys, Map<String, List<Vertex>> indicators) {
+        public Model {
+            vertices = List.copyOf(vertices); staticDisplay = List.copyOf(staticDisplay);
+            hardwareKeys = Map.copyOf(hardwareKeys); indicators = Map.copyOf(indicators);
+        }
         public Clip clip(String name) { return "holster".equals(name) ? holster : draw; }
     }
     public Model model() { return model; }
@@ -54,11 +60,17 @@ public final class TabletPrototypeModel extends SimplePreparableReloadListener<T
             if (json.get("format").getAsInt() != 1) throw new IllegalArgumentException("Unsupported TT01 resource format");
             List<Vertex> vertices = new ArrayList<>();
             List<Vertex> staticDisplay = new ArrayList<>();
+            JsonObject controls = json.getAsJsonObject("controls");
+            Map<String, String> keyNames = namedParts(controls.getAsJsonObject("keys"));
+            Map<String, String> indicatorNames = namedParts(controls.getAsJsonObject("indicators"));
+            Map<String, List<Vertex>> hardwareKeys = new HashMap<>(), indicators = new HashMap<>();
             JsonObject surface = json.getAsJsonObject("displaySurface");
             String displayCube = surface.get("cube").getAsString();
             int firstDisplayVertex = surface.get("firstVertex").getAsInt();
             for (var cube : json.getAsJsonArray("cubes")) {
                 JsonObject part = cube.getAsJsonObject();
+                String id = part.get("id").getAsString();
+                List<Vertex> partVertices = new ArrayList<>();
                 int vertexIndex = 0;
                 for (var element : part.getAsJsonArray("vertices")) {
                     int index = vertexIndex++;
@@ -67,12 +79,22 @@ public final class TabletPrototypeModel extends SimplePreparableReloadListener<T
                             && index >= firstDisplayVertex && index < firstDisplayVertex + 4;
                     JsonArray v = element.getAsJsonArray();
                     if (v.size() != 8) throw new IllegalArgumentException("Malformed TT01 vertex");
-                    (displayFace ? staticDisplay : vertices).add(new Vertex(number(v,0), number(v,1), number(v,2), number(v,3),
-                            number(v,4), number(v,5), number(v,6), number(v,7)));
+                    Vertex vertex = new Vertex(number(v,0), number(v,1), number(v,2), number(v,3),
+                            number(v,4), number(v,5), number(v,6), number(v,7));
+                    partVertices.add(vertex);
+                    if (displayFace) staticDisplay.add(vertex);
+                    else if (!indicatorNames.containsKey(id)) vertices.add(vertex);
                 }
+                if (keyNames.containsKey(id)) hardwareKeys.put(keyNames.get(id), List.copyOf(partVertices));
+                if (indicatorNames.containsKey(id)) indicators.put(indicatorNames.get(id), List.copyOf(partVertices));
             }
             if (vertices.isEmpty() || vertices.size() % 4 != 0 || staticDisplay.size() != 4)
                 throw new IllegalArgumentException("Empty/incomplete TT01 geometry or display face");
+            for (TabletPage page : TabletPage.PAGES) {
+                if (hardwareKeys.getOrDefault(page.hardwareKey, List.of()).size() != 24
+                        || indicators.getOrDefault(page.indicator, List.of()).size() != 24)
+                    throw new IllegalArgumentException("Missing complete hardware parts for " + page);
+            }
             JsonObject animations = json.getAsJsonObject("animations");
             Clip draw = clip(animations.getAsJsonObject("draw")), holster = clip(animations.getAsJsonObject("holster"));
             if (draw.length != 0.65 || holster.length != 0.45) throw new IllegalArgumentException("Unexpected TT01 durations");
@@ -89,10 +111,19 @@ public final class TabletPrototypeModel extends SimplePreparableReloadListener<T
             if (width <= 0 || height <= 0) throw new IllegalArgumentException("Degenerate display");
             return new Model(new ResourceLocation(json.get("texture").getAsString()),
                     vec(json.getAsJsonArray("rootRotation"), 0), vertices, draw, holster,
-                    new DisplaySurface(corners, normal, width, height), staticDisplay);
+                    new DisplaySurface(corners, normal, width, height), staticDisplay, hardwareKeys, indicators);
         } catch (Exception exception) {
             throw new IllegalStateException("Cannot prepare tablet prototype " + RESOURCE, exception);
         }
+    }
+
+    private static Map<String, String> namedParts(JsonObject parts) {
+        Map<String, String> names = new HashMap<>();
+        for (var entry : parts.entrySet())
+            if (names.put(entry.getValue().getAsString(), entry.getKey()) != null)
+                throw new IllegalArgumentException("Duplicate hardware part");
+        if (names.size() != 3) throw new IllegalArgumentException("Expected three named hardware parts");
+        return names;
     }
 
     private static Clip clip(JsonObject json) {

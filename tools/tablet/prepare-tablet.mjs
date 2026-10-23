@@ -58,6 +58,7 @@ export function compile(source) {
   if (m.outliner.length !== 1 || m.outliner[0].name !== 'tablet_root') fail('Expected single tablet_root');
   const rootGroup = m.outliner[0], rootOrigin = vector(rootGroup.origin);
   const groups = [], cubes = [], visited = new Set();
+  const controls = {keys: {}, indicators: {}};
   let displaySurface;
   function walk(group, parents = []) {
     if (!group.export || !group.visibility) fail('Hidden groups are unsupported in TT01');
@@ -102,10 +103,19 @@ export function compile(source) {
         });
       }
       cubes.push({id: child, name: cube.name, group: group.uuid, origin: pivot, rotation: angles, from: f, to: t, vertices});
+      // Keep named parts separate at runtime; their mesh already has the full pivot/parent transform.
+      const parts = /^hardware_key_[0-2]$/.test(cube.name) ? controls.keys
+        : /^key_index_[0-2]$/.test(cube.name) ? controls.indicators : null;
+      if (parts) {
+        if (parts[cube.name] || vertices.length !== 24) fail(`Missing/duplicate complete control cube ${cube.name}`);
+        parts[cube.name] = child;
+      }
     }
   }
   walk(rootGroup);
   if (!displaySurface) fail('Missing display_surface/screen_glass north face');
+  if (Object.keys(controls.keys).length !== 3 || Object.keys(controls.indicators).length !== 3)
+    fail('Expected hardware_key_0..2 and key_index_0..2');
   if (visited.size !== elements.size || !groups.some(g => g.name === 'display_surface')) fail('Incomplete hierarchy/display');
   const animations = {};
   for (const a of m.animations) {
@@ -131,7 +141,7 @@ export function compile(source) {
   if (animations.draw?.length !== 0.65 || animations.holster?.length !== 0.45) fail('Expected draw=0.65 and holster=0.45 seconds');
   const data = {format: 1, sourceSha256: createHash('sha256').update(source).digest('hex'),
     texture: 'tacticaltablet:textures/item/tablet_tt01.png', width, height,
-    rootRotation: vector(rootGroup.rotation), groups, cubes, displaySurface, animations};
+    rootRotation: vector(rootGroup.rotation), groups, cubes, displaySurface, controls, animations};
   return {json: JSON.stringify(data) + '\n', texture};
 }
 
