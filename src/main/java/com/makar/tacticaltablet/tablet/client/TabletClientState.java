@@ -35,6 +35,7 @@ public class TabletClientState {
     private static int matchesPlayed;
     private static int coins;
     private static int careerProgressPercent;
+    private static long profileRevision;
     private static int lives;
     private static int alivePlayers;
     private static int remainingLivesTotal;
@@ -174,7 +175,10 @@ public class TabletClientState {
         matchesPlayed = Math.max(0, newMatchesPlayed);
         coins = Math.max(0, newCoins);
         careerProgressPercent = Math.max(0, Math.min(100, newCareerProgressPercent));
+        profileRevision++;
     }
+
+    public static long getProfileRevision() { return profileRevision; }
 
 
     public static void updateLives(int newLives) {
@@ -215,7 +219,7 @@ public class TabletClientState {
     }
 
     public static void updateClanWarSet(boolean clanWar) {
-        clanWarSet = clanWar;
+        clanWarSet = false;
     }
 
     public static boolean isClanWarSet() {

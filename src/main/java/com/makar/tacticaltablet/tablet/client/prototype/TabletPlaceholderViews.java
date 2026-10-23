@@ -8,10 +8,6 @@ import static com.makar.tacticaltablet.tablet.client.prototype.TabletTerminalThe
 final class TabletPlaceholderViews {
     private TabletPlaceholderViews() { }
 
-    static void profile(GuiGraphics graphics, int height) {
-        render(graphics, height, TabletPage.PROFILE.title, "Личная статистика появится на следующем этапе.");
-    }
-
     static void contractTracker(GuiGraphics graphics, int height) {
         render(graphics, height, TabletPage.CONTRACT_TRACKER.title, "Контрактный трекер пока не подключён к 3D-планшету.");
     }

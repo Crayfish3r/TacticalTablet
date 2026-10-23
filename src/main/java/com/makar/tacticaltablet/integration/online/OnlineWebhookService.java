@@ -222,9 +222,6 @@ public final class OnlineWebhookService {
     }
 
     private static String currentSetMode() {
-        if (MapSetManager.isClanWarSet()) {
-            return "Война кланов";
-        }
         if (MapSetManager.isCompetitiveSet()) {
             return "Турнир";
         }

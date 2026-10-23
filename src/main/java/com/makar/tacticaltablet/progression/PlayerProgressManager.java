@@ -2180,7 +2180,7 @@ public class PlayerProgressManager {
     private static int getEffectiveBaseTier(PlayerProgress progress, String clazz) {
         return CompetitiveClassTierPolicy.effectiveBaseTier(
                 MapSetManager.isCompetitiveSet(),
-                MapSetManager.isClanWarSet(),
+                false,
                 MapSetManager.getCurrentGameNumber(),
                 getStoredTier(progress, clazz)
         );
@@ -2189,7 +2189,7 @@ public class PlayerProgressManager {
     private static boolean isCompetitiveClassTierLadderActive() {
         return CompetitiveClassTierPolicy.isActive(
                 MapSetManager.isCompetitiveSet(),
-                MapSetManager.isClanWarSet()
+                false
         );
     }
 

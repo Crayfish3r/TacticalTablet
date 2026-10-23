@@ -1,6 +1,5 @@
 package com.makar.tacticaltablet.game;
 
-import com.makar.tacticaltablet.game.clanwar.ClanWarManager;
 import com.makar.tacticaltablet.game.lives.LivesManager;
 import com.makar.tacticaltablet.game.team.TeamId;
 import com.makar.tacticaltablet.game.team.TeamMatchManager;
@@ -404,13 +403,12 @@ public final class SpectatorCameraManager {
                 && isActiveMatch(player.server)
                 && isStrictSpectatorCameraMatch()
                 && (LivesManager.isEliminated(player)
-                    || player.getTags().contains(ClanWarManager.TAG_SPECTATING)
                     || MatchAdmissionManager.isLateSpectator(player))
                 && player.isSpectator();
     }
 
     private static boolean isStrictSpectatorCameraMatch() {
-        return MapSetManager.isCompetitiveSet() || MapSetManager.isClanWarSet();
+        return MapSetManager.isCompetitiveSet();
     }
 
     private static boolean isActiveMatch(MinecraftServer server) {

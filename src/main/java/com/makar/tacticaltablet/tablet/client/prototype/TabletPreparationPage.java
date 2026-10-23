@@ -48,6 +48,7 @@ public final class TabletPreparationPage {
     boolean ready, awaiting, error, rtpUsed, rtpPending;
     private boolean interactive;
     private boolean refreshNotice;
+    private boolean synchronizationFailed;
     private boolean dirty = true;
     private int pendingAction = -1;
     private long requestId, deadline, nextPoll;
@@ -67,8 +68,9 @@ public final class TabletPreparationPage {
             screen.shell().acceptSnapshot(snapshot);
     }
 
-    void accept(PreparationSnapshot snapshot) {
-        if (snapshot.requestId() != requestId) return; // Ignore late replies from previous requests/sessions.
+    boolean accept(PreparationSnapshot snapshot) {
+        if (snapshot.requestId() != requestId) return false; // Ignore late replies from previous requests/sessions.
+        synchronizationFailed = false;
         boolean firstSnapshot = !ready;
         ready = true;
         confirmedClass = snapshot.selectedClass(); rtpUsed = snapshot.rtpUsed(); rtpPending = snapshot.rtpPending();
@@ -104,6 +106,7 @@ public final class TabletPreparationPage {
         refreshNotice = false;
         pendingAction = awaiting ? pendingAction : -1;
         dirty = true;
+        return true;
     }
 
     void tick() {
@@ -113,6 +116,7 @@ public final class TabletPreparationPage {
             awaiting = false; pendingAction = -1;
             message("Сервер не ответил вовремя. Обновите данные перед повторной попыткой.", true);
             ready = false; nextPoll = now + POLL_MS;
+            synchronizationFailed = true;
         }
         if (now >= nextPoll) {
             if (!awaiting) request(-1, true);
@@ -124,7 +128,11 @@ public final class TabletPreparationPage {
     }
 
     private void request(int action, boolean newRequest) {
-        if (Minecraft.getInstance().getConnection() == null) { message("Нет соединения с сервером.", true); return; }
+        if (Minecraft.getInstance().getConnection() == null) {
+            synchronizationFailed = true; awaiting = false; ready = false;
+            nextPoll = net.minecraft.Util.getMillis() + POLL_MS;
+            message("Нет соединения с сервером.", true); return;
+        }
         long now = net.minecraft.Util.getMillis();
         if (newRequest) requestId = ++sequence;
         pendingAction = action; awaiting = true; deadline = now + TIMEOUT_MS; nextPoll = now + POLL_MS;
@@ -229,6 +237,7 @@ public final class TabletPreparationPage {
         dirty = true;
     }
     boolean dirty() { return dirty; }
+    boolean synchronizationFailed() { return synchronizationFailed; }
     boolean navigationLocked() { return confirmation >= 0 || awaiting && pendingAction >= 0 || rtpPending; }
     void rendered() { dirty = false; }
     void interactive(boolean value) {

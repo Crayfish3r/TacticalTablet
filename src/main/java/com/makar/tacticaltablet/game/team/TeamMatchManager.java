@@ -1,6 +1,5 @@
 package com.makar.tacticaltablet.game.team;
 
-import com.makar.tacticaltablet.clan.ClanManager;
 import com.makar.tacticaltablet.game.MatchMode;
 import com.makar.tacticaltablet.game.MatchAdmissionManager;
 import com.makar.tacticaltablet.game.SpectatorCameraManager;
@@ -31,7 +30,6 @@ public final class TeamMatchManager {
     private static final Map<TeamId, LinkedHashSet<UUID>> teams = new EnumMap<>(TeamId.class);
     private static final Map<UUID, TeamId> playerTeams = new HashMap<>();
     private static final Map<UUID, String> playerNames = new HashMap<>();
-    private static final Map<String, TeamId> clanTeams = new HashMap<>();
     private static final Map<UUID, String> originalScoreboardTeams = new HashMap<>();
     private static int secondsLeft = 0;
     private static boolean activeSelection = false;
@@ -175,58 +173,7 @@ public final class TeamMatchManager {
         secondsLeft = 0;
     }
 
-    public static void assignClanWarTeams(MinecraftServer server) {
-        clearAssignments();
-        if (server == null) return;
 
-        for (TeamId team : TeamId.clanWarValues()) {
-            teams.put(team, new LinkedHashSet<>());
-        }
-
-        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-            if (!LobbyManager.isMatchParticipantCandidate(player)) continue;
-            assignClanWarPlayer(server, player);
-        }
-
-        activeSelection = false;
-        secondsLeft = 0;
-    }
-
-    public static TeamId assignClanWarPlayer(MinecraftServer server, ServerPlayer player) {
-        if (server == null || player == null) return null;
-        if (!LobbyManager.isMatchParticipantCandidate(player)) {
-            removeAssignment(player.getUUID());
-            return null;
-        }
-        if (MatchAdmissionManager.isLateSpectator(player)) return null;
-
-        rememberName(player);
-        String clanId = ClanManager.getClanIdForPlayer(player);
-        if (clanId.isBlank()) {
-            removeAssignment(player.getUUID());
-            return null;
-        }
-
-        TeamId target = clanTeams.get(clanId);
-        if (target == null) {
-            target = findClanWarTeamForClan(server, clanId);
-            if (target == null) {
-                player.sendSystemMessage(net.minecraft.network.chat.Component.literal(
-                        "[WAR] Clan-war team slots are full (" + TeamId.clanWarValues().length + ")."
-                ));
-                removeAssignment(player.getUUID());
-                return null;
-            }
-            clanTeams.put(clanId, target);
-        }
-
-        removeAssignment(player.getUUID());
-        teams.computeIfAbsent(target, ignored -> new LinkedHashSet<>()).add(player.getUUID());
-        playerTeams.put(player.getUUID(), target);
-        VoiceChatTeamManager.onPlayerTeamChanged(player);
-        SpectatorCameraManager.onPlayerTeamChanged(player);
-        return target;
-    }
 
     public static TeamId assignLateJoiner(MinecraftServer server, ServerPlayer player, MatchMode mode) {
         if (server == null || player == null || mode == null || !mode.isTeamMode()) return null;
@@ -519,22 +466,7 @@ public final class TeamMatchManager {
         return candidates.isEmpty() ? null : candidates.get(RANDOM.nextInt(candidates.size()));
     }
 
-    private static TeamId findFreeClanWarTeam() {
-        for (TeamId teamId : TeamId.clanWarValues()) {
-            if (!clanTeams.containsValue(teamId)) {
-                return teamId;
-            }
-        }
-        return null;
-    }
 
-    private static TeamId findClanWarTeamForClan(MinecraftServer server, String clanId) {
-        TeamId preferred = TeamId.byTextColor(ClanManager.getClanColorById(server, clanId));
-        if (preferred != null && !clanTeams.containsValue(preferred)) {
-            return preferred;
-        }
-        return findFreeClanWarTeam();
-    }
 
     private static void removeAssignment(UUID uuid) {
         TeamId oldTeam = playerTeams.remove(uuid);
@@ -550,7 +482,6 @@ public final class TeamMatchManager {
         teams.clear();
         playerTeams.clear();
         playerNames.clear();
-        clanTeams.clear();
     }
 
     private static void configureTeam(TeamId teamId, PlayerTeam team) {

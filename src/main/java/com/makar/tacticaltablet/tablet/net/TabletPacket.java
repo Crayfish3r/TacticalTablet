@@ -8,7 +8,6 @@ import com.makar.tacticaltablet.game.MatchAdmissionManager;
 import com.makar.tacticaltablet.game.MapSetManager;
 import com.makar.tacticaltablet.game.chaos.ChaosSelectionAdmission;
 import com.makar.tacticaltablet.game.chaos.ChaosSetManager;
-import com.makar.tacticaltablet.game.clanwar.ClanWarManager;
 import com.makar.tacticaltablet.game.lives.LivesManager;
 import com.makar.tacticaltablet.game.lobby.LobbyManager;
 import com.makar.tacticaltablet.game.respawn.RtpTimerManager;
@@ -242,13 +241,6 @@ public class TabletPacket {
             return;
         }
 
-        if (MapSetManager.isClanWarSet()
-                && !ClanManager.getClanIdForPlayer(player).isBlank()
-                && !ClanManager.isClanOwner(player)) {
-            player.sendSystemMessage(Component.literal("[WAR] В войне кланов RTP вручную запускает только глава клана."));
-            LobbyManager.sync(player);
-            return;
-        }
 
         RtpTimerManager.forceRtp(player);
     }
@@ -269,13 +261,6 @@ public class TabletPacket {
         }
         if (MapSetManager.isCompetitiveSet() && PlayerProgressManager.isShopClass(kit)) {
             player.sendSystemMessage(Component.literal("[WAR] Магазинные классы недоступны в соревновательном режиме."));
-            LobbyManager.sync(player);
-            return;
-        }
-        if (MapSetManager.isClanWarSet()
-                && !ClanWarManager.hasClan(player)
-                && PlayerProgressManager.isShopClass(kit)) {
-            player.sendSystemMessage(Component.literal("[WAR] В войне кланов одиночкам недоступны классы из магазина."));
             LobbyManager.sync(player);
             return;
         }

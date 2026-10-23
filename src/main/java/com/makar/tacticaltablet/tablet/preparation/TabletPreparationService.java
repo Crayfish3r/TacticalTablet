@@ -4,7 +4,6 @@ import com.makar.tacticaltablet.clan.ClanManager;
 import com.makar.tacticaltablet.game.*;
 import com.makar.tacticaltablet.game.chaos.ChaosSelectionAdmission;
 import com.makar.tacticaltablet.game.chaos.ChaosSetManager;
-import com.makar.tacticaltablet.game.clanwar.ClanWarManager;
 import com.makar.tacticaltablet.game.lives.LivesManager;
 import com.makar.tacticaltablet.game.respawn.RtpTimerManager;
 import com.makar.tacticaltablet.inventory.InventoryManager;
@@ -77,7 +76,6 @@ public final class TabletPreparationService {
         if (CompetitiveClassPolicy.isVipBlocked(MapSetManager.isCompetitiveSet(), key)) return "Недоступен в соревновательном режиме.";
         if (PlayerProgressManager.isShopClass(key)) {
             if (MapSetManager.isCompetitiveSet()) return "Магазинные классы недоступны в этом режиме.";
-            if (MapSetManager.isClanWarSet() && !ClanWarManager.hasClan(player)) return "Для класса требуется участие в клане.";
             if (!PlayerProgressManager.isClassPurchased(player, key)) return "Класс не приобретён. Покупки на этой странице недоступны.";
         }
         if (ClanManager.MARINE_CLASS.equals(key) && !ClanManager.isClanClassUnlocked(player, key)) return "Клановый класс не открыт.";
@@ -91,16 +89,11 @@ public final class TabletPreparationService {
         String reason = admission(player);
         if (!reason.isEmpty()) return reason;
         if (PlayerTabletState.isRtpUsed(player)) return "Вы уже вступили в бой.";
-        String clanId = ClanManager.getClanIdForPlayer(player);
-        if (MapSetManager.isClanWarSet() && !clanId.isBlank()
-                && !ClanManager.isClanOwner(player)) return "В войне кланов вступление запускает глава клана.";
         if (MapSetManager.isChaosSet() && (ChaosSetManager.requiresSelection(player) || !PlayerTabletState.isKitUsed(player)))
             return "Сначала выберите класс для текущей игры Хаоса.";
         if (!GameStateManager.isInLobby(player) || !player.getTags().contains("in_lobby"))
             return "Вступление через RTP доступно из лобби.";
         if (!LivesManager.isBoundToCurrentMatch(player)) return "Вы не зарегистрированы в текущем матче.";
-        if (MapSetManager.isClanWarSet() && !clanId.isBlank() && ClanWarManager.isClanEliminated(clanId))
-            return "Ваш клан выбыл из текущего матча.";
         return RtpTimerManager.canRtp(player, false) ? "" : "RTP временно недоступен. Обновите данные или повторите позже.";
     }
 }

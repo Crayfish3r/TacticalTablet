@@ -1,12 +1,9 @@
 package com.makar.tacticaltablet.game.lives;
 
-import com.makar.tacticaltablet.clan.ClanManager;
 import com.makar.tacticaltablet.game.GameStateManager;
 import com.makar.tacticaltablet.game.MatchScoreboard;
-import com.makar.tacticaltablet.game.MapSetManager;
 import com.makar.tacticaltablet.game.MatchAdmissionManager;
 import com.makar.tacticaltablet.game.SpectatorCameraManager;
-import com.makar.tacticaltablet.game.clanwar.ClanWarManager;
 import com.makar.tacticaltablet.game.lobby.LobbyManager;
 import com.makar.tacticaltablet.game.lifecycle.PlayerLifecycleSanitizer;
 import com.makar.tacticaltablet.game.respawn.RespawnControlManager;
@@ -220,9 +217,6 @@ public class LivesManager {
     public static int handleDeath(ServerPlayer victim) {
         if (victim == null) return 0;
 
-        if (MapSetManager.isClanWarSet()) {
-            return handleClanWarDeath(victim);
-        }
 
         if (!victim.getTags().contains(TAG_LIVES_INIT)) {
             ensureStarted(victim);
@@ -247,63 +241,8 @@ public class LivesManager {
         return lives;
     }
 
-    private static int handleClanWarDeath(ServerPlayer victim) {
-        if (victim == null) return 0;
 
-        if (!victim.getTags().contains(TAG_LIVES_INIT)) {
-            ensureStarted(victim);
-        }
 
-        String clanId = ClanManager.getClanIdForPlayer(victim);
-        ClassCooldownManager.setCooldownForSelectedClass(victim);
-
-        victim.removeTag("war.playing");
-        victim.removeTag("in_lobby");
-        victim.addTag(ClanWarManager.TAG_SPECTATING);
-        RtpTimerManager.cancel(victim);
-        PassiveClassXPManager.clear(victim);
-        VoiceChatTeamManager.removePlayerFromVoiceGroup(victim);
-
-        if (clanId.isBlank()) {
-            eliminate(victim, 0);
-            return 0;
-        }
-
-        if (!ClanWarManager.isClanWiped(victim.server, clanId)) {
-            victim.sendSystemMessage(Component.literal("[WAR] Ты погиб. Ожидай исхода боя клана."));
-            return ClanWarManager.getClanLives(clanId);
-        }
-
-        int remaining = ClanWarManager.consumeClanLife(victim.server, clanId);
-        if (remaining <= 0 || RespawnControlManager.areRespawnsDisabled()) {
-            ClanWarManager.eliminateClan(victim.server, clanId);
-            eliminateClan(victim.server, clanId);
-            return 0;
-        }
-
-        regroupClan(victim.server, clanId);
-        return remaining;
-    }
-
-    private static void regroupClan(MinecraftServer server, String clanId) {
-        ClanWarManager.markClanForRegroup(server, clanId);
-        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-            if (!clanId.equals(ClanManager.getClanIdForPlayer(player))) continue;
-            if (player.isDeadOrDying()) continue;
-            ClanWarManager.preparePlayerForRegroup(player);
-            LobbyManager.moveRespawningPlayerToLobby(player);
-            ClassXPManager.sync(player);
-        }
-    }
-
-    private static void eliminateClan(MinecraftServer server, String clanId) {
-        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-            if (!clanId.equals(ClanManager.getClanIdForPlayer(player))) continue;
-            player.removeTag(ClanWarManager.TAG_SPECTATING);
-            player.removeTag(ClanWarManager.TAG_REGROUP_PENDING);
-            eliminate(player, 0);
-        }
-    }
 
     public static void eliminateForRespawnDisabled(ServerPlayer player) {
         if (player == null) return;

@@ -1,5 +1,7 @@
 package com.makar.tacticaltablet.game;
 
+import com.makar.tacticaltablet.game.npc.NpcEncounterManager;
+
 import com.makar.tacticaltablet.admin.TestModeManager;
 import com.makar.tacticaltablet.airdrop.AirdropManager;
 import com.makar.tacticaltablet.camouflage.CamouflageCatalogLoader;
@@ -8,7 +10,7 @@ import com.makar.tacticaltablet.client.NameTagManager;
 import com.makar.tacticaltablet.clan.ClanManager;
 import com.makar.tacticaltablet.corpse.CorpseLootManager;
 import com.makar.tacticaltablet.core.TacticalTabletMod;
-import com.makar.tacticaltablet.game.clanwar.ClanWarManager;
+import com.makar.tacticaltablet.game.lifecycle.RetiredClanWarTags;
 import com.makar.tacticaltablet.game.contract.ContractManager;
 import com.makar.tacticaltablet.game.extraction.ExtractionPointManager;
 import com.makar.tacticaltablet.game.lives.LivesManager;
@@ -97,6 +99,7 @@ public class ServerEvents {
 
     @SubscribeEvent
     public static void onPlayerJoin(PlayerEvent.PlayerLoggedInEvent event) {
+        if (event.getEntity() instanceof ServerPlayer player) RetiredClanWarTags.clear(player);
         if (event.getEntity() instanceof ServerPlayer local && !ServerRules.enabled(local.server)) {
             PlayerProgressManager.loadPlayer(local);
             ClassXPManager.sync(local);
@@ -168,9 +171,7 @@ public class ServerEvents {
             if (GameStateManager.isRunning(player.server)
                     && GameStateManager.getMatchPhase() == MatchPhase.RUNNING
                     && GameStateManager.getCurrentMode().isTeamMode()) {
-                TeamId team = MapSetManager.isClanWarSet()
-                        ? TeamMatchManager.assignClanWarPlayer(player.server, player)
-                        : TeamMatchManager.assignLateJoiner(
+                TeamId team = TeamMatchManager.assignLateJoiner(
                         player.server,
                         player,
                         GameStateManager.getCurrentMode()
@@ -214,9 +215,7 @@ public class ServerEvents {
         if (GameStateManager.isRunning(player.server)
                 && GameStateManager.getMatchPhase() == MatchPhase.RUNNING
                 && GameStateManager.getCurrentMode().isTeamMode()) {
-            TeamId team = MapSetManager.isClanWarSet()
-                    ? TeamMatchManager.assignClanWarPlayer(player.server, player)
-                    : TeamMatchManager.assignLateJoiner(
+            TeamId team = TeamMatchManager.assignLateJoiner(
                     player.server,
                     player,
                     GameStateManager.getCurrentMode()
@@ -306,14 +305,13 @@ public class ServerEvents {
 
         for (String tag : oldPlayer.getTags()) {
             if (tag.equals("war.lives_init")
-                    || tag.equals("war.eliminated")
-                    || tag.equals(ClanWarManager.TAG_SPECTATING)
-                    || tag.equals(ClanWarManager.TAG_REGROUP_PENDING)) {
+                    || tag.equals("war.eliminated")) {
                 newPlayer.addTag(tag);
             }
         }
 
         LivesManager.copyMatchBinding(oldPlayer, newPlayer);
+        RetiredClanWarTags.clear(newPlayer);
         PlayerTabletState.reset(newPlayer);
     }
 
@@ -594,6 +592,7 @@ public class ServerEvents {
         SpectatorCameraManager.onServerTick(event.getServer());
         LobbyManager.tick(event.getServer());
         GameStateManager.onServerTick(event.getServer());
+        NpcEncounterManager.tick(event.getServer());
         InventoryGuard.tick(event.getServer());
 
         if (++utilityTickCounter >= 100) {
@@ -824,6 +823,7 @@ public class ServerEvents {
     @SubscribeEvent
     public static void onServerStarted(ServerStartedEvent event) {
         PlayerProgressManager.onServerStarted(event.getServer());
+        NpcEncounterManager.serverStarted(event.getServer());
         if (!ServerRules.enabled(event.getServer())) return;
         MatchScoreboard.ensureObjectives(event.getServer());
         MatchGameRules.apply(event.getServer());
@@ -886,11 +886,17 @@ public class ServerEvents {
 
     @SubscribeEvent
     public static void onServerStopping(ServerStoppingEvent event) {
+        NpcEncounterManager.deactivate();
         CombatAttributionLedger.reset();
         PlayerProgressManager.flushForShutdown();
         if (!ServerRules.enabled(event.getServer())) return;
         PrefixManager.save();
         PunishmentManager.saveAtomic();
+    }
+
+    @SubscribeEvent
+    public static void onNpcEntityRemoved(net.minecraftforge.event.entity.EntityLeaveLevelEvent event) {
+        NpcEncounterManager.onEntityRemoved(event.getEntity());
     }
 
     @SubscribeEvent

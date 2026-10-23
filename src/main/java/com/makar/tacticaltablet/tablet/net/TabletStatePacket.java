@@ -199,7 +199,7 @@ public class TabletStatePacket {
         this.selectedTeam = Math.max(-1, selectedTeam);
         this.teamSlots = copyStringStringMap(teamSlots, MAX_TEAM_SLOT_ENTRIES);
         this.competitiveSet = competitiveSet;
-        this.clanWarSet = clanWarSet;
+        this.clanWarSet = false; // Retained wire field for protocol 44.
     }
 
     public TabletStatePacket(
@@ -316,7 +316,8 @@ public class TabletStatePacket {
             );
         }
         this.competitiveSet = buf.readBoolean();
-        this.clanWarSet = buf.readBoolean();
+        buf.readBoolean(); // Consume the retired flag without activating client state.
+        this.clanWarSet = false;
         if (buf.readableBytes() > 0) preparation = com.makar.tacticaltablet.tablet.preparation.PreparationSnapshot.read(buf);
     }
 

@@ -3,6 +3,7 @@ package com.makar.tacticaltablet.game;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.makar.tacticaltablet.core.TacticalTabletMod;
+import com.makar.tacticaltablet.storage.ClanWarStateMigration;
 import com.makar.tacticaltablet.map.MapRotationManager;
 import com.makar.tacticaltablet.progression.ClassXPManager;
 import com.makar.tacticaltablet.progression.CompetitiveClassTierPolicy;
@@ -90,11 +91,10 @@ public final class MapSetManager {
                 || (!state.lastRotation.isBlank() && !lastRotation.isBlank()
                 && !lastRotation.equals(state.lastRotation))) {
             TacticalTabletMod.LOGGER.info(
-                    "Tactical Tablet detected a completed map rotation. Resetting map set: {} -> {}, competitive={}, clanWar={}",
+                    "Tactical Tablet detected a completed map rotation. Resetting map set: {} -> {}, competitive={}",
                     state.mapName,
                     currentMap,
-                    state.nextSetCompetitive,
-                    state.nextSetClanWar
+                    state.nextSetCompetitive
             );
             state.mapName = currentMap;
             state.lastRotation = lastRotation;
@@ -107,8 +107,7 @@ public final class MapSetManager {
             state.rewardPhaseStatus = RewardPhaseStatus.PENDING;
             state.setReportDispatched = false;
             state.competitiveSet = state.nextSetCompetitive;
-            state.clanWarSet = state.nextSetClanWar;
-            state.setMode = state.competitiveSet || state.clanWarSet
+            state.setMode = state.competitiveSet
                     ? SetGameMode.CASUAL : state.nextSetMode;
             state.chaosDeck.clear();
             state.nextSetCompetitive = false;
@@ -322,11 +321,11 @@ public final class MapSetManager {
     }
 
     public static synchronized boolean isClanWarSet() {
-        return state.clanWarSet;
+        return false; // Compatibility query for retired integrations; no active mode exists.
     }
 
     public static synchronized boolean isChaosSet() {
-        return !state.competitiveSet && !state.clanWarSet && state.setMode == SetGameMode.CHAOS;
+        return !state.competitiveSet && state.setMode == SetGameMode.CHAOS;
     }
 
     public static synchronized SetGameMode getSetMode() {
@@ -386,7 +385,7 @@ public final class MapSetManager {
     }
 
     public static synchronized boolean isNextSetClanWar() {
-        return state.nextSetClanWar;
+        return false;
     }
 
     public static synchronized void announceGameStart(MinecraftServer server) {
@@ -423,7 +422,6 @@ public final class MapSetManager {
         long previousRewardEndsAtMillis = state.rewardEndsAtMillis;
         RewardPhaseStatus previousRewardPhaseStatus = state.rewardPhaseStatus;
         boolean previousNextSetCompetitive = state.nextSetCompetitive;
-        boolean previousNextSetClanWar = state.nextSetClanWar;
         SetGameMode previousNextSetMode = state.nextSetMode;
         List<String> previousHistory = List.copyOf(state.recentPlayedMaps);
         List<String> updatedHistory = MapVoteCandidatePolicy.reconcileRecentPlayedMaps(
@@ -465,7 +463,6 @@ public final class MapSetManager {
             state.rewardEndsAtMillis = previousRewardEndsAtMillis;
             state.rewardPhaseStatus = previousRewardPhaseStatus;
             state.nextSetCompetitive = previousNextSetCompetitive;
-            state.nextSetClanWar = previousNextSetClanWar;
             state.nextSetMode = previousNextSetMode;
             state.recentPlayedMaps = new ArrayList<>(previousHistory);
         })) {
@@ -504,7 +501,7 @@ public final class MapSetManager {
 
     public static synchronized void voteSetMode(ServerPlayer player, SetGameMode mode) {
         if (player == null || !voting || !GameStateManager.isInLobby(player)) return;
-        if (!SetModeVotePolicy.ordinaryModesEnabled(state.nextSetCompetitive, state.nextSetClanWar)) return;
+        if (!SetModeVotePolicy.ordinaryModesEnabled(state.nextSetCompetitive, false)) return;
         if (!SetModeRotationPolicy.isAvailable(availableSetModes, mode)) {
             sync(player, false);
             return;
@@ -526,28 +523,7 @@ public final class MapSetManager {
         syncAll(player.server, false);
     }
 
-    public static synchronized void setNextSetClanWar(ServerPlayer player, boolean clanWar) {
-        if (player == null || !player.hasPermissions(2) || !voting) return;
-        state.nextSetClanWar = clanWar;
-        if (clanWar) {
-            state.nextSetCompetitive = false;
-            modeVotes.clear();
-        }
-        saveState();
-        broadcast(player.server, "[WAR] Следующий сет: "
-                + (clanWar ? "война кланов" : "обычный casual") + ".");
-        syncAll(player.server, false);
-    }
 
-    public static synchronized void setDebugClanWarSet(MinecraftServer server, boolean clanWar) {
-        initStorage(server);
-        state.clanWarSet = clanWar;
-        if (clanWar) {
-            state.competitiveSet = false;
-            state.nextSetCompetitive = false;
-        }
-        saveState();
-    }
 
     public static synchronized VoteTickResult tickVoting(MinecraftServer server) {
         if (!voting || server == null) return VoteTickResult.FAILED;
@@ -563,7 +539,7 @@ public final class MapSetManager {
         selectedMap = winner;
         boolean previousNextSetCompetitive = state.nextSetCompetitive;
         SetGameMode previousNextSetMode = state.nextSetMode;
-        if (SetModeVotePolicy.ordinaryModesEnabled(state.nextSetCompetitive, state.nextSetClanWar)) {
+        if (SetModeVotePolicy.ordinaryModesEnabled(state.nextSetCompetitive, false)) {
             SetGameMode modeWinner = SetModeVotePolicy.selectWinner(
                     modeVoteCounts(), availableSetModes, RANDOM);
             state.nextSetCompetitive = modeWinner == SetGameMode.COMPETITIVE;
@@ -640,8 +616,8 @@ public final class MapSetManager {
                 openScreen,
                 player.hasPermissions(2),
                 state.nextSetCompetitive,
-                state.nextSetClanWar,
-                SetModeVotePolicy.ordinaryModesEnabled(state.nextSetCompetitive, state.nextSetClanWar),
+                false,
+                SetModeVotePolicy.ordinaryModesEnabled(state.nextSetCompetitive, false),
                 SetModeRotationPolicy.availabilityMask(availableSetModes),
                 state.chaosCooldownRemaining,
                 state.consecutiveCompetitiveSets,
@@ -693,22 +669,21 @@ public final class MapSetManager {
 
         try {
             Files.createDirectories(dataRoot);
+            ClanWarStateMigration.migrate(statePath);
             if (Files.exists(statePath)) {
                 try (Reader reader = Files.newBufferedReader(statePath, StandardCharsets.UTF_8)) {
                     SetState loaded = GSON.fromJson(reader, SetState.class);
                     if (loaded != null) state = loaded;
                 }
             }
-            if (state.dataVersion < DATA_VERSION && !backupStateBeforeMigration(state.dataVersion)) {
-                normalizeState();
-                statePath = null;
-                return;
-            }
+            if (state.dataVersion < DATA_VERSION && !backupStateBeforeMigration(state.dataVersion))
+                throw new IOException("Map set backup failed; refusing to overwrite the existing save");
             normalizeState();
-            saveState();
+            if (!saveState()) throw new IOException("Map set normalization could not be committed");
         } catch (IOException | RuntimeException exception) {
             TacticalTabletMod.LOGGER.error("Failed to initialize map set state at {}", statePath, exception);
-            state = new SetState();
+            statePath = null;
+            throw new IllegalStateException("Map set state is unavailable; existing save was preserved", exception);
         }
     }
 
@@ -789,16 +764,20 @@ public final class MapSetManager {
                     ? RewardPhaseStatus.ACTIVE
                     : RewardPhaseStatus.PENDING;
         }
-        if (candidate.competitiveSet && candidate.clanWarSet) {
-            candidate.clanWarSet = false;
+        if (candidate.clanWarSet) {
+            candidate.competitiveSet = false;
+            candidate.setMode = SetGameMode.CASUAL;
         }
-        if (candidate.nextSetCompetitive && candidate.nextSetClanWar) {
-            candidate.nextSetClanWar = false;
+        if (candidate.nextSetClanWar) {
+            candidate.nextSetCompetitive = false;
+            candidate.nextSetMode = SetGameMode.CASUAL;
         }
+        candidate.clanWarSet = false;
+        candidate.nextSetClanWar = false;
         if (candidate.setMode == null || !candidate.setMode.selectable()) candidate.setMode = SetGameMode.CASUAL;
         if (candidate.nextSetMode == null || !candidate.nextSetMode.selectable()) candidate.nextSetMode = SetGameMode.CASUAL;
-        if (candidate.competitiveSet || candidate.clanWarSet) candidate.setMode = SetGameMode.CASUAL;
-        if (candidate.nextSetCompetitive || candidate.nextSetClanWar) candidate.nextSetMode = SetGameMode.CASUAL;
+        if (candidate.competitiveSet) candidate.setMode = SetGameMode.CASUAL;
+        if (candidate.nextSetCompetitive) candidate.nextSetMode = SetGameMode.CASUAL;
         if (candidate.chaosDeck == null) candidate.chaosDeck = new ArrayList<>();
     }
 

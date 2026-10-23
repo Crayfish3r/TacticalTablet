@@ -47,7 +47,7 @@ public final class MapVoteClientState {
         active = voteActive;
         operator = isOperator;
         nextSetCompetitive = competitive;
-        nextSetClanWar = clanWar;
+        nextSetClanWar = false;
         ordinaryModesEnabled = modesEnabled;
         availableModesMask = modesMask | (1 << SetGameMode.CASUAL.ordinal());
         chaosCooldownRemaining = Math.max(0, chaosCooldown);

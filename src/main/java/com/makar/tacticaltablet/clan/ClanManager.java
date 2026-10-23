@@ -4,10 +4,6 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonSyntaxException;
 import com.makar.tacticaltablet.core.TacticalTabletMod;
-import com.makar.tacticaltablet.game.GameStateManager;
-import com.makar.tacticaltablet.game.MapSetManager;
-import com.makar.tacticaltablet.game.lobby.LobbyManager;
-import com.makar.tacticaltablet.game.team.TeamMatchManager;
 import com.makar.tacticaltablet.progression.ClassXPManager;
 import com.makar.tacticaltablet.progression.PlayerProgressManager;
 import com.makar.tacticaltablet.storage.AtomicFileStore;
@@ -161,10 +157,6 @@ public class ClanManager {
         clan.color = color;
         if (!saveOrRestore(previous)) return Result.STORAGE_ERROR;
 
-        if (MapSetManager.isClanWarSet() && GameStateManager.isRunning(owner.server)) {
-            TeamMatchManager.assignClanWarTeams(owner.server);
-            TeamMatchManager.applyScoreboardTeams(owner.server);
-        }
 
         syncAll(owner.server);
         return Result.SUCCESS;
@@ -234,14 +226,6 @@ public class ClanManager {
         ServerPlayer applicantPlayer = getOnlinePlayer(owner.server, applicantUuid);
         if (applicantPlayer != null) {
             applicantPlayer.sendSystemMessage(Component.literal("[WAR] Ваша заявка в клан " + clan.name + " принята."));
-            if (MapSetManager.isClanWarSet() && GameStateManager.isRunning(owner.server)) {
-                TeamMatchManager.assignClanWarPlayer(owner.server, applicantPlayer);
-                TeamMatchManager.applyScoreboardTeams(owner.server);
-                applicantPlayer.removeTag("war.eliminated");
-                if (!applicantPlayer.getTags().contains("war.playing")) {
-                    LobbyManager.moveToLobby(applicantPlayer);
-                }
-            }
             sync(applicantPlayer);
         }
         sync(owner);
@@ -276,7 +260,6 @@ public class ClanManager {
         if (player == null) return Result.INVALID;
 
         init(player.server);
-        if (MapSetManager.isClanWarSet() && GameStateManager.isRunning(player.server)) return Result.CLAN_WAR_LOCKED;
 
         String playerId = player.getUUID().toString();
         ClanData clan = findClanByMember(playerId);
@@ -294,7 +277,6 @@ public class ClanManager {
         if (owner == null || clanId == null || clanId.isBlank()) return Result.INVALID;
 
         init(owner.server);
-        if (MapSetManager.isClanWarSet() && GameStateManager.isRunning(owner.server)) return Result.CLAN_WAR_LOCKED;
 
         ClanData clan = findClan(clanId);
         if (clan == null) return Result.NOT_FOUND;
@@ -319,7 +301,6 @@ public class ClanManager {
         if (owner == null || clanId == null || memberUuid == null) return Result.INVALID;
 
         init(owner.server);
-        if (MapSetManager.isClanWarSet() && GameStateManager.isRunning(owner.server)) return Result.CLAN_WAR_LOCKED;
 
         ClanData clan = findClan(clanId);
         if (clan == null) return Result.NOT_FOUND;
@@ -1046,7 +1027,7 @@ public class ClanManager {
         OWNER_CANNOT_LEAVE,
         CANNOT_KICK_OWNER,
         CLAN_FULL,
-        CLAN_WAR_LOCKED,
+        CLAN_WAR_LOCKED, // Reserved legacy result; no operation returns it after clan-war removal.
         CLAN_LIMIT_REACHED,
         COLOR_TAKEN,
         RATE_LIMITED,

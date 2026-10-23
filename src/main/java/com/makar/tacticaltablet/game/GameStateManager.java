@@ -1,9 +1,10 @@
 package com.makar.tacticaltablet.game;
 
+import com.makar.tacticaltablet.game.npc.NpcEncounterManager;
+
 import com.makar.tacticaltablet.admin.TestModeManager;
 import com.makar.tacticaltablet.airdrop.AirdropManager;
 import com.makar.tacticaltablet.core.TacticalTabletMod;
-import com.makar.tacticaltablet.game.clanwar.ClanWarManager;
 import com.makar.tacticaltablet.game.lives.LivesManager;
 import com.makar.tacticaltablet.game.lobby.LobbyManager;
 import com.makar.tacticaltablet.game.contract.ContractManager;
@@ -164,7 +165,6 @@ public class GameStateManager {
     }
 
     public static int getLivesPerPlayer() {
-        if (MapSetManager.isClanWarSet()) return 1;
         return currentMode.livesPerPlayer();
     }
 
@@ -173,7 +173,7 @@ public class GameStateManager {
         return TabletLobbyPolicy.isTabletAvailable(
                 isRunning(server),
                 startTransitionPlayerSetup,
-                MapSetManager.isClanWarSet(),
+                false,
                 matchPhase
         );
     }
@@ -230,7 +230,6 @@ public class GameStateManager {
         tickCounter = 0;
         SetRewardSummary pendingSetReport = MapSetManager.getRewardSummary();
         if (pendingSetReport != null
-                && !MapSetManager.isClanWarSet()
                 && !MapSetManager.isSetReportDispatched()) {
             dispatchSetReportOnce(server, pendingSetReport);
         }
@@ -269,15 +268,6 @@ public class GameStateManager {
     public static void checkForMatchEnd(MinecraftServer server) {
         if (server == null || !isRunning(server) || postGameDelay > 0) return;
 
-        if (MapSetManager.isClanWarSet()) {
-            int aliveUnits = ClanWarManager.getAliveUnitCount(server);
-            if (aliveUnits <= 1 && (!ClanWarManager.isSoloDebugEnabled() || aliveUnits <= 0)) {
-                ServerPlayer winner = ClanWarManager.findWinningUnitRepresentative(server);
-                TeamId winnerTeam = TeamMatchManager.getTeam(winner);
-                endGame(server, winner, clanWarWinnerLabel(winner), winnerTeam);
-            }
-            return;
-        }
 
         if (currentMode.isTeamMode()) {
             int aliveTeams = TeamMatchManager.getAliveTeamCount(server);
@@ -353,7 +343,6 @@ public class GameStateManager {
         currentMode = MatchMode.SOLO;
         VoteManager.reset();
         TeamMatchManager.reset(server);
-        ClanWarManager.resetRuntime();
         setGameState(server, WAITING);
         ClassXPManager.syncAll(server);
     }
@@ -367,6 +356,7 @@ public class GameStateManager {
                             "Started match has no match id; late admission window remains closed");
                 } else {
                     MatchAdmissionManager.openAdmissionWindow(matchId, server.getTickCount());
+                    NpcEncounterManager.started(server);
                 }
             }
             case REJECTED -> handleRejectedStart(server, result);
@@ -400,9 +390,6 @@ public class GameStateManager {
                 result.rejectionReason(), result.diagnostic());
     }
 
-    private static String clanWarWinnerLabel(ServerPlayer winner) {
-        return ClanWarWinnerLabel.resolve(winner);
-    }
 
     public static void endGame(MinecraftServer server) {
         endGame(server, findWinner(server));
@@ -459,7 +446,6 @@ public class GameStateManager {
 
         runMatchStage("end.contracts", () -> ContractManager.finishMatch(server), endFailures);
         runMatchStage("end.extraction", () -> ExtractionPointManager.reset(server), endFailures);
-        boolean clanWarSet = MapSetManager.isClanWarSet();
         boolean completingSet = MapSetManager.getCompletedGames() + 1 >= MapSetManager.GAMES_PER_MAP;
 
         for (ServerPlayer winner : normalizedWinners) {
@@ -471,24 +457,13 @@ public class GameStateManager {
             runMatchStage("end.sync." + playerId, () -> ClassXPManager.sync(winner), endFailures);
         }
 
-        boolean setComplete;
-        SetRewardSummary setSummary;
-        if (clanWarSet) {
-            // Preserve the established clan-war durability boundary before its separate clan coin award.
-            setComplete = runMatchValueStage("end.map-set", () -> MapSetManager.onGameCompleted(server),
-                    false, endFailures);
-            boolean completed = setComplete;
-            setSummary = runMatchValueStage("end.discord", () -> DiscordLeaderboardService.sendCurrentMatchLeaderboard(
-                    server, normalizedWinners, completed, true, participantIds), null, endFailures);
-        } else {
-            setSummary = runMatchValueStage("end.discord", () -> DiscordLeaderboardService.sendCurrentMatchLeaderboard(
-                    server, normalizedWinners, completingSet, false, participantIds), null, endFailures);
-            setComplete = runMatchValueStage("end.map-set", () -> MapSetManager.onGameCompleted(server),
-                    false, endFailures);
-        }
+        SetRewardSummary setSummary = runMatchValueStage("end.discord", () -> DiscordLeaderboardService.sendCurrentMatchLeaderboard(
+                server, normalizedWinners, completingSet, false, participantIds), null, endFailures);
+        boolean setComplete = runMatchValueStage("end.map-set", () -> MapSetManager.onGameCompleted(server),
+                false, endFailures);
         runMatchStage("end.sync-all", () -> ClassXPManager.syncAll(server), endFailures);
 
-        if (setComplete && !clanWarSet && setSummary != null) {
+        if (setComplete && setSummary != null) {
             runMatchStage("end.set-award", () -> awardSetAndLogFailures(server, setSummary), endFailures);
             runMatchStage("end.set-report", () -> dispatchSetReportOnce(server, setSummary), endFailures);
         }
@@ -521,13 +496,15 @@ public class GameStateManager {
         ClassXPManager.syncAll(server);
     }
     public static void resetRuntime(MinecraftServer server) {
+        boolean npcsClean = server == null || runMatchStage("cleanup.npcs",
+                () -> NpcEncounterManager.cleanup(server), new ArrayList<>());
         MatchAdmissionManager.clearAdmissionWindow();
         matchHadEnoughPlayers = false;
         matchStartingParticipants = 0;
         tickCounter = 0;
         startCountdown = -1;
         postGameDelay = 0;
-        cleanupPending = false;
+        cleanupPending = !npcsClean;
         competitivePreStartSeconds = -1;
         competitivePreStartValidated = false;
         SET_REWARD_COUNTDOWN.reset();
@@ -536,7 +513,6 @@ public class GameStateManager {
         currentMode = MatchMode.SOLO;
         SetMatchRuntime.reset();
         ChaosSetManager.clear();
-        ClanWarManager.resetRuntime();
         VoteManager.reset();
         SpectatorCameraManager.onMatchEnd(server);
         VoiceChatTeamManager.endMatch(server);
@@ -546,7 +522,7 @@ public class GameStateManager {
         if (server != null) {
             setGameState(server, WAITING);
         }
-        MATCH_START_COORDINATOR.clearAfterLegacyCleanup();
+        if (npcsClean) MATCH_START_COORDINATOR.clearAfterLegacyCleanup();
     }
 
     public static boolean forceStopMatch(MinecraftServer server) {
@@ -590,6 +566,7 @@ public class GameStateManager {
         runMatchStage("cleanup.scoreboard", () -> setGameState(server, WAITING), failures);
         runMatchStage("cleanup.spectator-camera", () -> SpectatorCameraManager.onMatchEnd(server), failures);
         runMatchStage("cleanup.voice-chat", () -> VoiceChatTeamManager.endMatch(server), failures);
+        runMatchStage("cleanup.npcs", () -> NpcEncounterManager.cleanup(server), failures);
         runMatchStage("cleanup.scoreboard-teams", () -> TeamMatchManager.cleanupScoreboardTeams(server), failures);
         runMatchStage("cleanup.airdrop-scheduler", AirdropManager::resetAutoScheduler, failures);
         runMatchStage("cleanup.contracts", () -> ContractManager.reset(server), failures);
@@ -603,7 +580,6 @@ public class GameStateManager {
         runMatchStage("cleanup.passive-xp", PassiveClassXPManager::clearAll, failures);
         runMatchStage("cleanup.rtp", RtpTimerManager::clearAll, failures);
         runMatchStage("cleanup.teleport-pool", SafeTeleport::clearPool, failures);
-        runMatchStage("cleanup.clan-war", ClanWarManager::resetRuntime, failures);
         runMatchStage("cleanup.dropped-items", () -> WorldCleanupManager.clearDroppedItems(server), failures);
         runMatchStage("cleanup.game-rules", () -> DropControlManager.enforceGameRules(server), failures);
         runMatchStage("cleanup.lives", () -> LivesManager.resetAll(server), failures);
@@ -636,6 +612,7 @@ public class GameStateManager {
     }
 
     private static void beginLifecycleEnding(MatchEndReason reason) {
+        NpcEncounterManager.deactivate();
         MatchLifecycleSnapshot snapshot = getLifecycleSnapshot();
         if (snapshot.matchId().isEmpty() || snapshot.state() != MatchState.RUNNING) return;
 
@@ -769,41 +746,8 @@ public class GameStateManager {
         return true;
     }
 
-    public static boolean forceStartClanWar(MinecraftServer server, boolean skipPreStartWait) {
-        return forceStartClanWar(server, skipPreStartWait, false);
-    }
 
-    public static boolean forceStartClanWarDebug(MinecraftServer server, boolean skipPreStartWait) {
-        return forceStartClanWar(server, skipPreStartWait, true);
-    }
 
-    private static boolean forceStartClanWar(
-            MinecraftServer server,
-            boolean skipPreStartWait,
-            boolean soloDebug
-    ) {
-        if (server == null || isRunning(server) || cleanupPending || hasPendingSetReward()) return false;
-
-        postGameDelay = 0;
-        startCountdown = -1;
-        if (!cleanupMatchRuntime(server)) {
-            cleanupPending = true;
-            return false;
-        }
-        ClanWarManager.setSoloDebugEnabled(soloDebug);
-        currentMode = MatchMode.SQUADS;
-        matchPhase = MatchPhase.WAITING;
-
-        if (skipPreStartWait) {
-            ClanWarManager.skipPreStartWait();
-            startGame(server);
-        } else {
-            setGameState(server, WAITING);
-            giveLobbyTabletsAndSync(server);
-        }
-
-        return true;
-    }
 
     private static boolean hasPendingSetReward() {
         return MapSetManager.isSetComplete() && !MapSetManager.wasRewardingCompleted();
@@ -864,29 +808,10 @@ public class GameStateManager {
         int requiredPlayers = TestModeManager.getRequiredPlayers(MIN_PLAYERS);
 
         if (matchParticipantCandidates(server) < requiredPlayers) {
-            if (MapSetManager.isClanWarSet()) {
-                ClanWarManager.resetPreStartWait();
-                giveLobbyTabletsAndSync(server);
-            }
             startCountdown = -1;
             return;
         }
 
-        if (MapSetManager.isClanWarSet()) {
-            if (!ClanWarManager.isSoloDebugEnabled()
-                    && ClanWarManager.getParticipantCandidateClanCount(server) < 2) {
-                ClanWarManager.resetPreStartWait();
-                startCountdown = -1;
-                return;
-            }
-            giveLobbyTabletsAndSync(server);
-            if (ClanWarManager.tickPreStartWait(server)) {
-                return;
-            }
-            currentMode = MatchMode.SQUADS;
-            startGame(server);
-            return;
-        }
 
         if (canStartVoting(server) && !TestModeManager.isSoloStartEnabled()) {
             matchPhase = MatchPhase.VOTING;
@@ -916,7 +841,7 @@ public class GameStateManager {
         }
 
         if (startCountdown == 0) {
-            currentMode = MapSetManager.isClanWarSet() ? MatchMode.SQUADS : MatchMode.SOLO;
+            currentMode = MatchMode.SOLO;
             startGame(server);
             startCountdown = -1;
             return;
@@ -1079,7 +1004,7 @@ public class GameStateManager {
             return;
         }
         SetRewardSummary summary = MapSetManager.getRewardSummary();
-        if (!MapSetManager.isClanWarSet() && summary == null) {
+        if (summary == null) {
             summary = DiscordLeaderboardService.prepareCompletedSetSummary(server);
             if (summary == null) {
                 TacticalTabletMod.LOGGER.error("Set {} is complete, but its reward summary could not be persisted; retrying",
@@ -1091,7 +1016,7 @@ public class GameStateManager {
         matchPhase = MatchPhase.SET_REWARDING;
         currentMode = MatchMode.SOLO;
         SET_REWARD_COUNTDOWN.resume(MapSetManager.beginOrResumeRewarding(server));
-        if (summary != null && !MapSetManager.isClanWarSet()) {
+        if (summary != null) {
             List<SetRewardService.PayoutResult> payouts = awardSetAndLogFailures(server, summary);
             dispatchSetReportOnce(server, summary);
             Component title = SetRewardPresentation.title(summary);
@@ -1179,14 +1104,6 @@ public class GameStateManager {
                         "not enough players"
                 );
             }
-            if (MapSetManager.isClanWarSet()
-                    && !ClanWarManager.isSoloDebugEnabled()
-                    && ClanWarManager.getParticipantCandidateClanCount(server) < 2) {
-                return MatchStartPreflightResult.rejected(
-                        MatchStartRejectionReason.INSUFFICIENT_PLAYERS,
-                        "clan war requires at least two participating clans"
-                );
-            }
             if (!validateStartRuntimeRequirements(server)) {
                 return MatchStartPreflightResult.rejected(
                         MatchStartRejectionReason.RUNTIME_REQUIREMENTS_FAILED,
@@ -1212,7 +1129,7 @@ public class GameStateManager {
             return new MatchStartRequest(
                     mapId.toString(),
                     currentMode.name(),
-                    MapSetManager.isClanWarSet() ? "clan-war" : "standard",
+                    "standard",
                     null,
                     participants,
                     Instant.now()
@@ -1234,12 +1151,7 @@ public class GameStateManager {
                     ChaosSetManager.beginGame(server, MapSetManager.getCurrentGameNumber());
                 }
                 case CONFIGURE_TEAMS -> {
-                    if (MapSetManager.isClanWarSet()) {
-                        ClanWarManager.startMatch(server);
-                        currentMode = MatchMode.SQUADS;
-                        TeamMatchManager.assignClanWarTeams(server);
-                        TeamMatchManager.applyScoreboardTeams(server);
-                    } else if (currentMode.isTeamMode()) {
+                    if (currentMode.isTeamMode()) {
                         TeamMatchManager.autoBalance(server, currentMode);
                         TeamMatchManager.applyScoreboardTeams(server);
                     } else {
@@ -1325,7 +1237,6 @@ public class GameStateManager {
                     }
                 }
                 case CONFIGURE_TEAMS -> {
-                    ClanWarManager.resetRuntime();
                     TeamMatchManager.reset(server);
                     currentMode = MatchMode.SOLO;
                 }

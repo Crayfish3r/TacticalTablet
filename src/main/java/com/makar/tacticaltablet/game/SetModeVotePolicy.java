@@ -37,6 +37,6 @@ public final class SetModeVotePolicy {
     }
 
     public static boolean ordinaryModesEnabled(boolean competitive, boolean clanWar) {
-        return !competitive && !clanWar;
+        return !competitive; // Second argument is retained for source compatibility with older integrations.
     }
 }

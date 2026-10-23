@@ -1,14 +1,12 @@
 package com.makar.tacticaltablet.game.respawn;
 
 import com.makar.tacticaltablet.airdrop.AirdropManager;
-import com.makar.tacticaltablet.clan.ClanManager;
 import com.makar.tacticaltablet.core.TacticalTabletMod;
 import com.makar.tacticaltablet.game.GameStateManager;
 import com.makar.tacticaltablet.game.MatchAdmissionManager;
 import com.makar.tacticaltablet.game.MapSetManager;
 import com.makar.tacticaltablet.game.chaos.ChaosSetManager;
 import com.makar.tacticaltablet.game.set.SetMatchRuntime;
-import com.makar.tacticaltablet.game.clanwar.ClanWarManager;
 import com.makar.tacticaltablet.game.lives.LivesManager;
 import com.makar.tacticaltablet.game.lifecycle.PlayerLifecycleSanitizer;
 import com.makar.tacticaltablet.game.lobby.LobbyManager;
@@ -362,16 +360,11 @@ public class RtpTimerManager {
         boolean sameMatch = requestMatchId == null
                 ? LivesManager.isBoundToCurrentMatch(player)
                 : requestMatchId.equals(currentMatchId);
-        boolean clanEligible = true;
-        if (MapSetManager.isClanWarSet()) {
-            String clanId = ClanManager.getClanIdForPlayer(player);
-            clanEligible = clanId.isBlank() || !ClanWarManager.isClanEliminated(clanId);
-        }
         return classifyEligibility(
                 true,
                 GameStateManager.isRunning(player.server),
                 sameMatch,
-                LivesManager.canContinueMatch(player) && clanEligible && !player.isSpectator()
+                LivesManager.canContinueMatch(player) && !player.isSpectator()
                         && isChaosDeploymentReady(player),
                 PlayerTabletState.isRtpUsed(player),
                 GameStateManager.isInLobby(player),

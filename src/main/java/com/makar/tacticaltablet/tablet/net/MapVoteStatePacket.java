@@ -53,7 +53,7 @@ public final class MapVoteStatePacket {
         this.openScreen = openScreen;
         this.operator = operator;
         this.nextSetCompetitive = nextSetCompetitive;
-        this.nextSetClanWar = nextSetClanWar;
+        this.nextSetClanWar = false; // Compatibility field, not a selectable mode.
         this.ordinaryModesEnabled = ordinaryModesEnabled;
         this.availableModesMask = availableModesMask;
         this.chaosCooldownRemaining = Math.max(0, chaosCooldownRemaining);
@@ -71,7 +71,8 @@ public final class MapVoteStatePacket {
         openScreen = buf.readBoolean();
         operator = buf.readBoolean();
         nextSetCompetitive = buf.readBoolean();
-        nextSetClanWar = buf.readBoolean();
+        buf.readBoolean();
+        nextSetClanWar = false;
         ordinaryModesEnabled = buf.readBoolean();
         availableModesMask = buf.readVarInt();
         chaosCooldownRemaining = Math.max(0, buf.readVarInt());

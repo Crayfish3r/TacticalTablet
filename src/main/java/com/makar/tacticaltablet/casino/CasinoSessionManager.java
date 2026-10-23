@@ -14,7 +14,6 @@ import com.makar.tacticaltablet.game.MatchAdmissionDecision;
 import com.makar.tacticaltablet.game.MatchAdmissionManager;
 import com.makar.tacticaltablet.game.MatchMode;
 import com.makar.tacticaltablet.game.MatchPhase;
-import com.makar.tacticaltablet.game.clanwar.ClanWarManager;
 import com.makar.tacticaltablet.game.contract.ContractManager;
 import com.makar.tacticaltablet.game.lives.LivesManager;
 import com.makar.tacticaltablet.game.lobby.LobbyManager;
@@ -263,8 +262,8 @@ public final class CasinoSessionManager {
                     GameStateManager.getMatchPhase(),
                     ModerModeManager.isInModerMode(player),
                     LivesManager.isEliminated(player),
-                    ClanWarManager.shouldKeepSpectating(player),
-                    MapSetManager.isClanWarSet()
+                    false, // Retired clan-war compatibility arguments.
+                    false
             );
             if (decision == CasinoReturnPolicy.Decision.WAIT) continue;
 

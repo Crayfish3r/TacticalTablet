@@ -18,7 +18,7 @@ public final class CasinoReturnPolicy {
     ) {
         if (!deadlineReached) return Decision.WAIT;
         if (!matchRunning || phase != MatchPhase.RUNNING) return Decision.RELEASE_FOR_NEXT_MATCH;
-        if (moderator || eliminated || clanSpectating || clanWarSet) return Decision.KEEP_SPECTATING;
+        if (moderator || eliminated) return Decision.KEEP_SPECTATING;
         return Decision.ADMIT_ACTIVE_MATCH;
     }
 

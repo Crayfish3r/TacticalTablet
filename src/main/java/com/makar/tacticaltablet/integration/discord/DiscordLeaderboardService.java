@@ -2,7 +2,7 @@ package com.makar.tacticaltablet.integration.discord;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
-import com.makar.tacticaltablet.clan.ClanManager;
+import com.makar.tacticaltablet.storage.ClanWarStateMigration;
 import com.makar.tacticaltablet.core.TacticalTabletMod;
 import com.makar.tacticaltablet.game.CombatAttributionDiagnostics;
 import com.makar.tacticaltablet.game.CombatDamageEventClaims;
@@ -59,8 +59,6 @@ public final class DiscordLeaderboardService {
     private static final int MATCH_COLOR = 0xE74C3C;
     private static final int RANKED_MATCH_COLOR = 0x9B59B6;
     private static final int CHAOS_COLOR = 0xFF4FA3;
-    private static final int CLAN_WAR_COLOR = 0x2ECC71;
-    private static final int CLAN_WAR_WIN_CLAN_COINS = 10;
     private static final int SET_STATS_DATA_VERSION = 3;
     private static final String SET_STATS_FILE = "map_set_stats.json";
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
@@ -73,7 +71,6 @@ public final class DiscordLeaderboardService {
     private static long currentSetStartedAtMillis;
     private static int currentSetAirdrops;
     private static int currentSetMatches;
-    private static boolean currentSetClanWar;
     private static boolean currentSetCompetitive;
     private static Path setStatsPath;
     private static String currentSetMap = "";
@@ -134,7 +131,6 @@ public final class DiscordLeaderboardService {
         currentMatchAirdrops = 0;
         if (currentSetStartedAtMillis <= 0L) {
             currentSetStartedAtMillis = currentMatchStartedAtMillis;
-            currentSetClanWar = MapSetManager.isClanWarSet();
             currentSetCompetitive = MapSetManager.isCompetitiveSet();
         }
 
@@ -254,7 +250,6 @@ public final class DiscordLeaderboardService {
                 .filter(player -> eligibleParticipantIds.contains(player.getUUID()))
                 .distinct()
                 .toList();
-        boolean effectiveClanWarSet = clanWarSet || currentSetClanWar;
 
         if (currentMatchStats.isEmpty() && !setComplete) {
             return null;
@@ -317,14 +312,6 @@ public final class DiscordLeaderboardService {
             return null;
         }
 
-        if (effectiveClanWarSet) {
-            ClanWarStats clanWinner = findClanWarSetWinner(server);
-            if (clanWinner != null) {
-                ClanManager.addClanCoins(server, clanWinner.clanId, CLAN_WAR_WIN_CLAN_COINS);
-            }
-            sendClanWarSetReport(server, clanWinner);
-            return null;
-        }
 
         return prepareCompletedSetSummary(server);
     }
@@ -333,7 +320,7 @@ public final class DiscordLeaderboardService {
         SetRewardSummary existing = MapSetManager.getRewardSummary();
         SetLeaderboardSnapshot existingSnapshot = MapSetManager.getLeaderboardSnapshot();
         if (existing != null && existingSnapshot != null) return existing;
-        if (server == null || MapSetManager.isClanWarSet()) return null;
+        if (server == null) return null;
 
         SetLeaderboardSnapshot snapshot = SetResultService.createSnapshot(
                 MapSetManager.getSetId(), MapSetManager.getParticipantNames(),
@@ -358,7 +345,6 @@ public final class DiscordLeaderboardService {
         currentSetStartedAtMillis = 0L;
         currentSetAirdrops = 0;
         currentSetMatches = 0;
-        currentSetClanWar = false;
         currentSetCompetitive = false;
         currentSetMap = "";
         deleteSetState();
@@ -389,19 +375,23 @@ public final class DiscordLeaderboardService {
         currentSetStartedAtMillis = 0L;
         currentSetAirdrops = 0;
         currentSetMatches = 0;
-        currentSetClanWar = false;
         currentSetCompetitive = false;
         currentSetMap = "";
 
         if (!Files.exists(setStatsPath)) return;
 
+        try {
+            ClanWarStateMigration.migrate(setStatsPath);
+        } catch (IOException | RuntimeException exception) {
+            throw new IllegalStateException("Set statistics migration failed; the existing save was preserved", exception);
+        }
         try (Reader reader = Files.newBufferedReader(setStatsPath, StandardCharsets.UTF_8)) {
             SetStatsState loaded = GSON.fromJson(reader, SetStatsState.class);
             if (loaded == null || !normalizeMapName(loaded.mapName).equals(normalizeMapName(currentMapName(server)))) {
                 deleteSetState();
                 return;
             }
-            if (loaded.dataVersion < SET_STATS_DATA_VERSION && loaded.matches > 0) {
+            if (loaded.dataVersion < SET_STATS_DATA_VERSION && loaded.matches > 0 && !loaded.clanWarRetired) {
                 TacticalTabletMod.LOGGER.warn(
                         "Active set statistics version {} has no reliable per-game placements/assists; resetting only this active set",
                         loaded.dataVersion);
@@ -414,19 +404,18 @@ public final class DiscordLeaderboardService {
             currentSetStartedAtMillis = Math.max(0L, loaded.startedAtMillis);
             currentSetAirdrops = Math.max(0, loaded.airdrops);
             currentSetMatches = Math.max(0, loaded.matches);
-            currentSetClanWar = loaded.clanWarSet;
             currentSetCompetitive = loaded.competitiveSet;
             if (loaded.players != null) currentSetStats.putAll(loaded.players);
             if (loaded.games != null) currentSetGames.putAll(loaded.games);
             recoverLegacyParticipants(server);
-            if (!currentSetClanWar && currentSetMatches >= MapSetManager.GAMES_PER_MAP) {
+            if (currentSetMatches >= MapSetManager.GAMES_PER_MAP) {
                 if (!MapSetManager.ensureSetCompleted(server)) {
                     TacticalTabletMod.LOGGER.error("Failed to reconcile completed set state after statistics recovery");
                 }
             }
         } catch (IOException | RuntimeException exception) {
             TacticalTabletMod.LOGGER.error("Failed to load map set stats from {}", setStatsPath, exception);
-            deleteSetState();
+            throw new IllegalStateException("Set statistics could not be loaded; the existing save was preserved", exception);
         }
     }
 
@@ -444,7 +433,7 @@ public final class DiscordLeaderboardService {
         snapshot.startedAtMillis = currentSetStartedAtMillis;
         snapshot.airdrops = currentSetAirdrops;
         snapshot.matches = currentSetMatches;
-        snapshot.clanWarSet = currentSetClanWar || MapSetManager.isClanWarSet();
+        snapshot.clanWarSet = false;
         snapshot.competitiveSet = currentSetCompetitive || MapSetManager.isCompetitiveSet();
         snapshot.players = new HashMap<>(currentSetStats);
         snapshot.games = new HashMap<>(currentSetGames);
@@ -559,57 +548,8 @@ public final class DiscordLeaderboardService {
         return DiscordWebhookClient.sendEmbedsAsync(config.getWebhookUrl(), embeds);
     }
 
-    private static CompletableFuture<Boolean> sendClanWarSetReport(MinecraftServer server, ClanWarStats winner) {
-        DiscordConfig config = DiscordConfig.get(server);
-        if (config == null || (!config.hasClanWarWebhook() && !config.hasWebhook())) {
-            TacticalTabletMod.LOGGER.warn("Discord webhook is not configured. Set clanWarWebhookUrl or webhookUrl in config/tacticaltablet_discord.json");
-            return CompletableFuture.completedFuture(false);
-        }
 
-        List<ClanWarStats> clans = sortedClanWarSet(buildClanWarStats(server));
-        ClanWarStats damageLeader = clanWarDamageLeader(clans);
-        DiscordEmbed embed = buildClanWarSetEmbed(
-                "Итоги войны кланов из " + currentSetMatches + " игр - " + config.getServerName(),
-                currentMapName(server),
-                clans,
-                config.getTopLimit(),
-                currentSetStartedAtMillis,
-                currentSetAirdrops,
-                winner,
-                damageLeader
-        );
 
-        if (config.hasClanWarWebhook()) {
-            return DiscordWebhookClient.sendEmbedAsync(config.getClanWarWebhookUrl(), embed);
-        }
-
-        TacticalTabletMod.LOGGER.warn("Discord clan-war webhook is not configured. Sending green clan-war report to the regular webhook.");
-        return DiscordWebhookClient.sendEmbedAsync(config.getWebhookUrl(), embed);
-    }
-
-    private static ClanWarStats findClanWarSetWinner(MinecraftServer server) {
-        List<ClanWarStats> clans = sortedClanWarSet(buildClanWarStats(server));
-        return clans.isEmpty() ? null : clans.get(0);
-    }
-
-    private static List<ClanWarStats> buildClanWarStats(MinecraftServer server) {
-        Map<String, ClanWarStats> clans = new HashMap<>();
-        if (server == null) return List.of();
-
-        for (MatchStats stats : currentSetStats.values()) {
-            String clanId = ClanManager.getClanIdForPlayerUuid(server, stats.uuid);
-            if (clanId.isBlank()) continue;
-
-            ClanWarStats clan = clans.computeIfAbsent(clanId, ignored -> new ClanWarStats(
-                    clanId,
-                    ClanManager.getClanNameById(server, clanId),
-                    ClanManager.getClanCoinsById(server, clanId)
-            ));
-            clan.merge(stats);
-        }
-
-        return new ArrayList<>(clans.values());
-    }
 
     public static List<PlayerStats> sorted(List<PlayerStats> players) {
         List<PlayerStats> result = new ArrayList<>(players == null ? List.of() : players);
@@ -883,58 +823,7 @@ public final class DiscordLeaderboardService {
                 .toString();
     }
 
-    private static DiscordEmbed buildClanWarSetEmbed(
-            String title,
-            String mapName,
-            List<ClanWarStats> clans,
-            int topLimit,
-            long startedAtMillis,
-            int airdrops,
-            ClanWarStats winner,
-            ClanWarStats damageLeader
-    ) {
-        int count = Math.min(Math.max(1, topLimit), clans.size());
-        StringBuilder description = new StringBuilder();
-        appendHeaderLine(description, "Карта", mapName);
-        appendHeaderLine(description, "Длительность сета", formatDuration(startedAtMillis));
-        description.append("**Игры:** `").append(currentSetMatches).append("`\n");
-        description.append("**Аирдропы за сет:** `").append(Math.max(0, airdrops)).append("`\n");
 
-        if (winner != null) {
-            description.append("**Победитель:** **").append(winner.name).append("**  ")
-                    .append("+`").append(CLAN_WAR_WIN_CLAN_COINS).append("` КК  ")
-                    .append("Победы `").append(winner.wins).append("`  ")
-                    .append("Убийства `").append(winner.kills).append("`  ")
-                    .append("Урон `").append(formatDamage(winner.damage)).append("`\n");
-        }
-
-        if (damageLeader != null) {
-            description.append("**Топ урон:** `").append(damageLeader.name).append("`  `")
-                    .append(formatDamage(damageLeader.damage)).append("`\n");
-        }
-
-        if (clans.isEmpty()) {
-            description.append("\nНет данных по кланам.");
-        } else {
-            description.append("\n**Места кланов**\n");
-            for (int i = 0; i < count; i++) {
-                appendClanWarRow(description, i + 1, clans.get(i));
-            }
-        }
-
-        return new DiscordEmbed(title, description.toString(), CLAN_WAR_COLOR, "Тактический планшет");
-    }
-
-    private static void appendClanWarRow(StringBuilder description, int place, ClanWarStats stats) {
-        description.append('\n')
-                .append("**#").append(place).append(' ').append(stats.name).append("**\n")
-                .append("Победы: **`").append(stats.wins).append("`**  ")
-                .append("Убийства: **`").append(stats.kills).append("`**  ")
-                .append("Урон: **`").append(formatDamage(stats.damage)).append("`**  ")
-                .append("Смерти: `").append(stats.deaths).append("`  ")
-                .append("У/С: `").append(stats.formattedKd()).append("`  ")
-                .append("КК: `").append(stats.clanCoins).append("`\n");
-    }
 
     private static void appendMatchPlayerRow(StringBuilder description, int place, MatchStats stats) {
         description.append('\n')
@@ -1024,16 +913,6 @@ public final class DiscordLeaderboardService {
         return result;
     }
 
-    private static List<ClanWarStats> sortedClanWarSet(List<ClanWarStats> clans) {
-        List<ClanWarStats> result = new ArrayList<>(clans == null ? List.of() : clans);
-        result.sort(Comparator
-                .comparingInt((ClanWarStats stats) -> stats.wins).reversed()
-                .thenComparing(Comparator.comparingInt((ClanWarStats stats) -> stats.kills).reversed())
-                .thenComparing(Comparator.comparingDouble((ClanWarStats stats) -> stats.damage).reversed())
-                .thenComparingInt(stats -> stats.deaths)
-                .thenComparing(stats -> stats.name, String.CASE_INSENSITIVE_ORDER));
-        return result;
-    }
 
     private static MatchStats damageLeader(List<MatchStats> players) {
         MatchStats best = null;
@@ -1047,15 +926,6 @@ public final class DiscordLeaderboardService {
         return best != null && best.damage > 0.0D ? best : null;
     }
 
-    private static ClanWarStats clanWarDamageLeader(List<ClanWarStats> clans) {
-        ClanWarStats best = null;
-        for (ClanWarStats stats : clans) {
-            if (best == null || stats.damage > best.damage) {
-                best = stats;
-            }
-        }
-        return best != null && best.damage > 0.0D ? best : null;
-    }
 
     private static MatchStats findMatchPlayer(List<MatchStats> players, String name) {
         if (name == null || name.isBlank()) {
@@ -1278,37 +1148,6 @@ public final class DiscordLeaderboardService {
         }
     }
 
-    private static final class ClanWarStats {
-        private final String clanId;
-        private final String name;
-        private final int clanCoins;
-        private int kills;
-        private int deaths;
-        private int wins;
-        private double damage;
-
-        private ClanWarStats(String clanId, String name, int clanCoins) {
-            this.clanId = clanId == null ? "" : clanId;
-            this.name = MatchStats.sanitizeName(name == null || name.isBlank() ? "unknown" : name);
-            this.clanCoins = Math.max(0, clanCoins);
-        }
-
-        private void merge(MatchStats other) {
-            if (other == null) return;
-            kills += other.kills;
-            deaths += other.deaths;
-            wins += other.wins;
-            damage += other.damage;
-        }
-
-        private double kd() {
-            return deaths <= 0 ? kills : (double) kills / deaths;
-        }
-
-        private String formattedKd() {
-            return String.format(Locale.US, "%.2f", kd());
-        }
-    }
 
     private static final class SetStatsState {
         int dataVersion = SET_STATS_DATA_VERSION;
@@ -1317,6 +1156,7 @@ public final class DiscordLeaderboardService {
         int airdrops;
         int matches;
         boolean clanWarSet;
+        boolean clanWarRetired; // Migration provenance, never a game-mode flag.
         boolean competitiveSet;
         Map<String, MatchStats> players = new HashMap<>();
         Map<String, List<GamePerformance>> games = new HashMap<>();

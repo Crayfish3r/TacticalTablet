@@ -4,7 +4,8 @@ import com.makar.tacticaltablet.game.GameStateManager;
 import com.makar.tacticaltablet.casino.CasinoSessionManager;
 import com.makar.tacticaltablet.game.MatchAdmissionManager;
 import com.makar.tacticaltablet.airdrop.AirdropManager;
-import com.makar.tacticaltablet.game.clanwar.ClanWarManager;
+import com.makar.tacticaltablet.game.lifecycle.RetiredClanWarTags;
+import com.makar.tacticaltablet.game.respawn.DeathTransitionManager;
 import com.makar.tacticaltablet.game.contract.ContractManager;
 import com.makar.tacticaltablet.game.lifecycle.PlayerLifecycleSanitizer;
 import com.makar.tacticaltablet.game.lives.LivesManager;
@@ -49,6 +50,7 @@ public class LobbyManager {
 
     private static void moveToLobby(ServerPlayer player, boolean ordinaryRespawn) {
         if (player == null) return;
+        RetiredClanWarTags.clear(player);
         if (MatchAdmissionManager.enforceLateSpectator(player, false)) return;
         boolean releasedLateSpectator = MatchAdmissionManager.releaseLateSpectatorAfterMatch(player);
 
@@ -77,8 +79,13 @@ public class LobbyManager {
         }
         GameType currentGameMode = player.gameMode.getGameModeForPlayer();
         boolean forcedSpectator = LivesManager.isEliminated(player)
-                || ClanWarManager.shouldKeepSpectating(player)
                 || MatchAdmissionManager.isLateSpectator(player);
+        if (RetiredClanWarTags.pendingLobbyCleanup(player)) {
+            // Retire only the clan-war reason; other spectator owners must keep control.
+            forcedSpectator |= CasinoSessionManager.isExcludedFromMatch(player)
+                    || DeathTransitionManager.isTransitionActive(player)
+                    || !LivesManager.canContinueMatch(player);
+        }
         GameType targetGameMode = LobbyGameModePolicy.target(
                 currentGameMode,
                 ModerModeManager.isInModerMode(player),
@@ -105,6 +112,7 @@ public class LobbyManager {
 
         Vec3 spawn = resolvedSpawn.orElseThrow();
         player.teleportTo(lobby, spawn.x, spawn.y, spawn.z, player.getYRot(), player.getXRot());
+        RetiredClanWarTags.finish(player);
         PlayerLifecycleSanitizer.restoreLobbySafety(player);
 
         if (canUseTabletNow) {
@@ -125,7 +133,6 @@ public class LobbyManager {
                 && player.gameMode.getGameModeForPlayer() != GameType.SPECTATOR
                 && !ModerModeManager.isInModerMode(player)
                 && !LivesManager.isEliminated(player)
-                && !ClanWarManager.shouldKeepSpectating(player)
                 && !CasinoSessionManager.isExcludedFromMatch(player);
     }
 

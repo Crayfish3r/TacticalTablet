@@ -196,7 +196,7 @@ public class ClassXPManager {
                 teamSnapshot.selectedTeam(),
                 teamSnapshot.slots(),
                 MapSetManager.isCompetitiveSet(),
-                MapSetManager.isClanWarSet()
+                false
         );
     }
 

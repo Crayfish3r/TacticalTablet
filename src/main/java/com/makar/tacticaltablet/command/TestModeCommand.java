@@ -5,7 +5,6 @@ import com.makar.tacticaltablet.game.contract.ContractManager;
 import com.makar.tacticaltablet.game.GameStateManager;
 import com.makar.tacticaltablet.game.MapSetManager;
 import com.makar.tacticaltablet.game.MatchMode;
-import com.makar.tacticaltablet.game.clanwar.ClanWarManager;
 import com.mojang.brigadier.CommandDispatcher;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -49,26 +48,6 @@ public class TestModeCommand {
                 )
                 .then(Commands.literal("stop")
                         .executes(ctx -> stopMatch(ctx.getSource()))
-                )
-                .then(Commands.literal("clanwar")
-                        .executes(ctx -> sendClanWarStatus(ctx.getSource()))
-                        .then(Commands.literal("start")
-                                .executes(ctx -> startClanWarDebug(ctx.getSource(), true))
-                        )
-                        .then(Commands.literal("wait")
-                                .executes(ctx -> startClanWarDebug(ctx.getSource(), false))
-                        )
-                        .then(Commands.literal("solo")
-                                .then(Commands.literal("on")
-                                        .executes(ctx -> setClanWarSoloDebug(ctx.getSource(), true))
-                                )
-                                .then(Commands.literal("off")
-                                        .executes(ctx -> setClanWarSoloDebug(ctx.getSource(), false))
-                                )
-                        )
-                        .then(Commands.literal("status")
-                                .executes(ctx -> sendClanWarStatus(ctx.getSource()))
-                        )
                 )
                 .then(Commands.literal("lowplayers")
                         .executes(ctx -> sendStatus(ctx.getSource()))
@@ -221,40 +200,8 @@ public class TestModeCommand {
         return stopped ? 1 : 0;
     }
 
-    private static int startClanWarDebug(CommandSourceStack source, boolean skipWait) {
-        TestModeManager.setSoloStartEnabled(true);
-        TestModeManager.setLowPlayerTeamTestsEnabled(true);
-        MapSetManager.setDebugClanWarSet(source.getServer(), true);
 
-        boolean started = GameStateManager.forceStartClanWarDebug(source.getServer(), skipWait);
-        source.sendSuccess(
-                () -> Component.literal(started
-                        ? "[WAR] Clan-war debug started. solo=true, lowplayers=true, skipWait=" + skipWait + "."
-                        : "[WAR] Clan-war debug cannot start during an active match."),
-                true
-        );
-        return started ? 1 : 0;
-    }
 
-    private static int setClanWarSoloDebug(CommandSourceStack source, boolean enabled) {
-        ClanWarManager.setSoloDebugEnabled(enabled);
-        source.sendSuccess(
-                () -> Component.literal("[WAR] Clan-war solo debug: " + (enabled ? "on" : "off") + "."),
-                true
-        );
-        return enabled ? 1 : 0;
-    }
-
-    private static int sendClanWarStatus(CommandSourceStack source) {
-        source.sendSuccess(
-                () -> Component.literal("[WAR] Clan-war currentSet=" + MapSetManager.isClanWarSet()
-                        + ", soloDebug=" + ClanWarManager.isSoloDebugEnabled()
-                        + ", soloStart=" + TestModeManager.isSoloStartEnabled()
-                        + ", lowplayers=" + TestModeManager.isLowPlayerTeamTestsEnabled() + "."),
-                false
-        );
-        return 1;
-    }
 
     private static int setContractSoloDebug(CommandSourceStack source, boolean enabled) {
         ContractManager.setSoloDebugEnabled(enabled);

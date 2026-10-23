@@ -6,6 +6,7 @@ import net.minecraft.client.gui.GuiGraphics;
 /** One session owns the retained preparation page, selected page and exclusive mouse recipient. */
 final class TabletPageShell {
     private final TabletPreparationPage preparation;
+    private final TabletProfilePage profile = new TabletProfilePage();
     private final int height;
     private TabletPage selected = TabletPage.PREPARATION;
     private TabletPage pressedHardware, pressedDisplayPage;
@@ -17,8 +18,13 @@ final class TabletPageShell {
     }
 
     TabletPage selected() { return selected; }
-    void acceptSnapshot(PreparationSnapshot snapshot) { preparation.accept(snapshot); }
-    void tick() { preparation.tick(); }
+    void acceptSnapshot(PreparationSnapshot snapshot) {
+        if (preparation.accept(snapshot)) {
+            profile.confirmCurrentSession();
+            profile.tick(preparation);
+        }
+    }
+    void tick() { preparation.tick(); profile.tick(preparation); }
 
     void interactive(boolean value) {
         if (open != value) { open = value; cancelPress(); dirty = true; }
@@ -71,12 +77,19 @@ final class TabletPageShell {
         if (open && selected == TabletPage.PREPARATION) preparation.scroll(TabletDisplayProjection.pick(x, y).display(), delta);
     }
 
-    boolean dirty() { return dirty || selected == TabletPage.PREPARATION && preparation.dirty(); }
-    void rendered() { dirty = false; if (selected == TabletPage.PREPARATION) preparation.rendered(); }
+    boolean dirty() {
+        return dirty || selected == TabletPage.PREPARATION && preparation.dirty()
+                || selected == TabletPage.PROFILE && profile.dirty();
+    }
+    void rendered() {
+        dirty = false;
+        if (selected == TabletPage.PREPARATION) preparation.rendered();
+        if (selected == TabletPage.PROFILE) profile.rendered();
+    }
     void render(GuiGraphics graphics) {
         switch (selected) {
             case PREPARATION -> TabletPreparationView.render(graphics, preparation);
-            case PROFILE -> TabletPlaceholderViews.profile(graphics, height);
+            case PROFILE -> TabletProfileView.render(graphics, profile, height);
             case CONTRACT_TRACKER -> TabletPlaceholderViews.contractTracker(graphics, height);
         }
     }

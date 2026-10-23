@@ -77,7 +77,7 @@ public final class IntegrationChecks {
 
         results.add(new Result(
                 "слоты выбора команды",
-                TeamId.standardValues().length == 4 && TeamId.clanWarValues().length >= 8 && MatchPhase.TEAM_SELECT != null,
+                TeamId.standardValues().length == 4 && MatchPhase.TEAM_SELECT != null,
                 "команды=Alfa/Beta/Gamma/Delta"
         ));
 
