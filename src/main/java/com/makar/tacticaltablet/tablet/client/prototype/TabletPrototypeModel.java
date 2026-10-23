@@ -26,6 +26,9 @@ public final class TabletPrototypeModel extends SimplePreparableReloadListener<T
         }
     }
     public record Vertex(float x, float y, float z, float u, float v, float nx, float ny, float nz) { }
+    public record DisplaySurface(List<Vec> corners, Vec normal, float width, float height) {
+        public DisplaySurface { corners = List.copyOf(corners); }
+    }
     public record Key(double time, Vec value) { }
     public record Clip(double length, List<Key> position, List<Key> rotation) {
         public Clip { position = List.copyOf(position); rotation = List.copyOf(rotation); }
@@ -38,8 +41,9 @@ public final class TabletPrototypeModel extends SimplePreparableReloadListener<T
             return keys.get(keys.size() - 1).value;
         }
     }
-    public record Model(ResourceLocation texture, Vec rootRotation, List<Vertex> vertices, Clip draw, Clip holster) {
-        public Model { vertices = List.copyOf(vertices); }
+    public record Model(ResourceLocation texture, Vec rootRotation, List<Vertex> vertices, Clip draw, Clip holster,
+                        DisplaySurface display, List<Vertex> staticDisplay) {
+        public Model { vertices = List.copyOf(vertices); staticDisplay = List.copyOf(staticDisplay); }
         public Clip clip(String name) { return "holster".equals(name) ? holster : draw; }
     }
     public Model model() { return model; }
@@ -49,20 +53,43 @@ public final class TabletPrototypeModel extends SimplePreparableReloadListener<T
             JsonObject json = JsonParser.parseReader(reader).getAsJsonObject();
             if (json.get("format").getAsInt() != 1) throw new IllegalArgumentException("Unsupported TT01 resource format");
             List<Vertex> vertices = new ArrayList<>();
+            List<Vertex> staticDisplay = new ArrayList<>();
+            JsonObject surface = json.getAsJsonObject("displaySurface");
+            String displayCube = surface.get("cube").getAsString();
+            int firstDisplayVertex = surface.get("firstVertex").getAsInt();
             for (var cube : json.getAsJsonArray("cubes")) {
-                for (var element : cube.getAsJsonObject().getAsJsonArray("vertices")) {
+                JsonObject part = cube.getAsJsonObject();
+                int vertexIndex = 0;
+                for (var element : part.getAsJsonArray("vertices")) {
+                    int index = vertexIndex++;
+                    // The dynamic quad replaces this face; never draw the TACTICAL atlas tile underneath it.
+                    boolean displayFace = part.get("id").getAsString().equals(displayCube)
+                            && index >= firstDisplayVertex && index < firstDisplayVertex + 4;
                     JsonArray v = element.getAsJsonArray();
                     if (v.size() != 8) throw new IllegalArgumentException("Malformed TT01 vertex");
-                    vertices.add(new Vertex(number(v,0), number(v,1), number(v,2), number(v,3),
+                    (displayFace ? staticDisplay : vertices).add(new Vertex(number(v,0), number(v,1), number(v,2), number(v,3),
                             number(v,4), number(v,5), number(v,6), number(v,7)));
                 }
             }
-            if (vertices.isEmpty() || vertices.size() % 4 != 0) throw new IllegalArgumentException("Empty/incomplete TT01 geometry");
+            if (vertices.isEmpty() || vertices.size() % 4 != 0 || staticDisplay.size() != 4)
+                throw new IllegalArgumentException("Empty/incomplete TT01 geometry or display face");
             JsonObject animations = json.getAsJsonObject("animations");
             Clip draw = clip(animations.getAsJsonObject("draw")), holster = clip(animations.getAsJsonObject("holster"));
             if (draw.length != 0.65 || holster.length != 0.45) throw new IllegalArgumentException("Unexpected TT01 durations");
+            List<Vec> corners = new ArrayList<>();
+            Vec normal = vec(surface.getAsJsonArray("normal"), 0);
+            for (var corner : surface.getAsJsonArray("corners")) {
+                Vec point = vec(corner.getAsJsonArray(), 0);
+                // A small outward offset prevents coplanar contact with the glass rim.
+                corners.add(new Vec(point.x + normal.x * 0.0001F, point.y + normal.y * 0.0001F,
+                        point.z + normal.z * 0.0001F));
+            }
+            if (corners.size() != 4) throw new IllegalArgumentException("Display requires four ordered corners");
+            float width = distance(corners.get(0), corners.get(3)), height = distance(corners.get(0), corners.get(1));
+            if (width <= 0 || height <= 0) throw new IllegalArgumentException("Degenerate display");
             return new Model(new ResourceLocation(json.get("texture").getAsString()),
-                    vec(json.getAsJsonArray("rootRotation"), 0), vertices, draw, holster);
+                    vec(json.getAsJsonArray("rootRotation"), 0), vertices, draw, holster,
+                    new DisplaySurface(corners, normal, width, height), staticDisplay);
         } catch (Exception exception) {
             throw new IllegalStateException("Cannot prepare tablet prototype " + RESOURCE, exception);
         }
@@ -71,6 +98,10 @@ public final class TabletPrototypeModel extends SimplePreparableReloadListener<T
     private static Clip clip(JsonObject json) {
         double length = json.get("length").getAsDouble();
         return new Clip(length, keys(json.getAsJsonArray("position"), length), keys(json.getAsJsonArray("rotation"), length));
+    }
+    private static float distance(Vec a, Vec b) {
+        float x = b.x - a.x, y = b.y - a.y, z = b.z - a.z;
+        return (float) Math.sqrt(x * x + y * y + z * z);
     }
     private static List<Key> keys(JsonArray array, double length) {
         List<Key> result = new ArrayList<>();
@@ -97,6 +128,8 @@ public final class TabletPrototypeModel extends SimplePreparableReloadListener<T
     }
     @Override protected void apply(Model prepared, ResourceManager resources, ProfilerFiller profiler) {
         model = prepared;
+        TabletDisplayTarget.release();
+        TabletTerminalTheme.reload(resources);
         TabletPrototypeClient.reset();
         TacticalTabletMod.LOGGER.info("Prepared TT01 tablet prototype: {} vertices", prepared.vertices.size());
     }

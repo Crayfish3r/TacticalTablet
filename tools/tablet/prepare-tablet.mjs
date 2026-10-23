@@ -58,6 +58,7 @@ export function compile(source) {
   if (m.outliner.length !== 1 || m.outliner[0].name !== 'tablet_root') fail('Expected single tablet_root');
   const rootGroup = m.outliner[0], rootOrigin = vector(rootGroup.origin);
   const groups = [], cubes = [], visited = new Set();
+  let displaySurface;
   function walk(group, parents = []) {
     if (!group.export || !group.visibility) fail('Hidden groups are unsupported in TT01');
     const origin = vector(group.origin), rotation = vector(group.rotation ?? [0,0,0]);
@@ -89,6 +90,12 @@ export function compile(source) {
         const turns = (face.rotation ?? 0) / 90;
         if (!Number.isInteger(turns) || turns < 0 || turns > 3) fail('Unsupported UV rotation');
         const uv = [[u,v], [u,V], [U,V], [U,v]];
+        if (group.name === 'display_surface' && cube.name === 'screen_glass' && direction === 'north') {
+          if (displaySurface) fail('Duplicate display surface');
+          // TL, BL, BR, TR in the same root-relative basis as the body, before animation.
+          displaySurface = {cube: child, firstVertex: vertices.length,
+            corners: corners.map(p => transform(p)), normal: transform(normal, true)};
+        }
         corners.forEach((p, i) => {
           const tex = uv[(i + turns) % 4];
           vertices.push([...transform(p), tex[0] / width, tex[1] / height, ...transform(normal, true)]);
@@ -98,6 +105,7 @@ export function compile(source) {
     }
   }
   walk(rootGroup);
+  if (!displaySurface) fail('Missing display_surface/screen_glass north face');
   if (visited.size !== elements.size || !groups.some(g => g.name === 'display_surface')) fail('Incomplete hierarchy/display');
   const animations = {};
   for (const a of m.animations) {
@@ -123,7 +131,7 @@ export function compile(source) {
   if (animations.draw?.length !== 0.65 || animations.holster?.length !== 0.45) fail('Expected draw=0.65 and holster=0.45 seconds');
   const data = {format: 1, sourceSha256: createHash('sha256').update(source).digest('hex'),
     texture: 'tacticaltablet:textures/item/tablet_tt01.png', width, height,
-    rootRotation: vector(rootGroup.rotation), groups, cubes, animations};
+    rootRotation: vector(rootGroup.rotation), groups, cubes, displaySurface, animations};
   return {json: JSON.stringify(data) + '\n', texture};
 }
 

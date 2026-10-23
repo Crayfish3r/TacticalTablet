@@ -41,7 +41,7 @@ public final class TabletPrototypeClient {
         if (mc.screen != null || !mc.player.isAlive() || DeathScreenOverlay.isActive()) return;
         if (!MOTION.active()) {
             hand = candidate;
-            held = mc.player.getItemInHand(hand);
+            held = mc.player.getItemInHand(hand).copy();
             selectedSlot = mc.player.getInventory().selected;
             level = mc.level;
         }
@@ -51,12 +51,14 @@ public final class TabletPrototypeClient {
 
     static void pressUse() { MOTION.pressUse(now()); }
     static void close() { MOTION.requestClose(now()); }
+    static boolean isOpen() { return MOTION.state() == TabletAnimationController.State.OPEN; }
 
     private static boolean tablet(ItemStack stack) { return stack.getItem() instanceof TacticalTabletItem; }
     private static boolean valid(Minecraft mc) {
         return mc.level != null && mc.level == level
                 && mc.player != null && mc.player.isAlive() && !DeathScreenOverlay.isActive()
-                && hand != null && mc.player.getItemInHand(hand) == held && tablet(held)
+                && hand != null && ItemStack.isSameItem(mc.player.getItemInHand(hand), held)
+                && tablet(mc.player.getItemInHand(hand))
                 && (hand != InteractionHand.MAIN_HAND || mc.player.getInventory().selected == selectedSlot);
     }
 
@@ -109,12 +111,14 @@ public final class TabletPrototypeClient {
     @SubscribeEvent public static void opening(ScreenEvent.Opening event) {
         screenOpening(event.getNewScreen());
     }
-    @SubscribeEvent public static void logout(ClientPlayerNetworkEvent.LoggingOut event) { reset(); }
+    @SubscribeEvent public static void logout(ClientPlayerNetworkEvent.LoggingOut event) { reset(); TabletDisplayTarget.release(); }
+    @SubscribeEvent public static void shutdown(net.minecraftforge.event.GameShuttingDownEvent event) { TabletDisplayTarget.release(); }
     static void resetState() {
         MOTION.reset();
         hand = null;
         held = ItemStack.EMPTY;
         level = null;
+        TabletDisplayProjection.clear();
     }
     public static void reset() {
         resetState();

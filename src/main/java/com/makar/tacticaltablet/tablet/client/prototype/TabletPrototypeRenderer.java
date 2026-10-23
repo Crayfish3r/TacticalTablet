@@ -152,6 +152,13 @@ public final class TabletPrototypeRenderer extends BlockEntityWithoutLevelRender
         }
         float radians = (float) (Math.PI / 180);
         pose.mulPose(new Quaternionf().rotationZYX(rotation.z() * radians, rotation.y() * radians, rotation.x() * radians));
+        TabletPreparationPage page = animation != null && Minecraft.getInstance().screen instanceof TabletPrototypeScreen screen
+                ? screen.page() : null;
+        if (page != null) {
+            page.interactive(TabletPrototypeClient.isOpen());
+            TabletDisplayTarget.update(page, model.display(), buffers);
+            TabletDisplayProjection.capture(pose.last().pose(), model.display());
+        }
         VertexConsumer consumer = buffers.getBuffer(RenderType.entityCutoutNoCull(model.texture()));
         PoseStack.Pose transform = pose.last();
         for (TabletPrototypeModel.Vertex v : model.vertices()) {
@@ -159,5 +166,12 @@ public final class TabletPrototypeRenderer extends BlockEntityWithoutLevelRender
                     .uv(v.u(), v.v()).overlayCoords(overlay).uv2(light)
                     .normal(transform.normal(), v.nx(), v.ny(), v.nz()).endVertex();
         }
+        if (animation == null) {
+            for (TabletPrototypeModel.Vertex v : model.staticDisplay()) {
+                consumer.vertex(transform.pose(), v.x(), v.y(), v.z()).color(255,255,255,255)
+                        .uv(v.u(), v.v()).overlayCoords(overlay).uv2(light)
+                        .normal(transform.normal(), v.nx(), v.ny(), v.nz()).endVertex();
+            }
+        } else if (page != null) TabletDisplayTarget.draw(transform.pose(), model.display(), buffers);
     }
 }

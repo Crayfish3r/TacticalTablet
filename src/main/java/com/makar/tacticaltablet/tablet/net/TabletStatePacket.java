@@ -13,6 +13,12 @@ import java.util.Set;
 import java.util.function.Supplier;
 
 public class TabletStatePacket {
+    private com.makar.tacticaltablet.tablet.preparation.PreparationSnapshot preparation;
+
+    public TabletStatePacket withPreparation(com.makar.tacticaltablet.tablet.preparation.PreparationSnapshot snapshot) {
+        preparation = snapshot;
+        return this;
+    }
 
     private static final int MAX_COOLDOWNS = 32;
     private static final int MAX_CLASS_ENTRIES = 64;
@@ -311,6 +317,7 @@ public class TabletStatePacket {
         }
         this.competitiveSet = buf.readBoolean();
         this.clanWarSet = buf.readBoolean();
+        if (buf.readableBytes() > 0) preparation = com.makar.tacticaltablet.tablet.preparation.PreparationSnapshot.read(buf);
     }
 
     public void encode(FriendlyByteBuf buf) {
@@ -390,6 +397,7 @@ public class TabletStatePacket {
         }
         buf.writeBoolean(competitiveSet);
         buf.writeBoolean(clanWarSet);
+        if (preparation != null) preparation.write(buf);
     }
 
     public void handle(Supplier<NetworkEvent.Context> ctx) {
@@ -426,6 +434,10 @@ public class TabletStatePacket {
             );
             TabletClientState.updateCompetitiveSet(competitiveSet);
             TabletClientState.updateClanWarSet(clanWarSet);
+            if (preparation != null) {
+                net.minecraftforge.fml.DistExecutor.unsafeRunWhenOn(net.minecraftforge.api.distmarker.Dist.CLIENT,
+                        () -> () -> com.makar.tacticaltablet.tablet.client.prototype.TabletPreparationPage.acceptSnapshot(preparation));
+            }
 
             if (kitUsed && rtpUsed && hadKitUsed && !hadRtpUsed) {
                 TabletClientState.requestClose();

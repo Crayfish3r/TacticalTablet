@@ -28,6 +28,7 @@ import java.util.function.Supplier;
 
 /** Tactical Tablet protocol registry. */
 public final class PacketHandler {
+    // Preparation uses optional tails on existing packets; legacy payloads and IDs remain unchanged.
     public static final String VERSION = "44";
 
     public static final int TABLET = 0, TABLET_STATE = 1, VOTE_MODE = 2, JOIN_TEAM = 3, VOTE_MAP = 4,
@@ -41,7 +42,7 @@ public final class PacketHandler {
             TABLET_MATCH_SETUP_STATE = 31, CONTRACT_SELECTION_TIMER = 32, SPECTATOR_HUD_STATE = 33,
             MDC_BALANCE_REQUEST = 34, MDC_BALANCE_STATE = 35, MDC_BALANCE_UPDATE = 36,
             CASINO_OPEN_STATE = 37, CASINO_SPIN_REQUEST = 38, CASINO_SPIN_RESULT = 39,
-            CASINO_CLOSE = 40, CASINO_SPECTATOR_OPEN = 41, CASINO_ANIMATION = 42,
+        CASINO_CLOSE = 40, CASINO_SPECTATOR_OPEN = 41, CASINO_ANIMATION = 42,
             COSMETIC_PURCHASE = 43;
 
     public static final SimpleChannel INSTANCE = NetworkRegistry.newSimpleChannel(
@@ -55,7 +56,7 @@ public final class PacketHandler {
         TABLET(3, 2_000_000_000L), VOTE(6, 1_000_000_000L), CLAN_MUTATION(4, 2_000_000_000L),
         CONTRACT_SELECT(3, 2_000_000_000L), TRACKER(8, 1_000_000_000L),
         SPECTATOR(8, 1_000_000_000L), ADMIN_MAP(3, 2_000_000_000L),
-        ADMIN_MDC(3, 2_000_000_000L), CASINO(6, 2_000_000_000L);
+        ADMIN_MDC(3, 2_000_000_000L), CASINO(6, 2_000_000_000L), TABLET_SNAPSHOT(4, 2_000_000_000L);
         private final C2SRateLimiter.Budget budget;
         C2SAction(int count, long windowNanos) { this.budget = new C2SRateLimiter.Budget(count, windowNanos); }
     }
