@@ -16,6 +16,17 @@ class KillFeedClientStateTest {
     }
 
     @Test
+    void npcUuidWithoutPlayerInfoRendersNamedEntryAndDeduplicates() {
+        UUID npc = UUID.randomUUID();
+        var packet = packet(npc, "Killer", "Bandit", 42, 3, 4);
+        KillFeedClientState.handle(packet);
+        KillFeedClientState.handle(packet);
+        assertEquals(1, KillFeedClientState.entries().size());
+        assertEquals("Bandit", KillFeedClientState.entries().get(0).packet().victimName());
+        assertEquals("+3 coins   +4 XP", KillFeedOverlay.rewardText(packet));
+    }
+
+    @Test
     void keepsAtMostFiveEntriesForFiveSecondsAndFades() {
         for (int i = 0; i < 6; i++) {
             KillFeedClientState.handle(packet(UUID.randomUUID(), "K" + i, "V" + i, i, 0, 0));

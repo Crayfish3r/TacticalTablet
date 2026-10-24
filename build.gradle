@@ -240,6 +240,7 @@ tasks.register('verifyProcessedModsToml') {
 
 tasks.named('jar', Jar).configure {
     exclude 'com/makar/tacticaltablet/game/npc/NpcEncounterSmoke*'
+    exclude 'com/makar/tacticaltablet/game/npc/NpcKillRewardSmoke*'
     manifest {
         attributes([
             "Specification-Title"     : mod_id,

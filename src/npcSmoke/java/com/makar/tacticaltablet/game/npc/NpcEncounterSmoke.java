@@ -16,6 +16,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.storage.LevelResource;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.common.util.FakePlayer;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -30,7 +31,7 @@ import java.util.UUID;
 public final class NpcEncounterSmoke {
     private static int ticks;
     private static int stage;
-    private static FakePlayer player;
+    private static ServerPlayer player;
     private static NpcIntegration api;
     private static UUID match;
     private static UUID unrelated;
@@ -58,6 +59,7 @@ public final class NpcEncounterSmoke {
                 check(api != null, "TacticalNPC API missing");
                 var level = server.overworld();
                 if ("restart".equals(System.getProperty("tacticaltablet.npcProbe"))) {
+                    NpcKillRewardSmoke.verifyRestart(server);
                     var saved = com.google.gson.JsonParser.parseString(Files.readString(
                             server.getWorldPath(LevelResource.ROOT).resolve("npc-probe-orphan.json"))).getAsJsonObject();
                     orphanMatch = UUID.fromString(saved.get("match").getAsString());
@@ -79,15 +81,14 @@ public final class NpcEncounterSmoke {
                 config.maxSpawnAttempts = 64;
                 write(server, "tacticaltablet_npcs.json", new GsonBuilder().setPrettyPrinting().create().toJson(config));
                 write(server, "tacticaltablet_zone.json", "{\"zoneCenterX\":0,\"zoneCenterZ\":0,\"zoneRandomRadius\":0}");
-                player = new FakePlayer(level, new GameProfile(UUID.randomUUID(), "NpcProbe")) {
+                player = new ServerPlayer(server, level, new GameProfile(UUID.randomUUID(), "NpcProbe")) {
                     @Override public boolean hasDisconnected() { return false; }
                 };
-                var fakeConnection = player.connection;
+                var probeConnection = new net.minecraft.network.Connection(net.minecraft.network.protocol.PacketFlow.SERVERBOUND);
                 // Vanilla PlayerList admission requires an actual channel even for FakePlayer.
                 // Embedded transport stays inside the fixture and sends no network traffic.
-                new io.netty.channel.embedded.EmbeddedChannel(fakeConnection.connection);
-                server.getPlayerList().placeNewPlayer(fakeConnection.connection, player);
-                player.connection = fakeConnection;
+                new io.netty.channel.embedded.EmbeddedChannel(probeConnection);
+                server.getPlayerList().placeNewPlayer(probeConnection, player);
                 player.setGameMode(GameType.SURVIVAL);
                 player.getAbilities().invulnerable = true;
                 TestModeManager.setSoloStartEnabled(true);
@@ -142,13 +143,15 @@ public final class NpcEncounterSmoke {
                         new NpcLoadoutSelector.Selection(p, List.of("tacticaltablet:intentionally_missing_probe_weapon")));
                 check(!invalid.success() && invalid.invalidWeapon() && invalid.ids().isEmpty(), "Invalid weapon did not fail atomically");
                 var defeated = (net.minecraft.world.entity.LivingEntity) server.overworld().getEntity(npcs.get(1));
-                defeated.hurt(server.overworld().damageSources().genericKill(), Float.MAX_VALUE);
+                NpcKillRewardSmoke.verify(server, player, defeated, npc,
+                        (net.minecraft.world.entity.LivingEntity) server.overworld().getEntity(unrelatedNpc));
                 check(GameStateManager.getLifecycleSnapshot().state() == MatchState.RUNNING, "NPC death ended the player match");
                 check(LivesManager.getAlivePlayerCount(server) == alive, "NPC death changed player lives");
                 GameStateManager.endGame(server, (net.minecraft.server.level.ServerPlayer) null);
                 check(GameStateManager.getLifecycleSnapshot().state() == MatchState.ENDING, "Natural end did not reach ENDING");
                 check(!api.activeIds(match).isEmpty(), "NPCs should still exist before delayed cleanup");
                 check(blocked(player, npc), "ENDING did not immediately revoke NPC damage");
+                NpcKillRewardSmoke.verifyEnding(player, npc);
                 GameStateManager.forceStopMatch(server);
                 check(api.activeIds(match).isEmpty(), "TT cleanup retained current-match NPCs");
                 check(api.activeIds(unrelated).contains(unrelatedNpc), "TT cleanup removed another match's NPC");

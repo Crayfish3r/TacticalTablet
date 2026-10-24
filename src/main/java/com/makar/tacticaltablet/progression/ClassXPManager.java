@@ -76,6 +76,14 @@ public class ClassXPManager {
         return awarded;
     }
 
+    /** Base rewards (NPCs): same eligibility/caps, no XP Boost and no immediate packet. */
+    public static int addBaseXPDeferredSync(ServerPlayer player, String clazz, int amount) {
+        if (player == null || clazz == null || clazz.isBlank() || amount <= 0) return 0;
+        if (MapSetManager.isChaosSet()) return 0;
+        if (PlayerProgressManager.isShopClass(clazz)) return 0;
+        return PlayerProgressManager.addXP(player, clazz, amount);
+    }
+
     public static void addXPToAllClasses(ServerPlayer player, int amount) {
         if (player == null || amount <= 0) return;
         if (MapSetManager.isChaosSet()) return;

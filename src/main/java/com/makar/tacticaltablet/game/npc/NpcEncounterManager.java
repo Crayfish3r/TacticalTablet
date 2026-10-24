@@ -15,6 +15,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.storage.LevelResource;
 import net.minecraft.world.phys.Vec3;
@@ -36,6 +37,7 @@ public final class NpcEncounterManager {
     private final NpcEncounterConfig config;
     private final ResourceKey<Level> dimension;
     private final NpcEncounterSchedule schedule = new NpcEncounterSchedule();
+    private final NpcDeathClaims deathClaims = new NpcDeathClaims();
     private final Random random = new Random();
     private final NpcLoadoutSelector selector = new NpcLoadoutSelector();
     private final NpcPlacementPlanner planner = new NpcPlacementPlanner();
@@ -49,6 +51,7 @@ public final class NpcEncounterManager {
             // No API/entity access to a previous server instance. TacticalNPC recovery closes
             // persisted ownership; callbacks are never restored or transferred to a new server.
             current.schedule.deactivate();
+            current.deathClaims.clear();
             current = null;
         }
     }
@@ -107,6 +110,30 @@ public final class NpcEncounterManager {
                 combatRunning(), LivesManager.isBoundToCurrentMatch(p), LivesManager.isAliveParticipant(p),
                 p.isAlive() && !p.isDeadOrDying() && !p.hasDisconnected(), p.level().dimension().equals(dimension) && !GameStateManager.isInLobby(p),
                 p.isSpectator(), p.isCreative(), ModerModeManager.isInModerMode(p), p.getTags().contains("war.playing"));
+    }
+
+    /** O(1) ownership check, using only the already-connected optional adapter. */
+    static NpcIntegration.DeathIdentity rewardIdentity(LivingEntity victim) {
+        var m = current;
+        if (m == null || victim.getServer() != m.server || !m.schedule.owns(victim.getUUID())) return null;
+        requireThread(m.server);
+        if (!m.combatRunning() || !victim.level().dimension().equals(m.dimension)
+                || !victim.level().getWorldBorder().isWithinBounds(victim.getBoundingBox())) return null;
+        var identity = m.integration.deathIdentity(victim);
+        return identity != null && m.schedule.matchId().equals(identity.ownerMatchId()) ? identity : null;
+    }
+
+    static boolean canReward(ServerPlayer killer, LivingEntity victim) {
+        var m = current;
+        return m != null && m.canAttack(killer) && m.server.getPlayerList().getPlayer(killer.getUUID()) == killer
+                && killer.level() == victim.level()
+                && killer.level().getWorldBorder().isWithinBounds(killer.getBoundingBox());
+    }
+
+    static boolean claimDeath(UUID matchId, UUID victimId) {
+        var m = current;
+        return m != null && m.combatRunning() && m.schedule.matchId().equals(matchId)
+                && m.deathClaims.claim(matchId, victimId);
     }
 
     public static void tick(MinecraftServer server) {
@@ -173,6 +200,7 @@ public final class NpcEncounterManager {
         if (m.stopped) return;
         m.stopped = true;
         m.schedule.deactivate(); // Callback closes first, even if the optional API fails.
+        m.deathClaims.clear();
         try {
             m.integration.deactivate(m.schedule.matchId());
             TacticalTabletMod.LOGGER.info("NPC encounters deactivated matchId={}", m.schedule.matchId());
@@ -187,6 +215,7 @@ public final class NpcEncounterManager {
         var m = current;
         if (m == null || m.server != server) return;
         m.schedule.deactivate();
+        m.deathClaims.clear();
         try {
             int removed = m.integration.remove(m.schedule.matchId());
             TacticalTabletMod.LOGGER.info("NPC cleanup matchId={} removed={}", m.schedule.matchId(), removed);

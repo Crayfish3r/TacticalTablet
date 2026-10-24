@@ -12,6 +12,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.entity.LivingEntity;
 
 import java.util.List;
 import java.util.UUID;
@@ -21,6 +22,12 @@ final class TacticalNpcV020Integration implements NpcIntegration {
     private final TacticalNpcMatchApi api;
 
     TacticalNpcV020Integration(MinecraftServer server) { api = TacticalNpcMatchApi.get(server); }
+
+    @Override public DeathIdentity deathIdentity(LivingEntity victim) {
+        if (!(victim instanceof TacticalNpcEntity npc) || npc.ownerMatchId() == null
+                || npc.groupId() == null || npc.isRemoved() || !npc.isAddedToWorld()) return null;
+        return new DeathIdentity(npc.ownerMatchId(), npc.npcName());
+    }
 
     @Override public void register(UUID matchId, Policy policy) {
         api.registerPolicy(matchId, new MatchNpcPolicy() {

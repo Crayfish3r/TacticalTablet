@@ -5,6 +5,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraftforge.fml.ModList;
 
 import java.util.List;
@@ -19,6 +20,10 @@ public interface NpcIntegration {
         boolean active();
         boolean canAttack(ServerPlayer player);
     }
+    record DeathIdentity(UUID ownerMatchId, String name) { }
+
+    /** Null for ordinary mobs, unowned NPCs and entities already being removed. */
+    DeathIdentity deathIdentity(LivingEntity victim);
     record Result(boolean success, boolean invalidWeapon, List<UUID> ids, String diagnostic) {
         public Result { ids = List.copyOf(ids); }
     }
