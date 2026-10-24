@@ -225,6 +225,12 @@ public final class TabletPreparationPage {
         } else confirmation = id;
     }
     void cancelPress() { if (pressed != -1) { pressed = -1; dirty = true; } }
+    void dismissConfirmation() {
+        confirmation = -1;
+        cancelPress(); hover = -1; dirty = true;
+        // Requests already sent keep their nonce, timeout and response processing across phase changes.
+    }
+    void refreshWhenIdle() { if (!awaiting) nextPoll = 0; }
     void scroll(TabletDisplayProjection.Point point, double delta) {
         if (point == null || confirmation >= 0 || !list.contains(point.x(), point.y())) return;
         int next = Math.max(0, Math.min(Math.max(0, rows.length - capacity), offset - (int) Math.signum(delta)));

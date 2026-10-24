@@ -593,8 +593,12 @@ public final class MapSetManager {
     }
 
     public static synchronized void sync(ServerPlayer player, boolean openScreen) {
+        sync(player, openScreen, 0);
+    }
+
+    public static synchronized void sync(ServerPlayer player, boolean openScreen, long snapshotRequestId) {
         if (player == null) return;
-        PacketHandler.sendToPlayer(player, createStatePacket(player, openScreen));
+        PacketHandler.sendToPlayer(player, createStatePacket(player, openScreen).withSnapshotRequestId(snapshotRequestId));
     }
 
     public static synchronized boolean isVoting() {

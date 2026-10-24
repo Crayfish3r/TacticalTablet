@@ -12,7 +12,7 @@ import net.minecraftforge.client.event.InputEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
-/** Tablet input now has one owner; match snapshots never open a functional GUI. */
+/** Tablet input has one owner; server voting requests use the same 3D controller. */
 @Mod.EventBusSubscriber(modid = TacticalTabletMod.MODID, value = Dist.CLIENT)
 public class ClientEvents {
     @SubscribeEvent
@@ -21,7 +21,15 @@ public class ClientEvents {
     }
 
     @SubscribeEvent
+    public static void onClientLogin(ClientPlayerNetworkEvent.LoggingIn event) {
+        TabletClientState.clearMatchSetup();
+        MapVoteClientState.clear();
+    }
+
+    @SubscribeEvent
     public static void onClientLogout(ClientPlayerNetworkEvent.LoggingOut event) {
+        TabletClientState.clearMatchSetup();
+        MapVoteClientState.clear();
         ChaosClientState.clear();
         PrefixClientState.clear();
         SpectatorCameraClientState.clear();

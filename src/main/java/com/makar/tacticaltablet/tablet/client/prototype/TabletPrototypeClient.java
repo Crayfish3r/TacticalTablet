@@ -3,6 +3,8 @@ package com.makar.tacticaltablet.tablet.client.prototype;
 import com.makar.tacticaltablet.client.DeathScreenOverlay;
 import com.makar.tacticaltablet.core.TacticalTabletMod;
 import com.makar.tacticaltablet.tablet.TacticalTabletItem;
+import com.makar.tacticaltablet.game.MatchPhase;
+import com.makar.tacticaltablet.tablet.client.TabletClientState;
 import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
@@ -26,6 +28,8 @@ public final class TabletPrototypeClient {
     private static ItemStack held = ItemStack.EMPTY;
     private static Object level;
     private static int selectedSlot;
+    private static MatchPhase lastPhase;
+    private static boolean mapOpenSeen, mapOpenPending;
 
     private TabletPrototypeClient() { }
     private static long now() { return System.nanoTime(); }
@@ -40,10 +44,7 @@ public final class TabletPrototypeClient {
         event.setSwingHand(false);
         if (mc.screen != null || !mc.player.isAlive() || DeathScreenOverlay.isActive()) return;
         if (!MOTION.active()) {
-            hand = candidate;
-            held = mc.player.getItemInHand(hand).copy();
-            selectedSlot = mc.player.getInventory().selected;
-            level = mc.level;
+            rememberHeldTablet(mc, candidate);
         }
         pressUse();
         if (MOTION.active() && !(mc.screen instanceof TabletPrototypeScreen)) mc.setScreen(new TabletPrototypeScreen());
@@ -52,6 +53,32 @@ public final class TabletPrototypeClient {
     static void pressUse() { MOTION.pressUse(now()); }
     static void close() { MOTION.requestClose(now()); }
     static boolean isOpen() { return MOTION.state() == TabletAnimationController.State.OPEN; }
+
+    private static void rememberHeldTablet(Minecraft mc, InteractionHand candidate) {
+        hand = candidate;
+        held = mc.player.getItemInHand(hand).copy();
+        selectedSlot = mc.player.getInventory().selected;
+        level = mc.level;
+    }
+
+    /** One server opening signal per map vote; ordinary state packets never navigate or reopen. */
+    public static void onMapVoteState(boolean active, boolean openScreen, long snapshotRequestId) {
+        if (!active) { mapOpenSeen = false; mapOpenPending = false; }
+        else if (openScreen && !mapOpenSeen) { mapOpenSeen = true; mapOpenPending = true; }
+        if (Minecraft.getInstance().screen instanceof TabletPrototypeScreen screen && screen.shell() != null)
+            screen.shell().acceptMapSnapshot(snapshotRequestId);
+    }
+
+    private static void openVotingOnce(Minecraft mc) {
+        if (MOTION.active() || mc.screen != null || mc.level == null || mc.player == null
+                || !mc.player.isAlive() || DeathScreenOverlay.isActive() || !mc.isWindowActive()) return;
+        InteractionHand candidate = tablet(mc.player.getMainHandItem()) ? InteractionHand.MAIN_HAND
+                : tablet(mc.player.getOffhandItem()) ? InteractionHand.OFF_HAND : null;
+        if (candidate == null) return;
+        rememberHeldTablet(mc, candidate);
+        pressUse();
+        if (MOTION.active()) mc.setScreen(new TabletPrototypeScreen());
+    }
 
     private static boolean tablet(ItemStack stack) { return stack.getItem() instanceof TacticalTabletItem; }
     private static boolean valid(Minecraft mc) {
@@ -70,6 +97,18 @@ public final class TabletPrototypeClient {
                 || !(mc.screen instanceof TabletPrototypeScreen))) reset();
         MOTION.update(now());
         if (!MOTION.active() && mc.screen instanceof TabletPrototypeScreen) mc.setScreen(null);
+        if (TabletClientState.hasMatchSetup()) {
+            MatchPhase phase = TabletClientState.getMatchPhase();
+            boolean formatStarted = phase == MatchPhase.VOTING && lastPhase != phase;
+            if (lastPhase == MatchPhase.MAP_VOTING && phase != lastPhase) {
+                mapOpenSeen = false; mapOpenPending = false;
+            }
+            lastPhase = phase;
+            if (formatStarted || mapOpenPending && phase == MatchPhase.MAP_VOTING) {
+                mapOpenPending = false;
+                openVotingOnce(mc); // Consumed even when another screen/held item prevents opening.
+            }
+        }
     }
 
     private static void releaseIfUp(Minecraft mc) {
@@ -111,7 +150,10 @@ public final class TabletPrototypeClient {
     @SubscribeEvent public static void opening(ScreenEvent.Opening event) {
         screenOpening(event.getNewScreen());
     }
-    @SubscribeEvent public static void logout(ClientPlayerNetworkEvent.LoggingOut event) { reset(); TabletDisplayTarget.release(); }
+    @SubscribeEvent public static void logout(ClientPlayerNetworkEvent.LoggingOut event) {
+        lastPhase = null; mapOpenSeen = false; mapOpenPending = false;
+        reset(); TabletDisplayTarget.release();
+    }
     @SubscribeEvent public static void shutdown(net.minecraftforge.event.GameShuttingDownEvent event) { TabletDisplayTarget.release(); }
     static void resetState() {
         MOTION.reset();

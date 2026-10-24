@@ -31,6 +31,13 @@ public final class MapVoteStatePacket {
     private final String selectedMap;
     private final List<String> maps;
     private final Map<String, Integer> voteCounts;
+    private long snapshotRequestId;
+
+    /** Optional correlation with the existing tablet snapshot request; ordinary broadcasts use zero. */
+    public MapVoteStatePacket withSnapshotRequestId(long requestId) {
+        snapshotRequestId = Math.max(0, requestId);
+        return this;
+    }
 
     public MapVoteStatePacket(
             boolean active,
@@ -95,6 +102,7 @@ public final class MapVoteStatePacket {
         }
         maps = List.copyOf(decodedMaps);
         voteCounts = Map.copyOf(decodedCounts);
+        snapshotRequestId = buf.readableBytes() > 0 ? buf.readVarLong() : 0;
     }
 
     public void encode(FriendlyByteBuf buf) {
@@ -116,11 +124,13 @@ public final class MapVoteStatePacket {
             buf.writeUtf(map, MAX_MAP_NAME_LENGTH);
             buf.writeInt(voteCounts.getOrDefault(map, 0));
         }
+        if (snapshotRequestId > 0) buf.writeVarLong(snapshotRequestId);
     }
 
     public void handle(Supplier<NetworkEvent.Context> contextSupplier) {
         NetworkEvent.Context context = contextSupplier.get();
-        context.enqueueWork(() -> MapVoteClientState.update(
+        context.enqueueWork(() -> {
+            MapVoteClientState.update(
                 active,
                 openScreen,
                 operator,
@@ -136,7 +146,11 @@ public final class MapVoteStatePacket {
                 selectedMap,
                 maps,
                 voteCounts
-        ));
+            );
+            net.minecraftforge.fml.DistExecutor.unsafeRunWhenOn(net.minecraftforge.api.distmarker.Dist.CLIENT,
+                    () -> () -> com.makar.tacticaltablet.tablet.client.prototype.TabletPrototypeClient
+                            .onMapVoteState(active, openScreen, snapshotRequestId));
+        });
         context.setPacketHandled(true);
     }
 

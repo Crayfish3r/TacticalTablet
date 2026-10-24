@@ -49,6 +49,8 @@ public final class TabletPreparationService {
         var snapshot = new PreparationSnapshot(requestId, rejected, denial, PlayerTabletState.getSelectedClass(player),
                 PlayerTabletState.isRtpUsed(player), pending, rtpReason(player), rows);
         PacketHandler.sendToPlayer(player, ClassXPManager.createStatePacket(player).withPreparation(snapshot));
+        // Same server-thread snapshot, same nonce, no second poll or synthetic vote from the client.
+        MapSetManager.sync(player, false, requestId);
     }
 
     private static String admission(ServerPlayer player) {

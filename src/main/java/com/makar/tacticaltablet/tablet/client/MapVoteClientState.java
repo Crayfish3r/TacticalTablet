@@ -23,6 +23,8 @@ public final class MapVoteClientState {
     private static String selectedMap = "";
     private static List<String> maps = List.of();
     private static Map<String, Integer> voteCounts = Map.of();
+    private static long revision;
+    private static long roundRevision;
 
     private MapVoteClientState() {
     }
@@ -44,12 +46,13 @@ public final class MapVoteClientState {
             List<String> mapPool,
             Map<String, Integer> counts
     ) {
+        if (voteActive != active) roundRevision++;
         active = voteActive;
         operator = isOperator;
         nextSetCompetitive = competitive;
         nextSetClanWar = false;
         ordinaryModesEnabled = modesEnabled;
-        availableModesMask = modesMask | (1 << SetGameMode.CASUAL.ordinal());
+        availableModesMask = modesMask;
         chaosCooldownRemaining = Math.max(0, chaosCooldown);
         consecutiveCompetitiveSets = Math.max(0, competitiveStreak);
         selectedMode = mode;
@@ -58,12 +61,22 @@ public final class MapVoteClientState {
         selectedMap = selected == null ? "" : selected;
         maps = mapPool == null ? List.of() : List.copyOf(mapPool);
         voteCounts = counts == null ? Map.of() : Map.copyOf(new LinkedHashMap<>(counts));
+        revision++;
 
         // Keep the packet/state contract; the archived GUI no longer owns presentation.
     }
 
     public static boolean isActive() {
         return active;
+    }
+
+    public static long getRevision() { return revision; }
+    public static long getRoundRevision() { return roundRevision; }
+
+    public static void clear() {
+        update(false, false, false, false, false, false, 0, 0, 0,
+                null, Map.of(), 0, "", List.of(), Map.of());
+        roundRevision++;
     }
 
     public static int getSecondsLeft() {
