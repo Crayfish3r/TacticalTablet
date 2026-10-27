@@ -990,9 +990,6 @@ public class GameStateManager {
     private static void showWinnerTitle(MinecraftServer server, String winnerName, TeamId winnerTeam) {
         if (MapSetManager.isArenaSet() && ArenaMatchRuntime.leaders().size() > 1) {
             for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-                player.connection.send(new ClientboundSetTitlesAnimationPacket(10, 100, 20));
-                player.connection.send(new ClientboundSetTitleTextPacket(Component.literal("НИЧЬЯ")));
-                player.connection.send(new ClientboundSetSubtitleTextPacket(Component.literal(winnerName)));
                 player.sendSystemMessage(Component.literal("[WAR] " + winnerName));
             }
             return;
@@ -1015,9 +1012,11 @@ public class GameStateManager {
         }
 
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-            player.connection.send(new ClientboundSetTitlesAnimationPacket(10, 100, 20));
-            player.connection.send(new ClientboundSetTitleTextPacket(title));
-            player.connection.send(new ClientboundSetSubtitleTextPacket(subtitle));
+            if (!MapSetManager.isArenaSet()) {
+                player.connection.send(new ClientboundSetTitlesAnimationPacket(10, 100, 20));
+                player.connection.send(new ClientboundSetTitleTextPacket(title));
+                player.connection.send(new ClientboundSetSubtitleTextPacket(subtitle));
+            }
             player.sendSystemMessage(chat);
         }
     }
@@ -1076,9 +1075,11 @@ public class GameStateManager {
             Component title = SetRewardPresentation.title(summary);
             Component subtitle = SetRewardPresentation.subtitle(summary);
             for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-                player.connection.send(new ClientboundSetTitlesAnimationPacket(10, 280, 10));
-                player.connection.send(new ClientboundSetTitleTextPacket(title));
-                player.connection.send(new ClientboundSetSubtitleTextPacket(subtitle));
+                if (!MapSetManager.isArenaSet()) {
+                    player.connection.send(new ClientboundSetTitlesAnimationPacket(10, 280, 10));
+                    player.connection.send(new ClientboundSetTitleTextPacket(title));
+                    player.connection.send(new ClientboundSetSubtitleTextPacket(subtitle));
+                }
                 for (Component line : SetRewardPresentation.chat(
                         summary, SetRewardService.successfullyPersistedPlaces(payouts))) {
                     player.sendSystemMessage(line);
@@ -1115,6 +1116,7 @@ public class GameStateManager {
 
     public static void showCurrentSetRewardOnJoin(ServerPlayer player) {
         if (player == null || matchPhase != MatchPhase.SET_REWARDING) return;
+        if (MapSetManager.isArenaSet()) return;
         SetRewardSummary summary = MapSetManager.getRewardSummary();
         if (summary == null || summary.placements().isEmpty()) return;
         int stayTicks = Math.max(1, MapSetManager.getRewardSecondsRemaining() * 20 - 20);
