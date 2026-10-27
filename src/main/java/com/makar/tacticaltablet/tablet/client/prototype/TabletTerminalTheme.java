@@ -28,6 +28,61 @@ public final class TabletTerminalTheme {
         return LOGICAL_WIDTH * surface.height() / surface.width();
     }
 
+    static int tierColor(int tier) {
+        return switch (com.makar.tacticaltablet.progression.ClassTier.clamp(tier)) {
+            case BASIC -> 0xFF27BE29;
+            case RARE -> 0xFF0A15A9;
+            case EPIC -> 0xFF9B00F5;
+            case LEGEND -> 0xFFFFBB24;
+            case MONSTER -> 0xFFD10A00;
+        };
+    }
+    static String tierName(int tier) {
+        var value = com.makar.tacticaltablet.progression.ClassTier.clamp(tier);
+        return value == com.makar.tacticaltablet.progression.ClassTier.BASIC ? "BASE" : value.displayName();
+    }
+    static String fit(String value, int width) {
+        return net.minecraft.client.Minecraft.getInstance().font.plainSubstrByWidth(value, width);
+    }
+    static void text(GuiGraphics g, String value, int x, int y, int color, float scale) {
+        g.pose().pushPose(); g.pose().translate(x, y, 0); g.pose().scale(scale, scale, 1);
+        g.drawString(net.minecraft.client.Minecraft.getInstance().font, value, 0, 0, color, false);
+        g.pose().popPose();
+    }
+    static void icon(GuiGraphics g, ResourceLocation icon, int x, int y) {
+        g.flush(); RenderSystem.enableBlend(); RenderSystem.defaultBlendFunc();
+        g.blit(icon, x, y, 24, 24, 0, 0, 16, 16, 16, 16);
+        g.flush(); RenderSystem.disableBlend();
+    }
+    static void tierRow(GuiGraphics g, int x, int y, int w, int h, int tier, int next, float progress,
+                        boolean hover, boolean pressed, boolean selected, boolean disabled) {
+        g.fill(x, y, x + w, y + h, tierColor(tier));
+        g.flush(); RenderSystem.enableBlend(); RenderSystem.defaultBlendFunc();
+        if (next >= 0 && progress > 0) {
+            int fill = Math.min(w - 2, Math.max(0, Math.round((w - 2) * progress)));
+            g.fill(x + 1, y + 1, x + 1 + fill, y + h - 1, 0x80000000 | (tierColor(next) & 0xFFFFFF));
+        }
+        // A neutral veil preserves tier identity and keeps every text/icon layer readable.
+        g.fill(x + 1, y + 1, x + w - 1, y + h - 1, pressed ? 0x80000000 : disabled ? 0x78000000 : 0x50000000);
+        if (hover) g.fill(x + 1, y + 1, x + w - 1, y + h - 1, 0x22FFFFFF);
+        g.flush(); RenderSystem.disableBlend();
+        g.renderOutline(x, y, w, h, selected || pressed ? TEXT : hover ? SECONDARY : BORDER);
+        if (selected) g.fill(x, y, x + 3, y + h, TEXT);
+    }
+    static void drawButton(GuiGraphics g, TabletPreparationPage.Rect rect, String label, boolean enabled, boolean hover, boolean pressed) {
+        background(g, Kind.BUTTON, !enabled ? State.DISABLED : pressed ? State.PRESSED : hover ? State.HOVER : State.NORMAL,
+                rect.x(), rect.y(), rect.width(), rect.height());
+        int width = (int) (net.minecraft.client.Minecraft.getInstance().font.width(label) * TEXT_SCALE);
+        text(g, label, rect.x() + (rect.width() - width) / 2, rect.y() + 10, enabled ? TEXT : DISABLED, TEXT_SCALE);
+    }
+    static void scrollbar(GuiGraphics g, TabletPreparationPage.Rect list, int capacity, int count, int offset) {
+        int x = list.x() + list.width() - 5;
+        g.fill(x, list.y(), x + 3, list.y() + list.height(), BORDER);
+        int thumb = Math.max(18, list.height() * capacity / Math.max(capacity, count));
+        int y = list.y() + (list.height() - thumb) * offset / Math.max(1, count - capacity);
+        g.fill(x, y, x + 3, y + thumb, OLIVE);
+    }
+
     // Resource shape: {"button":{"normal":{"texture":"namespace:path.png","width":32,"height":32,"border":6},...},...}
     static void reload(ResourceManager resources) {
         SKINS.clear();

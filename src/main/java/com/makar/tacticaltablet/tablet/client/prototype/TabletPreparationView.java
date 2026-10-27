@@ -17,17 +17,38 @@ final class TabletPreparationView {
         int end = Math.min(page.rows.length, page.offset + page.capacity);
         for (int i = page.offset; i < end; i++) {
             var row = page.rows[i]; var rect = row.bounds;
-            State state = row.reason.isEmpty() ? State.NORMAL : State.DISABLED;
-            if (page.focused == i || !row.badge.isEmpty()) state = State.SELECTED;
-            if (page.hover == TabletPreparationPage.ROW + i) state = State.HOVER;
-            if (page.pressed == TabletPreparationPage.ROW + i) state = State.PRESSED;
-            background(g, Kind.ROW, state, rect.x(), rect.y(), rect.width() - 9, rect.height());
+            boolean arrow = row.state != null && row.state.nextTier() >= 0;
+            int bodyWidth = rect.width() - (arrow ? 55 : 9);
+            tierRow(g, rect.x(), rect.y(), bodyWidth, rect.height(), row.state == null ? 0 : row.state.tier(),
+                    row.state == null ? -1 : row.state.nextTier(), row.state == null ? 0 : row.state.progress(),
+                    page.hover == TabletPreparationPage.ROW + i, page.pressed == TabletPreparationPage.ROW + i,
+                    page.focused == i || !row.badge.isEmpty(), !row.reason.isEmpty());
+            if (arrow) {
+                var target = new TabletPreparationPage.Rect(rect.x() + rect.width() - 51, rect.y(), 42, rect.height());
+                drawButton(g, target, "↑", row.state.canUpgrade() && !TabletClassesClient.busy(),
+                        page.hover == TabletPreparationPage.UPGRADE + i, page.pressed == TabletPreparationPage.UPGRADE + i);
+            }
             RenderSystem.enableBlend(); RenderSystem.defaultBlendFunc();
             g.blit(row.icon, rect.x() + 9, rect.y() + 6, 24, 24, 0, 0, 16, 16, 16, 16);
             RenderSystem.disableBlend();
             text(g, row.name, rect.x() + 43, rect.y() + 5, TEXT, TEXT_SCALE);
-            text(g, row.shortReason, rect.x() + 43, rect.y() + 23, row.reason.isEmpty() ? OLIVE : MUTED, DETAIL_SCALE);
-            if (!row.badge.isEmpty()) text(g, row.badge, rect.x() + rect.width() - 76, rect.y() + 7, OLIVE, DETAIL_SCALE);
+            String reason = row.reason.isEmpty() && row.state != null && row.state.nextTier() >= 0
+                    ? row.state.upgradeReason().isEmpty() ? "Улучшение: " + row.state.upgradePrice() + " монет" : row.state.upgradeReason()
+                    : row.shortReason;
+            if (row.reason.isEmpty() && row.state != null && row.state.nextTier() < 0
+                    && row.definition.category() == com.makar.tacticaltablet.tablet.ClassCategory.BASE)
+                reason = row.state.upgradeReason();
+            text(g, fit(reason, bodyWidth - 56), rect.x() + 43, rect.y() + 23, SECONDARY, DETAIL_SCALE);
+            if (row.state != null) {
+                String tier = tierName(row.state.tier());
+                if (row.state.tier() == 4 && row.definition.category() == com.makar.tacticaltablet.tablet.ClassCategory.BASE) tier += " MAX";
+                text(g, tier, rect.x() + bodyWidth - 106, rect.y() + 6, TEXT, DETAIL_SCALE);
+            }
+        }
+        if (page.rows.length == 0) {
+            text(g, TabletClassesClient.snapshot() == null ? "Загрузка классов с сервера…" : "Нет классов для подготовки.",
+                    page.list.x() + 18, page.list.y() + 20, SECONDARY, TEXT_SCALE);
+            if (TabletClassesClient.snapshot() != null) button(g, page, TabletPreparationPage.OPEN_SHOP, "Перейти в магазин", true);
         }
         int trackX = page.list.x() + page.list.width() - 5;
         g.fill(trackX, page.list.y(), trackX + 3, page.list.y() + page.list.height(), BORDER);
@@ -42,7 +63,8 @@ final class TabletPreparationView {
             g.drawString(Minecraft.getInstance().font, page.feedbackLines.get(i), MARGIN, lineY + i * 12,
                     page.error ? ERROR : SECONDARY, false);
         }
-        text(g, page.awaiting ? "ОЖИДАНИЕ ОТВЕТА СЕРВЕРА" : "ПКМ / ESC — убрать планшет", MARGIN, page.height - 17, MUTED, DETAIL_SCALE);
+        text(g, TabletClassesClient.busy() ? "СОХРАНЕНИЕ ИЗМЕНЕНИЙ…"
+                : page.awaiting ? "ОЖИДАНИЕ ОТВЕТА СЕРВЕРА" : "ПКМ / ESC — убрать планшет", MARGIN, page.height - 17, MUTED, DETAIL_SCALE);
         if (page.confirmation >= 0) {
             g.fill(0, 0, LOGICAL_WIDTH, page.height + 1, SCRIM);
             var m = page.modal;
@@ -51,7 +73,8 @@ final class TabletPreparationView {
             text(g, page.confirmation == TabletPreparationPage.SELECT ? "Получить набор выбранного класса?" : "Запросить вступление в бой через RTP?",
                     m.x() + 16, m.y() + 52, SECONDARY, DETAIL_SCALE);
             if (page.confirmation == TabletPreparationPage.SELECT)
-                text(g, page.rows[page.focused].name, m.x() + 16, m.y() + 75, OLIVE, TEXT_SCALE);
+                text(g, page.confirmedRow() == null ? "Класс больше недоступен" : page.confirmedRow().name,
+                        m.x() + 16, m.y() + 75, OLIVE, TEXT_SCALE);
             button(g, page, TabletPreparationPage.CONFIRM, "Подтвердить", true);
             button(g, page, TabletPreparationPage.CANCEL, "Отмена", false);
         }

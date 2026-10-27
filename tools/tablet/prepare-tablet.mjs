@@ -47,21 +47,45 @@ export function faceCorners(direction, f, t) {
 
 export function compile(source) {
   const m = JSON.parse(source);
-  if (m.meta?.model_format !== 'free' || !String(m.meta.format_version).startsWith('4.')) fail('Expected Blockbench 4.x Generic/free');
+  const version = String(m.meta?.format_version);
+  if (m.meta?.model_format !== 'free' || !(version.startsWith('4.') || version === '5.0'))
+    fail('Expected Blockbench 4.x or 5.0 Generic/free');
   if (m.textures?.length !== 1 || !m.textures[0].source?.startsWith('data:image/png;base64,')) fail('Expected one embedded PNG');
   const texture = Buffer.from(m.textures[0].source.split(',')[1], 'base64');
   if (texture.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a') fail('Invalid PNG');
   const width = texture.readUInt32BE(16), height = texture.readUInt32BE(20);
   if (width !== m.resolution.width || height !== m.resolution.height) fail('Texture/UV size mismatch');
+  const uuid = id => typeof id === 'string' && /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id);
+  if (!Array.isArray(m.elements) || m.elements.some(e => !uuid(e.uuid))) fail('Invalid element UUID');
   const elements = new Map(m.elements.map(e => [e.uuid, e]));
   if (elements.size !== m.elements.length) fail('Duplicate element UUID');
+  const groupMetadata = new Map();
+  for (const group of m.groups ?? []) {
+    if (!uuid(group.uuid) || elements.has(group.uuid) || groupMetadata.has(group.uuid)) fail('Invalid/duplicate group UUID');
+    groupMetadata.set(group.uuid, group);
+  }
+  const groupIds = new Set();
+  function normalizeGroup(entry) {
+    const id = typeof entry === 'string' ? entry : entry.uuid;
+    if (!uuid(id) || elements.has(id) || groupIds.has(id)) fail('Invalid/duplicate group in hierarchy');
+    groupIds.add(id);
+    const metadata = groupMetadata.get(id) ?? (version.startsWith('4.') ? entry : null);
+    if (!metadata || typeof metadata.name !== 'string') fail('Missing group metadata');
+    const children = typeof entry === 'string' ? metadata.children ?? [] : entry.children ?? [];
+    return {...metadata, ...(typeof entry === 'object' ? entry : {}),
+      origin: metadata.origin ?? [0,0,0], rotation: metadata.rotation ?? [0,0,0],
+      children: children.map(child => typeof child === 'string' && elements.has(child) ? child : normalizeGroup(child))};
+  }
+  if (!Array.isArray(m.outliner)) fail('Missing hierarchy');
+  m.outliner = m.outliner.map(normalizeGroup);
+  if (groupMetadata.size && groupIds.size !== groupMetadata.size) fail('Incomplete group hierarchy');
   if (m.outliner.length !== 1 || m.outliner[0].name !== 'tablet_root') fail('Expected single tablet_root');
   const rootGroup = m.outliner[0], rootOrigin = vector(rootGroup.origin);
   const groups = [], cubes = [], visited = new Set();
   const controls = {keys: {}, indicators: {}};
   let displaySurface;
   function walk(group, parents = []) {
-    if (!group.export || !group.visibility) fail('Hidden groups are unsupported in TT01');
+    if (group.export === false || group.visibility === false) fail('Hidden groups are unsupported in TT01');
     const origin = vector(group.origin), rotation = vector(group.rotation ?? [0,0,0]);
     groups.push({id: group.uuid, name: group.name, parent: parents.at(-1)?.uuid ?? null, origin, rotation});
     for (const child of group.children) {
@@ -70,9 +94,10 @@ export function compile(source) {
       if (!cube || visited.has(child)) fail('Missing/duplicate cube in hierarchy');
       visited.add(child);
       if (cube.type !== 'cube' || cube.box_uv || cube.rescale || cube.inflate
-          || (cube.stretch && cube.stretch.some(n => n !== 1)) || !cube.export || !cube.visibility) fail(`Unsupported cube ${cube.name}`);
-      const pivot = vector(cube.origin), angles = vector(cube.rotation ?? [0,0,0]);
+          || (cube.stretch && cube.stretch.some(n => n !== 1)) || cube.export === false || cube.visibility === false) fail(`Unsupported cube ${cube.name}`);
+      const pivot = vector(cube.origin ?? [0,0,0]), angles = vector(cube.rotation ?? [0,0,0]);
       const f = vector(cube.from), t = vector(cube.to);
+      if (t.some((n, i) => n < f[i])) fail('Inverted cube geometry');
       const chain = [...parents, group].slice(1).reverse(); // root transform is animated at runtime
       const transform = (point, normal = false) => {
         let v = normal ? rotate(point, angles) : add(rotate(sub(point, pivot), angles), pivot);
@@ -104,8 +129,8 @@ export function compile(source) {
       }
       cubes.push({id: child, name: cube.name, group: group.uuid, origin: pivot, rotation: angles, from: f, to: t, vertices});
       // Keep named parts separate at runtime; their mesh already has the full pivot/parent transform.
-      const parts = /^hardware_key_[0-2]$/.test(cube.name) ? controls.keys
-        : /^key_index_[0-2]$/.test(cube.name) ? controls.indicators : null;
+      const parts = /^hardware_key_[0-5]$/.test(cube.name) ? controls.keys
+        : /^key_index_[0-5]$/.test(cube.name) ? controls.indicators : null;
       if (parts) {
         if (parts[cube.name] || vertices.length !== 24) fail(`Missing/duplicate complete control cube ${cube.name}`);
         parts[cube.name] = child;
@@ -114,8 +139,12 @@ export function compile(source) {
   }
   walk(rootGroup);
   if (!displaySurface) fail('Missing display_surface/screen_glass north face');
-  if (Object.keys(controls.keys).length !== 3 || Object.keys(controls.indicators).length !== 3)
-    fail('Expected hardware_key_0..2 and key_index_0..2');
+  const keyCount = Object.keys(controls.keys).length;
+  // Original 4.x three-key sources remain readable; the current 5.0 model requires all six.
+  if (!(keyCount === 6 || version.startsWith('4.') && keyCount === 3)
+      || Object.keys(controls.indicators).length !== keyCount
+      || Array.from({length:keyCount}, (_, i) => i).some(i => !controls.keys[`hardware_key_${i}`] || !controls.indicators[`key_index_${i}`]))
+    fail('Expected complete hardware_key_0..5 and key_index_0..5');
   if (visited.size !== elements.size || !groups.some(g => g.name === 'display_surface')) fail('Incomplete hierarchy/display');
   const animations = {};
   for (const a of m.animations) {

@@ -122,7 +122,7 @@ public final class TabletPrototypeModel extends SimplePreparableReloadListener<T
         for (var entry : parts.entrySet())
             if (names.put(entry.getValue().getAsString(), entry.getKey()) != null)
                 throw new IllegalArgumentException("Duplicate hardware part");
-        if (names.size() != 3) throw new IllegalArgumentException("Expected three named hardware parts");
+        if (names.size() != TabletPage.PAGES.size()) throw new IllegalArgumentException("Expected six named hardware parts");
         return names;
     }
 

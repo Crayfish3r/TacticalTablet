@@ -161,7 +161,7 @@ public class ClassXPManager {
                 PlayerProgressManager.getKills(player),
                 PlayerProgressManager.getDeaths(player),
                 PlayerProgressManager.getMatchesPlayed(player),
-                PlayerProgressManager.getCoins(player),
+                PlayerProgressManager.getConfirmedTabletCoins(player),
                 PlayerProgressManager.getCareerProgressPercent(player),
                 LivesManager.getLives(player),
                 LivesManager.getAlivePlayerCount(player.server),

@@ -11,6 +11,8 @@ final class TabletPageShell {
     private final TabletProfilePage profile = new TabletProfilePage();
     private final TabletVotingPage voting;
     private final TabletArenaResultsView arenaResults;
+    private final TabletShopPage shop;
+    private final TabletClassDialog classDialog;
     private final int height;
     private TabletPage selected = TabletPage.PREPARATION;
     private TabletPage pressedHardware, pressedDisplayPage;
@@ -19,13 +21,18 @@ final class TabletPageShell {
     private long phaseRevision = -1;
 
     TabletPageShell(TabletPrototypeModel.DisplaySurface display) {
-        preparation = new TabletPreparationPage(display);
         height = (int) TabletTerminalTheme.logicalHeight(display);
+        classDialog = new TabletClassDialog(height);
+        preparation = new TabletPreparationPage(display, classDialog);
+        shop = new TabletShopPage(height, classDialog);
         voting = new TabletVotingPage(height);
         arenaResults = new TabletArenaResultsView(height);
     }
 
     TabletPage selected() { return selected; }
+    void classesUpdated() {
+        preparation.classesUpdated(); shop.update(); dirty = true;
+    }
     void acceptSnapshot(PreparationSnapshot snapshot) {
         synchronizePhase();
         if (preparation.accept(snapshot)) {
@@ -41,7 +48,7 @@ final class TabletPageShell {
     }
     void tick() {
         synchronizePhase();
-        preparation.tick(); profile.tick(preparation); voting.tick(); arenaResults.tick();
+        preparation.tick(); profile.tick(preparation); voting.tick(); arenaResults.tick(); shop.update();
         if (voting.takeRefreshRequest()) preparation.refreshWhenIdle();
     }
 
@@ -61,8 +68,9 @@ final class TabletPageShell {
         updateInteractivity(); dirty = true;
     }
     private void updateInteractivity() {
-        preparation.interactive(open && selected == TabletPage.PREPARATION && !votingView() && !arenaResultsView());
-        voting.interactive(open && selected == TabletPage.PREPARATION && votingView());
+        preparation.interactive(open && !classDialog.active() && selected == TabletPage.PREPARATION && !votingView() && !arenaResultsView());
+        voting.interactive(open && !classDialog.active() && selected == TabletPage.PREPARATION && votingView());
+        shop.interactive(open && !classDialog.active() && selected == TabletPage.SHOP);
     }
 
     void interactive(boolean value) {
@@ -74,8 +82,13 @@ final class TabletPageShell {
     void hover(double x, double y) {
         synchronizePhase();
         var hit = open ? TabletDisplayProjection.pick(x, y) : null;
+        if (classDialog.active()) {
+            classDialog.hover(hit == null ? null : hit.display());
+            preparation.hover(null, false); voting.hover(null); shop.hover(null); return;
+        }
         preparation.hover(hit == null ? null : hit.display(), open && selected == TabletPage.PREPARATION && !votingView() && !arenaResultsView());
         voting.hover(hit == null ? null : hit.display());
+        shop.hover(hit == null ? null : hit.display());
     }
 
     void press(double x, double y) {
@@ -85,8 +98,11 @@ final class TabletPageShell {
         var hit = TabletDisplayProjection.pick(x, y);
         if (hit.hardwareKey() != null) {
             if (!navigationLocked()) pressedHardware = TabletPage.forHardwareKey(hit.hardwareKey());
-        } else if (hit.display() != null && selected == TabletPage.PREPARATION) {
+        } else if (hit.display() != null) {
             pressedDisplayPage = selected;
+            if (classDialog.active()) { classDialog.press(hit.display()); return; }
+            if (selected == TabletPage.SHOP) { shop.press(hit.display()); return; }
+            if (selected != TabletPage.PREPARATION) return;
             if (arenaResultsView()) return;
             if (votingView()) voting.press(hit.display());
             else preparation.press(hit.display());
@@ -97,22 +113,29 @@ final class TabletPageShell {
         synchronizePhase(); voting.tick();
         TabletPage hardware = pressedHardware, displayPage = pressedDisplayPage;
         pressedHardware = null; pressedDisplayPage = null;
-        if (!open) { preparation.cancelPress(); voting.cancelPress(); return; }
+        if (!open) { cancelPress(); return; }
         var hit = TabletDisplayProjection.pick(x, y);
         if (hardware != null) {
             preparation.cancelPress();
             voting.cancelPress();
             if (hardware == TabletPage.forHardwareKey(hit.hardwareKey()) && !navigationLocked()) select(hardware);
+        } else if (displayPage == selected && hit.hardwareKey() == null && classDialog.active()) {
+            classDialog.release(hit.display()); updateInteractivity(); dirty = true;
+        } else if (displayPage == selected && selected == TabletPage.SHOP && hit.hardwareKey() == null) {
+            shop.release(hit.display()); updateInteractivity(); dirty = true;
         } else if (displayPage == selected && selected == TabletPage.PREPARATION && hit.hardwareKey() == null) {
             if (arenaResultsView()) { preparation.cancelPress(); voting.cancelPress(); return; }
             if (votingView()) voting.release(hit.display());
             else preparation.release(hit.display());
-        } else { preparation.cancelPress(); voting.cancelPress(); }
+            if (preparation.shopRequested) { preparation.shopRequested = false; select(TabletPage.SHOP); }
+            updateInteractivity();
+        } else { cancelPress(); }
     }
 
     private void select(TabletPage page) {
         if (selected == page) return;
         cancelPress();
+        classDialog.dismiss(); preparation.dismissConfirmation();
         selected = page; dirty = true;
         updateInteractivity();
     }
@@ -121,10 +144,17 @@ final class TabletPageShell {
         pressedHardware = null; pressedDisplayPage = null;
         preparation.cancelPress();
         voting.cancelInput();
+        shop.cancelPress(); classDialog.cancelPress();
     }
 
     void scroll(double x, double y, double delta) {
         synchronizePhase(); voting.tick();
+        if (classDialog.active()) return;
+        if (open && selected == TabletPage.SHOP) {
+            var hit = TabletDisplayProjection.pick(x, y);
+            if (hit.hardwareKey() == null) shop.scroll(hit.display(), delta);
+            return;
+        }
         if (open && selected == TabletPage.PREPARATION) {
             var hit = TabletDisplayProjection.pick(x, y);
             if (hit.hardwareKey() != null) return;
@@ -136,8 +166,8 @@ final class TabletPageShell {
 
     boolean dirty() {
         synchronizePhase();
-        return dirty || selected == TabletPage.PREPARATION && (arenaResultsView() ? arenaResults.dirty() : votingView() ? voting.dirty() : preparation.dirty())
-                || selected == TabletPage.PROFILE && profile.dirty();
+        return dirty || classDialog.dirty() || selected == TabletPage.PREPARATION && (arenaResultsView() ? arenaResults.dirty() : votingView() ? voting.dirty() : preparation.dirty())
+                || selected == TabletPage.PROFILE && profile.dirty() || selected == TabletPage.SHOP && shop.dirty();
     }
     void rendered() {
         dirty = false;
@@ -145,6 +175,8 @@ final class TabletPageShell {
             if (arenaResultsView()) arenaResults.rendered(); else if (votingView()) voting.rendered(); else preparation.rendered();
         }
         if (selected == TabletPage.PROFILE) profile.rendered();
+        if (selected == TabletPage.SHOP) shop.rendered();
+        classDialog.rendered();
     }
     void render(GuiGraphics graphics) {
         switch (selected) {
@@ -155,6 +187,10 @@ final class TabletPageShell {
             }
             case PROFILE -> TabletProfileView.render(graphics, profile, height);
             case CONTRACT_TRACKER -> TabletPlaceholderViews.contractTracker(graphics, height);
+            case SHOP -> TabletShopView.render(graphics, shop);
+            case EMPTY_4, EMPTY_5 -> TabletTerminalTheme.background(graphics, TabletTerminalTheme.Kind.SCREEN,
+                    TabletTerminalTheme.State.NORMAL, 0, 0, TabletTerminalTheme.LOGICAL_WIDTH, height + 1);
         }
+        classDialog.render(graphics, height);
     }
 }

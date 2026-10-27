@@ -64,7 +64,7 @@ public final class TabletPreparationService {
         return "";
     }
 
-    private static String classReason(ServerPlayer player, ClassDefinition definition) {
+    public static String classReason(ServerPlayer player, ClassDefinition definition) {
         String reason = admission(player);
         if (!reason.isEmpty()) return reason;
         String key = definition.classKey();

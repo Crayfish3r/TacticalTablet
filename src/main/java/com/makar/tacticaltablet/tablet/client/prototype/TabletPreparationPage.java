@@ -7,6 +7,7 @@ import com.makar.tacticaltablet.tablet.client.TabletClientState;
 import com.makar.tacticaltablet.tablet.net.PacketHandler;
 import com.makar.tacticaltablet.tablet.net.TabletPacket;
 import com.makar.tacticaltablet.tablet.preparation.PreparationSnapshot;
+import com.makar.tacticaltablet.tablet.classes.TabletClassSnapshot;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -15,7 +16,7 @@ import java.util.List;
 
 /** Retained page behavior and data. The view/theme own all drawing. */
 public final class TabletPreparationPage {
-    static final int REFRESH = 1, SELECT = 2, DEPLOY = 3, CONFIRM = 4, CANCEL = 5, ROW = 100;
+    static final int REFRESH = 1, SELECT = 2, DEPLOY = 3, CONFIRM = 4, CANCEL = 5, OPEN_SHOP = 6, ROW = 100, UPGRADE = 1000;
     private static final long TIMEOUT_MS = 10_000, POLL_MS = 2_000;
     private static long sequence;
     record Rect(int x, int y, int width, int height) {
@@ -29,6 +30,7 @@ public final class TabletPreparationPage {
         String shortReason = reason;
         String badge = "";
         Rect bounds;
+        TabletClassSnapshot.Row state;
         Row(ClassDefinition definition) {
             this.definition = definition;
             var mc = Minecraft.getInstance();
@@ -36,8 +38,12 @@ public final class TabletPreparationPage {
             name = definition.name().getString();
         }
     }
-    final Row[] rows;
-    final Rect[] buttons = new Rect[6];
+    Row[] rows = new Row[0];
+    private final Row[] allRows;
+    final Rect[] buttons = new Rect[7];
+    final TabletClassDialog classDialog;
+    boolean shopRequested;
+    private String confirmationClass = "";
     final int height;
     Rect list, modal;
     int offset, capacity, focused, hover = -1, pressed = -1;
@@ -53,14 +59,16 @@ public final class TabletPreparationPage {
     private int pendingAction = -1;
     private long requestId, deadline, nextPoll;
 
-    TabletPreparationPage(TabletPrototypeModel.DisplaySurface surface) {
+    TabletPreparationPage(TabletPrototypeModel.DisplaySurface surface, TabletClassDialog classDialog) {
+        this.classDialog = classDialog;
         height = (int) TabletTerminalTheme.logicalHeight(surface);
         var definitions = ClassDefinitions.all();
-        rows = new Row[definitions.size()];
-        for (int i = 0; i < rows.length; i++) rows[i] = new Row(definitions.get(i));
+        allRows = new Row[definitions.size()];
+        for (int i = 0; i < allRows.length; i++) allRows[i] = new Row(definitions.get(i));
         layout();
         message(feedback, false);
         request(-1, true);
+        classesUpdated();
     }
 
     public static void acceptSnapshot(PreparationSnapshot snapshot) {
@@ -75,7 +83,7 @@ public final class TabletPreparationPage {
         ready = true;
         confirmedClass = snapshot.selectedClass(); rtpUsed = snapshot.rtpUsed(); rtpPending = snapshot.rtpPending();
         rtpReason = snapshot.rtpReason();
-        for (Row row : rows) {
+        for (Row row : allRows) {
             row.reason = "Сервер не передал состояние класса.";
             for (var availability : snapshot.classes()) if (availability.actionId() == row.definition.actionId()) {
                 row.reason = availability.reason(); break;
@@ -111,6 +119,7 @@ public final class TabletPreparationPage {
 
     void tick() {
         long now = net.minecraft.Util.getMillis();
+        TabletClassesClient.tick();
         updateMatchStatus();
         if (awaiting && now >= deadline) {
             awaiting = false; pendingAction = -1;
@@ -137,6 +146,7 @@ public final class TabletPreparationPage {
         if (newRequest) requestId = ++sequence;
         pendingAction = action; awaiting = true; deadline = now + TIMEOUT_MS; nextPoll = now + POLL_MS;
         PacketHandler.sendToServer(new TabletPacket(action, requestId));
+        if (action == -1) TabletClassesClient.fetch();
         if (action >= 0) message(action == 7 ? "Запрос вступления отправлен…" : "Ожидание выдачи набора сервером…", false);
         dirty = true;
     }
@@ -175,6 +185,7 @@ public final class TabletPreparationPage {
         modal = new Rect((w - 444) / 2, (height - 156) / 2, 444, 156);
         buttons[CONFIRM] = new Rect(modal.x + 16, modal.y + 104, 242, 32);
         buttons[CANCEL] = new Rect(modal.x + 266, modal.y + 104, 162, 32);
+        buttons[OPEN_SHOP] = new Rect(m + 140, list.y + 54, 300, 32);
         dirty = true;
     }
 
@@ -182,10 +193,12 @@ public final class TabletPreparationPage {
         if (!interactive) return false;
         if (id == CANCEL) return true;
         if (id == REFRESH) return !awaiting;
+        if (id == OPEN_SHOP) return true;
         if (!ready || awaiting) return false;
         if (id == SELECT) return rows.length > 0 && rows[focused].reason.isEmpty();
         if (id == DEPLOY) return !rtpUsed && !rtpPending && rtpReason.isEmpty();
-        if (id == CONFIRM) return enabled(confirmation);
+        if (id == CONFIRM) return confirmation == SELECT
+                ? confirmedRow() != null && confirmedRow().reason.isEmpty() : enabled(confirmation);
         return id >= ROW;
     }
     int hit(TabletDisplayProjection.Point point) {
@@ -195,9 +208,15 @@ public final class TabletPreparationPage {
             return buttons[CANCEL].contains(point.x(), point.y()) ? CANCEL : -1;
         }
         for (int id = REFRESH; id <= DEPLOY; id++) if (buttons[id].contains(point.x(), point.y())) return id;
+        if (rows.length == 0 && TabletClassesClient.snapshot() != null && buttons[OPEN_SHOP].contains(point.x(), point.y())) return OPEN_SHOP;
         if (list.contains(point.x(), point.y()))
             for (int i = offset; i < Math.min(rows.length, offset + capacity); i++)
-                if (rows[i].bounds.contains(point.x(), point.y())) return ROW + i;
+                if (rows[i].bounds.contains(point.x(), point.y())) {
+                    if (rows[i].state != null && rows[i].state.nextTier() >= 0
+                            && point.x() >= rows[i].bounds.x() + rows[i].bounds.width() - 51
+                            && point.x() < rows[i].bounds.x() + rows[i].bounds.width() - 9) return UPGRADE + i;
+                    return ROW + i;
+                }
         return -1;
     }
     void hover(TabletDisplayProjection.Point point, boolean open) {
@@ -208,6 +227,13 @@ public final class TabletPreparationPage {
     void release(TabletDisplayProjection.Point point) {
         int id = pressed; pressed = -1; dirty = true;
         if (id < 0 || id != hit(point)) return;
+        if (id == OPEN_SHOP) { shopRequested = true; return; }
+        if (id >= UPGRADE) {
+            Row row = rows[id - UPGRADE];
+            if (row.state.canUpgrade() && !TabletClassesClient.busy()) classDialog.upgrade(row.definition, row.state);
+            else message(TabletClassesClient.busy() ? "Ожидаем сохранения операции." : row.state.upgradeReason(), false);
+            return;
+        }
         if (id >= ROW) {
             focused = id - ROW;
             message(rows[focused].reason.isEmpty() ? "Набор: " + rows[focused].name : rows[focused].reason, false);
@@ -217,15 +243,18 @@ public final class TabletPreparationPage {
             message(!ready ? "Дождитесь актуальных данных сервера."
                     : awaiting ? "Дождитесь ответа сервера на текущий запрос."
                     : id == DEPLOY ? (rtpPending ? "Сервер уже обрабатывает запрос RTP." : rtpReason)
-                    : rows[focused].reason, false);
+                    : rows.length == 0 ? "Нет классов для выбора." : rows[focused].reason, false);
             return;
         }
         if (id == REFRESH) { refreshNotice = true; error = false; message("Обновляем состояние…", false); request(-1, true); }
         else if (id == CANCEL) confirmation = -1;
         else if (id == CONFIRM) {
-            int action = confirmation == SELECT ? rows[focused].definition.actionId() : 7;
+            int action = confirmation == SELECT ? confirmedRow().definition.actionId() : 7;
             confirmation = -1; error = false; request(action, true);
-        } else confirmation = id;
+        } else {
+            confirmation = id;
+            confirmationClass = id == SELECT ? rows[focused].definition.classKey() : "";
+        }
     }
     void cancelPress() { if (pressed != -1) { pressed = -1; dirty = true; } }
     void dismissConfirmation() {
@@ -234,6 +263,37 @@ public final class TabletPreparationPage {
         // Requests already sent keep their nonce, timeout and response processing across phase changes.
     }
     void refreshWhenIdle() { if (!awaiting) nextPoll = 0; }
+    Row confirmedRow() {
+        for (Row row : rows) if (row.definition.classKey().equals(confirmationClass)) return row;
+        return null;
+    }
+    void classesUpdated() {
+        var snapshot = TabletClassesClient.snapshot();
+        if (snapshot == null) return;
+        String focusedKey = rows.length == 0 ? "" : rows[focused].definition.classKey();
+        String anchor = rows.length == 0 ? "" : rows[Math.min(offset, rows.length - 1)].definition.classKey();
+        var visible = new java.util.ArrayList<Row>();
+        for (Row row : allRows) {
+            row.state = snapshot.rows().stream().filter(r -> r.classKey().equals(row.definition.classKey())
+                    && r.actionId() == row.definition.actionId()).findFirst().orElse(null);
+            if (row.state == null || !row.state.visible()) continue;
+            row.reason = row.state.kitReason();
+            row.shortReason = Minecraft.getInstance().font.plainSubstrByWidth(
+                    row.reason.isEmpty() ? "Доступен для выбора" : row.reason, 390);
+            row.badge = row.definition.classKey().equals(confirmedClass) ? "ПОЛУЧЕН" : "";
+            visible.add(row);
+        }
+        Row[] next = visible.toArray(Row[]::new);
+        boolean changed = !java.util.Arrays.equals(rows, next);
+        rows = next;
+        focused = rows.length == 0 ? 0 : Math.min(focused, rows.length - 1);
+        for (int i = 0; i < rows.length; i++) {
+            if (rows[i].definition.classKey().equals(focusedKey)) focused = i;
+            if (rows[i].definition.classKey().equals(anchor)) offset = i;
+        }
+        if (changed) { cancelPress(); layout(); }
+        dirty = true;
+    }
     void scroll(TabletDisplayProjection.Point point, double delta) {
         if (point == null || confirmation >= 0 || !list.contains(point.x(), point.y())) return;
         int next = Math.max(0, Math.min(Math.max(0, rows.length - capacity), offset - (int) Math.signum(delta)));

@@ -133,6 +133,163 @@ public class PlayerProgressManager {
     private static long nextSnapshotRevision;
     private static long nextBackupRevision;
     private static ProgressRepository progressRepository;
+    private static final Map<String, PendingTabletOperation> pendingTabletOperations = new HashMap<>();
+    private static final Map<String, java.util.LinkedHashMap<TabletProgressOperation.Identity, TabletProgressOperation.Result>> tabletResults = new HashMap<>();
+
+    private static final class PendingTabletOperation {
+        final TabletProgressOperation.Identity identity;
+        final TabletProgressOperation.PersonalClass before;
+        final long requiredRevision;
+        final int reservedCoins;
+        SaveTicket ticket;
+        int retryTick;
+        TabletProgressOperation.Result result;
+        PendingTabletOperation(TabletProgressOperation.Identity identity, TabletProgressOperation.PersonalClass before,
+                               long revision, int reservedCoins, SaveTicket ticket) {
+            this.identity = identity; this.before = before; this.requiredRevision = revision; this.ticket = ticket;
+            this.reservedCoins = reservedCoins;
+            result = new TabletProgressOperation.Result(identity, TabletProgressOperation.Status.ACCEPTED, revision,
+                    "Операция принята. Сохраняем…");
+        }
+    }
+
+    /** Personal data, never the effective Competitive ladder. Pending entitlements stay hidden until commit. */
+    public static synchronized TabletProgressOperation.PersonalClass getPersonalTabletClass(ServerPlayer player, String clazz) {
+        String key = getPlayerKey(player), normalized = normalizeClass(clazz);
+        PlayerProgress progress = getOrLoad(player, key);
+        PendingTabletOperation pending = pendingTabletOperations.get(key);
+        if (pending != null && pending.identity.classKey().equals(normalized)) return pending.before;
+        return personalTabletClass(progress, normalized);
+    }
+
+    private static TabletProgressOperation.PersonalClass personalTabletClass(PlayerProgress progress, String clazz) {
+        boolean owned = isBaseProgressionClass(clazz) ? isBaseClassUnlocked(progress, clazz)
+                : progress.purchasedClasses.getOrDefault(clazz, 0) > 0;
+        int tier = isShopClass(clazz) ? getShopFixedLevel(clazz) : getStoredTier(progress, clazz);
+        return new TabletProgressOperation.PersonalClass(owned, tier, progress.classes.getOrDefault(clazz, 0));
+    }
+
+    public static synchronized boolean hasPendingTabletOperation(ServerPlayer player) {
+        return player != null && pendingTabletOperations.containsKey(getPlayerKey(player));
+    }
+
+    /** Presentation balance changes with this operation only after commit; other economic APIs keep spendable coins. */
+    public static synchronized int getConfirmedTabletCoins(ServerPlayer player) {
+        PendingTabletOperation pending = pendingTabletOperations.get(getPlayerKey(player));
+        return (int) Math.min(Integer.MAX_VALUE, (long) getCoins(player) + (pending == null ? 0 : pending.reservedCoins));
+    }
+
+    public static synchronized TabletProgressOperation.Result pendingTabletOperation(ServerPlayer player) {
+        PendingTabletOperation pending = pendingTabletOperations.get(getPlayerKey(player));
+        return pending == null ? null : pending.result;
+    }
+
+    public static synchronized TabletProgressOperation.Result tabletOperationResult(ServerPlayer player, TabletProgressOperation.Identity identity) {
+        PendingTabletOperation pending = pendingTabletOperations.get(getPlayerKey(player));
+        if (pending != null && pending.identity.equals(identity)) return pending.result;
+        return tabletResults.getOrDefault(getPlayerKey(player), new java.util.LinkedHashMap<>()).get(identity);
+    }
+
+    public static synchronized TabletProgressOperation.Result latestTabletResult(ServerPlayer player, UUID session) {
+        TabletProgressOperation.Result last = null;
+        for (var result : tabletResults.getOrDefault(getPlayerKey(player), new java.util.LinkedHashMap<>()).values())
+            if (result.identity().session().equals(session)) last = result;
+        return last;
+    }
+
+    /** Uses the existing preparation rules, but exposes success only after a repository revision is written. */
+    public static synchronized TabletProgressOperation.Result applyDurableTabletOperation(
+            ServerPlayer player, TabletProgressOperation.Identity identity) {
+        String key = getPlayerKey(player);
+        TabletProgressOperation.Result previous = tabletOperationResult(player, identity);
+        if (previous != null) return previous;
+        for (var result : tabletResults.getOrDefault(key, new java.util.LinkedHashMap<>()).values()) {
+            var prior = result.identity();
+            if (prior.session().equals(identity.session()) && prior.requestId() == identity.requestId())
+                return tabletRejected(identity, "Идентификатор запроса уже использован для другой операции.");
+        }
+        if (hasPendingTabletOperation(player)) return tabletRejected(identity, "Предыдущая операция ещё сохраняется.");
+        if (MapSetManager.isChaosSet() || MapSetManager.isCompetitiveSet())
+            return tabletRejected(identity, "Постоянные покупки и улучшения недоступны в этом режиме.");
+        PlayerProgress progress = getOrLoad(player, key);
+        int coinsBefore = progress.coins;
+        var before = personalTabletClass(progress, identity.classKey());
+        PreparedProgressOperation<?> operation = switch (identity.kind()) {
+            case PURCHASE_CLASS -> prepareTabletClassPurchase(player, identity.classKey());
+            case UNLOCK_BASE -> prepareTabletBaseUnlock(player, identity.classKey());
+            case UPGRADE_TIER -> prepareTabletTierUpgrade(player, identity.classKey(), identity.targetTier());
+            case FETCH -> null;
+        };
+        if (operation == null) return tabletRejected(identity, "Неизвестная операция.");
+        if (operation.queuedSave().isEmpty()) {
+            String reason = switch (operation.result().toString()) {
+                case "ALREADY_OWNED" -> "Класс уже куплен.";
+                case "ALREADY_UNLOCKED" -> "Класс уже открыт.";
+                case "NOT_ENOUGH_COINS" -> "Недостаточно монет.";
+                case "NOT_ENOUGH_XP" -> "Накопите опыт.";
+                case "LOCKED" -> "Сначала откройте класс.";
+                case "MAX_TIER" -> "Класс уже максимального уровня.";
+                case "WRONG_TIER" -> "Уровень изменился. Обновите данные.";
+                default -> "Действие недоступно для этого класса.";
+            };
+            var result = tabletRejected(identity, reason);
+            rememberTabletResult(key, result);
+            return result;
+        }
+        QueuedProgressSave save = operation.queuedSave().orElseThrow();
+        var pending = new PendingTabletOperation(identity, before, save.snapshot().revision(), coinsBefore - progress.coins,
+                enqueuePreparedTabletSave(save));
+        pending.retryTick = player.server.getTickCount() + 40;
+        pendingTabletOperations.put(key, pending);
+        return pending.result;
+    }
+
+    private static TabletProgressOperation.Result tabletRejected(TabletProgressOperation.Identity identity, String message) {
+        return new TabletProgressOperation.Result(identity, TabletProgressOperation.Status.REJECTED, 0, message);
+    }
+
+    private static void rememberTabletResult(String key, TabletProgressOperation.Result result) {
+        var results = tabletResults.computeIfAbsent(key, ignored -> new java.util.LinkedHashMap<>());
+        results.put(result.identity(), result);
+        while (results.size() > 64) results.remove(results.keySet().iterator().next());
+    }
+
+    /** Server tick observes immutable ticket results. Retries snapshot current data, never an old balance. */
+    private static void reconcileTabletOperations(MinecraftServer server) {
+        for (var entry : new ArrayList<>(pendingTabletOperations.entrySet())) {
+            String key = entry.getKey();
+            PendingTabletOperation pending = entry.getValue();
+            long written = progressRepository.completedRevision(key);
+            if (written >= pending.requiredRevision) {
+                pendingTabletOperations.remove(key);
+                rememberTabletResult(key, new TabletProgressOperation.Result(pending.identity,
+                        TabletProgressOperation.Status.SAVED, written, "Изменение сохранено."));
+                continue;
+            }
+            var future = pending.ticket == null ? null : pending.ticket.completion().toCompletableFuture();
+            if (future != null && !future.isDone()) continue;
+            DurableSaveResult outcome = null;
+            Throwable failure = null;
+            if (future != null) {
+                try { outcome = future.join(); }
+                catch (java.util.concurrent.CompletionException | java.util.concurrent.CancellationException exception) { failure = exception; }
+            }
+            boolean failed = failure != null || outcome == null || switch (outcome.status()) {
+                case FAILED, QUEUE_REJECTED, EXECUTOR_STOPPED -> true;
+                case WRITTEN, SUPERSEDED, STALE_REJECTED -> false;
+            };
+            if (failed && pending.result.status() != TabletProgressOperation.Status.SAVE_FAILED) {
+                pending.result = new TabletProgressOperation.Result(pending.identity, TabletProgressOperation.Status.SAVE_FAILED,
+                        pending.requiredRevision, "Запись не подтверждена. Повторяем сохранение без нового списания.");
+                TacticalTabletMod.LOGGER.warn("Tablet operation save failed player={} operation={} diagnostic={}",
+                        key, pending.identity, outcome == null ? String.valueOf(failure) : outcome.diagnostic());
+            }
+            if (server.getTickCount() < pending.retryTick) continue;
+            PlayerProgress progress = cache.get(key);
+            if (progress != null) pending.ticket = enqueueSnapshot(key, progress);
+            pending.retryTick = server.getTickCount() + 100;
+        }
+    }
 
     public enum PurchaseResult {
         PURCHASED,
@@ -363,6 +520,9 @@ public class PlayerProgressManager {
         snapshotRevisions.clear();
         pendingUnloads.clear();
         pendingMatchesPlayed.clear();
+        pendingTabletOperations.clear();
+        tabletResults.clear();
+        com.makar.tacticaltablet.tablet.classes.TabletClassService.reset();
         autosaveTicks = 0;
         backupTicks = 0;
         nextSnapshotRevision = 0L;
@@ -481,7 +641,7 @@ public class PlayerProgressManager {
         }
 
         PlayerProgress progress = getOrLoad(player, getPlayerKey(player));
-        return getStoredTier(progress, normalizedClass);
+        return getPersonalTabletClass(player, normalizedClass).tier();
     }
 
     public static int getLevelForXP(int xp) {
@@ -496,7 +656,7 @@ public class PlayerProgressManager {
         if (MapSetManager.isCompetitiveSet()) return true;
 
         PlayerProgress progress = getOrLoad(player, getPlayerKey(player));
-        return isBaseClassUnlocked(progress, normalizedClass);
+        return getPersonalTabletClass(player, normalizedClass).owned();
     }
 
     public static synchronized boolean canGainXp(ServerPlayer player, String clazz) {
@@ -508,6 +668,7 @@ public class PlayerProgressManager {
 
     public static synchronized ProgressionResult unlockBaseClass(ServerPlayer player, String clazz) {
         if (player == null || clazz == null) return ProgressionResult.INVALID_CLASS;
+        if (hasPendingTabletOperation(player)) return ProgressionResult.WRONG_TIER;
         if (MapSetManager.isCompetitiveSet()) return ProgressionResult.ALREADY_UNLOCKED;
 
         String normalizedClass = normalizeClass(clazz);
@@ -541,7 +702,7 @@ public class PlayerProgressManager {
             ServerPlayer player,
             String clazz
     ) {
-        if (player == null || clazz == null) {
+        if (player == null || clazz == null || hasPendingTabletOperation(player)) {
             ProgressionResult result = ProgressionResult.INVALID_CLASS;
             return PreparedProgressOperation.withoutSave(
                     result, player == null ? ProgressSyncMode.NONE : ProgressSyncMode.TABLET);
@@ -557,6 +718,7 @@ public class PlayerProgressManager {
 
     public static synchronized ProgressionResult upgradeClassTier(ServerPlayer player, String clazz, int targetTier) {
         if (player == null || clazz == null) return ProgressionResult.INVALID_CLASS;
+        if (hasPendingTabletOperation(player)) return ProgressionResult.WRONG_TIER;
         if (MapSetManager.isCompetitiveSet()) return ProgressionResult.WRONG_TIER;
 
         String normalizedClass = normalizeClass(clazz);
@@ -592,7 +754,7 @@ public class PlayerProgressManager {
             String clazz,
             int targetTier
     ) {
-        if (player == null || clazz == null) {
+        if (player == null || clazz == null || hasPendingTabletOperation(player)) {
             ProgressionResult result = ProgressionResult.INVALID_CLASS;
             return PreparedProgressOperation.withoutSave(
                     result, player == null ? ProgressSyncMode.NONE : ProgressSyncMode.TABLET);
@@ -1222,11 +1384,12 @@ public class PlayerProgressManager {
         if (!isShopClass(normalizedClass)) return false;
 
         PlayerProgress progress = getOrLoad(player, getPlayerKey(player));
-        return progress.purchasedClasses.getOrDefault(normalizedClass, 0) > 0;
+        return getPersonalTabletClass(player, normalizedClass).owned();
     }
 
     public static synchronized PurchaseResult purchaseClass(ServerPlayer player, String clazz) {
         if (player == null || clazz == null) return PurchaseResult.NOT_PURCHASABLE;
+        if (hasPendingTabletOperation(player)) return PurchaseResult.NOT_PURCHASABLE;
         if (MapSetManager.isCompetitiveSet()) return PurchaseResult.NOT_PURCHASABLE;
 
         String normalizedClass = normalizeClass(clazz);
@@ -1301,7 +1464,7 @@ public class PlayerProgressManager {
             ServerPlayer player,
             String clazz
     ) {
-        if (player == null || clazz == null) {
+        if (player == null || clazz == null || hasPendingTabletOperation(player)) {
             PurchaseResult result = PurchaseResult.NOT_PURCHASABLE;
             return PreparedProgressOperation.withoutSave(
                     result, player == null ? ProgressSyncMode.NONE : ProgressSyncMode.TABLET);
@@ -1487,7 +1650,7 @@ public class PlayerProgressManager {
             String normalizedClass = normalizeClass(clazz);
             result.put(normalizedClass, MapSetManager.isCompetitiveSet()
                     ? 0
-                    : progress.purchasedClasses.getOrDefault(normalizedClass, 0) > 0 ? 1 : 0);
+                    : getPersonalTabletClass(player, normalizedClass).owned() ? 1 : 0);
         }
 
         for (String clazz : EXCLUSIVE_CLASSES) {
@@ -1511,7 +1674,7 @@ public class PlayerProgressManager {
         for (String clazz : BASE_CLASSES) {
             String normalizedClass = normalizeClass(clazz);
             result.put(normalizedClass, MapSetManager.isCompetitiveSet()
-                    || isBaseClassUnlocked(progress, normalizedClass) ? 1 : 0);
+                    || getPersonalTabletClass(player, normalizedClass).owned() ? 1 : 0);
         }
         return result;
     }
@@ -1523,7 +1686,8 @@ public class PlayerProgressManager {
         PlayerProgress progress = getOrLoad(player, getPlayerKey(player));
         for (String clazz : BASE_CLASSES) {
             String normalizedClass = normalizeClass(clazz);
-            result.put(normalizedClass, getEffectiveBaseTier(progress, normalizedClass));
+            result.put(normalizedClass, MapSetManager.isCompetitiveSet() ? getEffectiveBaseTier(progress, normalizedClass)
+                    : getPersonalTabletClass(player, normalizedClass).tier());
         }
         for (String clazz : SHOP_CLASSES) {
             String normalizedClass = normalizeClass(clazz);
@@ -1542,13 +1706,13 @@ public class PlayerProgressManager {
 
         for (String clazz : BASE_CLASSES) {
             String normalizedClass = normalizeClass(clazz);
-            if (!isBaseClassUnlocked(progress, normalizedClass)) continue;
+            if (!getPersonalTabletClass(player, normalizedClass).owned()) continue;
             int xp = progress.classes.getOrDefault(normalizeClass(clazz), 0);
             completed += normalizePersistedXp(xp) / (double) MAX_CLASS_XP;
         }
 
         for (String clazz : SHOP_CLASSES) {
-            if (progress.purchasedClasses.getOrDefault(normalizeClass(clazz), 0) > 0) {
+            if (getPersonalTabletClass(player, normalizeClass(clazz)).owned()) {
                 completed += 1.0D;
             }
         }
@@ -1579,7 +1743,9 @@ public class PlayerProgressManager {
         if (server == null || progressRepository == null) return;
 
         reconcileCompletedWrites();
+        reconcileTabletOperations(server);
         evictCompletedOfflinePlayers(server);
+        com.makar.tacticaltablet.tablet.classes.TabletClassService.tick(server);
 
         for (Map.Entry<MatchPlayedKey, PendingMatchPlayed> entry
                 : new ArrayList<>(pendingMatchesPlayed.entrySet())) {
@@ -1642,7 +1808,7 @@ public class PlayerProgressManager {
                     ? isBaseProgressionClass(normalizedClass) ? getCurrentCompetitiveClassTier() : BASIC_TIER
                     : isShopClass(normalizedClass)
                             ? getShopFixedLevel(normalizedClass)
-                            : getStoredTier(progress, normalizedClass);
+                            : getPersonalTabletClass(player, normalizedClass).tier();
             result.put(normalizedClass, level);
         }
 
@@ -1986,6 +2152,7 @@ public class PlayerProgressManager {
 
         for (Map.Entry<String, UUID> entry : new ArrayList<>(pendingUnloads.entrySet())) {
             String key = entry.getKey();
+            if (pendingTabletOperations.containsKey(key)) continue;
             ServerPlayer online = server.getPlayerList().getPlayer(entry.getValue());
             boolean playerOnline = online != null && !online.hasDisconnected();
             if (playerOnline) {

@@ -151,6 +151,7 @@ public final class TabletPrototypeClient {
         screenOpening(event.getNewScreen());
     }
     @SubscribeEvent public static void logout(ClientPlayerNetworkEvent.LoggingOut event) {
+        TabletClassesClient.reset();
         lastPhase = null; mapOpenSeen = false; mapOpenPending = false;
         reset(); TabletDisplayTarget.release();
     }
