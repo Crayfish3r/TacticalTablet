@@ -246,6 +246,10 @@ public class TabletPacket {
     }
 
     private void handleKit(ServerPlayer player, String kit) {
+        if (MapSetManager.isArenaSet() && !com.makar.tacticaltablet.game.arena.ArenaMatchRuntime.combatOpen()) {
+            LobbyManager.sync(player);
+            return;
+        }
         if (MatchAdmissionManager.enforceLateSpectator(player, false)) {
             LobbyManager.sync(player);
             return;

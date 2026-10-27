@@ -68,6 +68,8 @@ public class LobbyManager {
         }
 
         RtpTimerManager.cancel(player);
+        var arenaLife = com.makar.tacticaltablet.game.arena.ArenaMatchRuntime.life(player);
+        if (arenaLife != null) { arenaLife.rtpUsed = false; arenaLife.awaitingRespawn = false; }
         boolean matchRunningOrStarting = GameStateManager.isRunning(player.server)
                 || GameStateManager.isStartTransitionPlayerSetup();
         boolean preserveTeamMatchState = matchRunningOrStarting
@@ -97,8 +99,10 @@ public class LobbyManager {
         }
 
         player.removeTag("war.playing");
-        InventoryManager.clearInventory(player);
-        PlayerLifecycleSanitizer.clearPreviousLifeState(player);
+        if (arenaLife == null || !arenaLife.kitUsed || ordinaryRespawn) {
+            InventoryManager.clearInventory(player);
+            PlayerLifecycleSanitizer.clearPreviousLifeState(player);
+        }
 
         boolean matchRunning = matchRunningOrStarting;
         boolean canUseTabletNow = GameStateManager.isTabletAvailableInLobby(player.server)
@@ -116,9 +120,11 @@ public class LobbyManager {
         PlayerLifecycleSanitizer.restoreLobbySafety(player);
 
         if (canUseTabletNow) {
-            InventoryManager.giveFreshTablet(player);
+            if (arenaLife == null || !arenaLife.kitUsed) InventoryManager.giveFreshTablet(player);
+            else InventoryManager.giveTabletIfMissing(player);
             AirdropManager.giveCompassToJoiningPlayer(player);
-            if (matchRunning && (!MapSetManager.isChaosSet() || !ChaosSetManager.requiresSelection(player))) {
+            if (matchRunning && (!MapSetManager.isArenaSet() || PlayerTabletState.isKitUsed(player))
+                    && (!MapSetManager.isChaosSet() || !ChaosSetManager.requiresSelection(player))) {
                 RtpTimerManager.start(player);
             } else {
                 sync(player);

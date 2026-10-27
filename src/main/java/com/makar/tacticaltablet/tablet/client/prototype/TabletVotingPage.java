@@ -21,7 +21,7 @@ import static com.makar.tacticaltablet.tablet.client.prototype.TabletTerminalThe
 /** Retained voting states of PREPARATION, not additional physical pages or a separate poller. */
 final class TabletVotingPage {
     static final int SET = 10, FORMAT = 20, MAP = 100;
-    static final SetGameMode[] SET_MODES = {SetGameMode.CASUAL, SetGameMode.CHAOS, SetGameMode.COMPETITIVE};
+    static final SetGameMode[] SET_MODES = {SetGameMode.CASUAL, SetGameMode.CHAOS, SetGameMode.COMPETITIVE, SetGameMode.ARENA};
     static final MatchMode[] FORMATS = {MatchMode.SOLO, MatchMode.DUO, MatchMode.TRIO, MatchMode.SQUADS};
     private static final int MAP_ROW_HEIGHT = 66;
     private static final long TIMEOUT_MS = 8_000, CLICK_INTERVAL_MS = 250;
@@ -48,7 +48,7 @@ final class TabletVotingPage {
         this.height = height;
         list = new TabletPreparationPage.Rect(MARGIN, 64, LOGICAL_WIDTH - 2 * MARGIN, height - 176);
         capacity = Math.max(1, list.height() / MAP_ROW_HEIGHT);
-        int setWidth = (LOGICAL_WIDTH - 2 * MARGIN - 2 * GAP) / 3;
+        int setWidth = (LOGICAL_WIDTH - 2 * MARGIN - (SET_MODES.length - 1) * GAP) / SET_MODES.length;
         for (int i = 0; i < setButtons.length; i++)
             setButtons[i] = new TabletPreparationPage.Rect(MARGIN + i * (setWidth + GAP), height - 87, setWidth, 44);
         int formatWidth = (LOGICAL_WIDTH - 2 * MARGIN - GAP) / 2;

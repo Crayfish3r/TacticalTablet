@@ -11,7 +11,7 @@ public final class SetModeVotePolicy {
     private SetModeVotePolicy() { }
 
     public static SetGameMode selectWinner(Map<SetGameMode, Integer> counts, RandomGenerator random) {
-        return selectWinner(counts, Set.of(SetGameMode.CASUAL, SetGameMode.CHAOS, SetGameMode.COMPETITIVE), random);
+        return selectWinner(counts, Set.of(SetGameMode.CASUAL, SetGameMode.CHAOS, SetGameMode.COMPETITIVE, SetGameMode.ARENA), random);
     }
 
     public static SetGameMode selectWinner(Map<SetGameMode, Integer> counts,

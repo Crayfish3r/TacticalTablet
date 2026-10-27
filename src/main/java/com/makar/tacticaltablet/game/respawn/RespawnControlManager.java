@@ -18,7 +18,7 @@ public class RespawnControlManager {
     private static boolean respawnsDisabled;
 
     public static boolean areRespawnsDisabled() {
-        return respawnsDisabled;
+        return !LivesManager.hasUnlimitedLives() && respawnsDisabled;
     }
 
     public static void reset(MinecraftServer server) {
@@ -28,6 +28,7 @@ public class RespawnControlManager {
 
     public static void disableRespawns(MinecraftServer server) {
         if (server == null) return;
+        if (LivesManager.hasUnlimitedLives()) return;
 
         if (!respawnsDisabled) {
             respawnsDisabled = true;

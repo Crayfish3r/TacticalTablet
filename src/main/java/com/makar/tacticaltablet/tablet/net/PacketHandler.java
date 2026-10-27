@@ -29,7 +29,7 @@ import java.util.function.Supplier;
 /** Tactical Tablet protocol registry. */
 public final class PacketHandler {
     // Preparation uses optional tails on existing packets; legacy payloads and IDs remain unchanged.
-    public static final String VERSION = "44";
+    public static final String VERSION = "45";
 
     public static final int TABLET = 0, TABLET_STATE = 1, VOTE_MODE = 2, JOIN_TEAM = 3, VOTE_MAP = 4,
             MAP_VOTE_STATE = 5, SET_COMPETITIVE = 6, SET_CLAN_WAR = 7, CONTRACT_SELECTION_STATE = 8,
@@ -43,7 +43,7 @@ public final class PacketHandler {
             MDC_BALANCE_REQUEST = 34, MDC_BALANCE_STATE = 35, MDC_BALANCE_UPDATE = 36,
             CASINO_OPEN_STATE = 37, CASINO_SPIN_REQUEST = 38, CASINO_SPIN_RESULT = 39,
         CASINO_CLOSE = 40, CASINO_SPECTATOR_OPEN = 41, CASINO_ANIMATION = 42,
-            COSMETIC_PURCHASE = 43;
+            COSMETIC_PURCHASE = 43, ARENA_STATE = 44;
 
     public static final SimpleChannel INSTANCE = NetworkRegistry.newSimpleChannel(
             new ResourceLocation("tacticaltablet", "main"), () -> VERSION, VERSION::equals, VERSION::equals);
@@ -112,6 +112,8 @@ public final class PacketHandler {
         register(CASINO_ANIMATION, CasinoAnimationPacket.class, CasinoAnimationPacket::encode, CasinoAnimationPacket::new, CasinoAnimationPacket::handle, NetworkDirection.PLAY_TO_CLIENT);
         register(COSMETIC_PURCHASE, CosmeticPurchasePacket.class, CosmeticPurchasePacket::encode,
                 CosmeticPurchasePacket::new, CosmeticPurchasePacket::handle, NetworkDirection.PLAY_TO_SERVER);
+        register(ARENA_STATE, ArenaStatePacket.class, ArenaStatePacket::encode,
+                ArenaStatePacket::new, ArenaStatePacket::handle, NetworkDirection.PLAY_TO_CLIENT);
         verifyUniqueIds();
         registered = true;
     }

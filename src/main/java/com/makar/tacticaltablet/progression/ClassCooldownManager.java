@@ -76,7 +76,7 @@ public class ClassCooldownManager {
 
     public static void setCooldownForSelectedClass(ServerPlayer player) {
         if (player == null || !PlayerTabletState.isKitUsed(player)) return;
-        if (MapSetManager.isChaosSet()) return;
+        if (MapSetManager.isChaosSet() || MapSetManager.isArenaSet()) return;
 
         int classId = classIdForClass(PlayerTabletState.getSelectedClass(player));
         if (classId < 0) return;
@@ -117,6 +117,7 @@ public class ClassCooldownManager {
         };
     }
     public static void setCooldown(ServerPlayer player, int classId) {
+        if (MapSetManager.isArenaSet()) return;
         if (player == null || classId < 0 || classId >= COOLDOWNS.length) return;
 
         long cooldownTime = getCooldownTime(player, classId);
@@ -127,6 +128,7 @@ public class ClassCooldownManager {
     }
 
     public static long getRemaining(ServerPlayer player, int classId) {
+        if (MapSetManager.isArenaSet()) return 0;
         if (player == null || classId < 0 || classId >= COOLDOWNS.length) return 0L;
 
         Map<Integer, Long> map = data.get(player.getUUID());
@@ -154,6 +156,7 @@ public class ClassCooldownManager {
 
     public static Map<Integer, Long> getCooldowns(ServerPlayer player) {
         Map<Integer, Long> result = new HashMap<>();
+        if (MapSetManager.isArenaSet()) return result;
         if (player == null) return result;
 
         Map<Integer, Long> map = data.get(player.getUUID());

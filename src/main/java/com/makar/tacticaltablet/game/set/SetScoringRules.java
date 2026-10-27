@@ -58,14 +58,22 @@ public final class SetScoringRules {
 
     public static int calculateGameScore(GamePerformance performance) {
         if (performance == null) return 0;
+        if (performance.arena()) return performance.arenaScore();
         return getPlacementPoints(performance.placement())
                 + getKillPoints(performance.kills())
                 + getAssistPoints(performance.assists())
                 + getDamagePoints(performance.effectivePvpDamage());
     }
 
+    public static int calculateTotal(java.util.List<GamePerformance> games) {
+        if (games.stream().noneMatch(GamePerformance::arena)) return games.stream().mapToInt(SetScoringRules::calculateGameScore).sum();
+        return (int) Math.min(Integer.MAX_VALUE, games.stream().mapToLong(SetScoringRules::calculateGameScore).sum());
+    }
+
     public static ScoreBreakdown breakdown(SetPlayerResult result) {
         if (result == null) return new ScoreBreakdown(0, 0, 0, 0, 0);
+        if (result.games().stream().anyMatch(GamePerformance::arena))
+            return new ScoreBreakdown(0, 0, 0, 0, result.totalScore());
         int placement = result.games().stream().mapToInt(game -> getPlacementPoints(game.placement())).sum();
         int kills = result.games().stream().mapToInt(game -> getKillPoints(game.kills())).sum();
         int assists = result.games().stream().mapToInt(game -> getAssistPoints(game.assists())).sum();

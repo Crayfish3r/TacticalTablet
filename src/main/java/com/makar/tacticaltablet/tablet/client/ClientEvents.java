@@ -22,12 +22,14 @@ public class ClientEvents {
 
     @SubscribeEvent
     public static void onClientLogin(ClientPlayerNetworkEvent.LoggingIn event) {
+        ArenaClientState.clear();
         TabletClientState.clearMatchSetup();
         MapVoteClientState.clear();
     }
 
     @SubscribeEvent
     public static void onClientLogout(ClientPlayerNetworkEvent.LoggingOut event) {
+        ArenaClientState.clear();
         TabletClientState.clearMatchSetup();
         MapVoteClientState.clear();
         ChaosClientState.clear();

@@ -51,11 +51,14 @@ public final class TabletPreparationService {
         PacketHandler.sendToPlayer(player, ClassXPManager.createStatePacket(player).withPreparation(snapshot));
         // Same server-thread snapshot, same nonce, no second poll or synthetic vote from the client.
         MapSetManager.sync(player, false, requestId);
+        com.makar.tacticaltablet.game.arena.ArenaMatchRuntime.sync(player);
     }
 
     private static String admission(ServerPlayer player) {
         if (!InventoryManager.hasTablet(player)) return "Нужен планшет в инвентаре.";
         if (!GameStateManager.isRunning(player.server)) return "Матч ещё не начался.";
+        if (MapSetManager.isArenaSet() && !com.makar.tacticaltablet.game.arena.ArenaMatchRuntime.combatOpen())
+            return "Арена завершена. Ожидаем фиксацию результатов.";
         if (!player.isAlive() || player.isSpectator() || MatchAdmissionManager.isLateSpectator(player)
                 || !LivesManager.canContinueMatch(player)) return "Вы не являетесь активным участником матча.";
         return "";
@@ -91,6 +94,7 @@ public final class TabletPreparationService {
         String reason = admission(player);
         if (!reason.isEmpty()) return reason;
         if (PlayerTabletState.isRtpUsed(player)) return "Вы уже вступили в бой.";
+        if (MapSetManager.isArenaSet() && !PlayerTabletState.isKitUsed(player)) return "Сначала получите набор для этой жизни.";
         if (MapSetManager.isChaosSet() && (ChaosSetManager.requiresSelection(player) || !PlayerTabletState.isKitUsed(player)))
             return "Сначала выберите класс для текущей игры Хаоса.";
         if (!GameStateManager.isInLobby(player) || !player.getTags().contains("in_lobby"))

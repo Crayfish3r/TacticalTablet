@@ -324,7 +324,7 @@ public final class DiscordLeaderboardService {
 
         SetLeaderboardSnapshot snapshot = SetResultService.createSnapshot(
                 MapSetManager.getSetId(), MapSetManager.getParticipantNames(),
-                SetResultService.flatten(currentSetGames));
+                SetResultService.flatten(currentSetGames), MapSetManager.getGamesPerSet());
         SetRewardSummary summary = SetResultService.createRewardSummary(
                 snapshot, MapSetManager.isCompetitiveSet());
         if (!MapSetManager.saveCompletedSetResults(server, snapshot, summary)) {
@@ -408,7 +408,7 @@ public final class DiscordLeaderboardService {
             if (loaded.players != null) currentSetStats.putAll(loaded.players);
             if (loaded.games != null) currentSetGames.putAll(loaded.games);
             recoverLegacyParticipants(server);
-            if (currentSetMatches >= MapSetManager.GAMES_PER_MAP) {
+            if (currentSetMatches >= MapSetManager.getGamesPerSet()) {
                 if (!MapSetManager.ensureSetCompleted(server)) {
                     TacticalTabletMod.LOGGER.error("Failed to reconcile completed set state after statistics recovery");
                 }
@@ -524,6 +524,8 @@ public final class DiscordLeaderboardService {
     }
 
     private static CompletableFuture<Boolean> sendCurrentSetReport(MinecraftServer server, SetRewardSummary summary) {
+        // Arena results stay local until the user explicitly authorizes external export.
+        if (MapSetManager.isArenaSet()) return CompletableFuture.completedFuture(false);
         DiscordConfig config = DiscordConfig.get(server);
         if (config == null || !config.hasWebhook()) {
             TacticalTabletMod.LOGGER.warn("Discord webhook is not configured. Set webhookUrl in config/tacticaltablet_discord.json");

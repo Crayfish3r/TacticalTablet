@@ -79,6 +79,9 @@ public final class MapSetManager {
             state.mapName = currentMap;
             state.lastRotation = lastRotation;
             state.completedGames = 0;
+            state.arenaGames = new ArrayList<>();
+            state.arenaCompletedMatches = new java.util.HashSet<>();
+            state.arenaGameMatchIds = new LinkedHashMap<>();
             state.setId = UUID.randomUUID().toString();
             state.participants.clear();
             state.rewardSummary = null;
@@ -90,6 +93,8 @@ public final class MapSetManager {
         } else if (!normalize(state.mapName).equals(normalize(currentMap))
                 || (!state.lastRotation.isBlank() && !lastRotation.isBlank()
                 && !lastRotation.equals(state.lastRotation))) {
+            if (isArenaSet() && !archiveArenaResults())
+                throw new IllegalStateException("Arena results archive could not be committed; existing results preserved");
             TacticalTabletMod.LOGGER.info(
                     "Tactical Tablet detected a completed map rotation. Resetting map set: {} -> {}, competitive={}",
                     state.mapName,
@@ -99,6 +104,9 @@ public final class MapSetManager {
             state.mapName = currentMap;
             state.lastRotation = lastRotation;
             state.completedGames = 0;
+            state.arenaGames = new ArrayList<>();
+            state.arenaCompletedMatches = new java.util.HashSet<>();
+            state.arenaGameMatchIds = new LinkedHashMap<>();
             state.setId = UUID.randomUUID().toString();
             state.participants.clear();
             state.rewardSummary = null;
@@ -113,12 +121,14 @@ public final class MapSetManager {
             state.nextSetCompetitive = false;
             state.nextSetClanWar = false;
             state.nextSetMode = SetGameMode.CASUAL;
-            saveState();
+            if (!saveState() && isArenaSet())
+                throw new IllegalStateException("Arena mode activation could not be persisted; previous set save preserved");
         } else if (state.lastRotation.isBlank() && !lastRotation.isBlank()) {
             state.lastRotation = lastRotation;
             saveState();
         }
         reconcileRecentPlayedMaps(server);
+        if (isArenaSet()) reconcileArenaProgress(server);
     }
 
     public static synchronized void onServerStopped() {
@@ -129,33 +139,118 @@ public final class MapSetManager {
     }
 
     public static synchronized int getCurrentGameNumber() {
-        return MapSetProgressionPolicy.currentGameNumber(state.completedGames, GAMES_PER_MAP);
+        return MapSetProgressionPolicy.currentGameNumber(state.completedGames, getGamesPerSet());
     }
 
+    public static int gamesPerMode(SetGameMode mode) { return mode == SetGameMode.ARENA ? 3 : GAMES_PER_MAP; }
+    public static synchronized int getGamesPerSet() { return gamesPerMode(getSetMode()); }
+    public static synchronized boolean isArenaSet() { return !state.competitiveSet && state.setMode == SetGameMode.ARENA; }
+
+    /** One atomic mode-specific completion receipt, results, set summary and game counter. */
+    public static synchronized boolean commitArenaGame(MinecraftServer server, UUID matchId,
+            List<com.makar.tacticaltablet.game.set.GamePerformance> games) {
+        initStorage(server);
+        if (!isArenaSet() || matchId == null) return false;
+        String key = matchId.toString();
+        if (state.arenaCompletedMatches.contains(key)) return !isSetComplete() || archiveArenaResults();
+        if (isSetComplete()) return false;
+        int previousCount = state.completedGames;
+        var previousGames = state.arenaGames;
+        var previousIds = state.arenaCompletedMatches;
+        var previousSnapshot = state.leaderboardSnapshot;
+        var previousSummary = state.rewardSummary;
+        var previousRotation = rotationState();
+        var previousParticipants = state.participants;
+        var previousGameMatches = state.arenaGameMatchIds;
+        state.arenaGameMatchIds = new LinkedHashMap<>(previousGameMatches);
+        state.arenaGameMatchIds.put(state.completedGames + 1, key);
+        state.participants = new LinkedHashMap<>(previousParticipants);
+        for (var game : games) state.participants.putIfAbsent(game.playerId().toString(), game.playerName());
+        state.arenaGames = new ArrayList<>(previousGames);
+        state.arenaGames.addAll(games);
+        state.arenaCompletedMatches = new java.util.HashSet<>(previousIds);
+        state.arenaCompletedMatches.add(key);
+        state.completedGames = MapSetProgressionPolicy.completedAfterGame(previousCount, getGamesPerSet());
+        recordRotationIfSetJustCompleted(previousCount);
+        if (isSetComplete()) {
+            state.leaderboardSnapshot = com.makar.tacticaltablet.game.set.SetResultService.createSnapshot(
+                    getSetId(), getParticipantNames(), state.arenaGames, getGamesPerSet());
+            state.rewardSummary = com.makar.tacticaltablet.game.set.SetResultService.createRewardSummary(state.leaderboardSnapshot);
+        }
+        if (saveState()) { reconcileArenaProgress(server); return !isSetComplete() || archiveArenaResults(); }
+        state.completedGames = previousCount; state.arenaGames = previousGames;
+        state.arenaCompletedMatches = previousIds; state.leaderboardSnapshot = previousSnapshot;
+        state.rewardSummary = previousSummary; applyRotationState(previousRotation);
+        state.participants = previousParticipants;
+        state.arenaGameMatchIds = previousGameMatches;
+        return false;
+    }
+
+    private static void reconcileArenaProgress(MinecraftServer server) {
+        for (var game : state.arenaGames) {
+            String match = state.arenaGameMatchIds.get(game.gameNumber());
+            if (match == null) continue;
+            try {
+                var ticket = PlayerProgressManager.queueArenaCompletion(server, game.playerId(), game.playerName(),
+                        UUID.fromString(match), game.arenaWinner());
+                if (ticket != null) ticket.completion().whenComplete((result, failure) -> {
+                    if (failure != null || result == null || result.status() != com.makar.tacticaltablet.storage.DurableSaveResult.Status.WRITTEN)
+                        TacticalTabletMod.LOGGER.error("Arena career save not committed playerId={} matchId={} result={}",
+                                game.playerId(), match, result, failure);
+                });
+            } catch (RuntimeException exception) {
+                TacticalTabletMod.LOGGER.error("Arena career recovery failed playerId={} matchId={}", game.playerId(), match, exception);
+            }
+        }
+    }
+
+    private static boolean archiveArenaResults() {
+        if (state.arenaGames.isEmpty()) return true;
+        Path target = statePath.getParent().resolve("arena_results").resolve(getSetId() + ".json");
+        var data = new ArenaArchive(getSetId(), List.copyOf(state.arenaGames),
+                Map.copyOf(state.arenaGameMatchIds), state.leaderboardSnapshot);
+        try {
+            if (Files.exists(target)) {
+                if (com.google.gson.JsonParser.parseString(Files.readString(target)).equals(GSON.toJsonTree(data))) return true;
+                TacticalTabletMod.LOGGER.error("Arena archive differs; refusing to overwrite {}", target);
+                return false;
+            }
+            var saved = new com.makar.tacticaltablet.storage.AtomicFileStore().writeUtf8(target, GSON.toJson(data));
+            if (saved.status() == com.makar.tacticaltablet.storage.FileSaveResult.Status.SUCCESS) return true;
+            TacticalTabletMod.LOGGER.error("Arena archive commit failed {}: {}", target, saved.diagnostic());
+        } catch (IOException | RuntimeException error) {
+            TacticalTabletMod.LOGGER.error("Arena archive read/write failed {}", target, error);
+        }
+        return false;
+    }
+
+    private record ArenaArchive(UUID setId, List<com.makar.tacticaltablet.game.set.GamePerformance> games,
+                                Map<Integer, String> matchIds, SetLeaderboardSnapshot results) { }
+
     public static synchronized int getCompletedGames() {
-        return MapSetProgressionPolicy.normalizeCompletedGames(state.completedGames, GAMES_PER_MAP);
+        return MapSetProgressionPolicy.normalizeCompletedGames(state.completedGames, getGamesPerSet());
     }
 
     public static synchronized boolean onGameCompleted(MinecraftServer server) {
         initStorage(server);
         int previousCompletedGames = state.completedGames;
         SetModeRotationPolicy.RotationState previousRotation = rotationState();
-        state.completedGames = MapSetProgressionPolicy.completedAfterGame(state.completedGames, GAMES_PER_MAP);
+        state.completedGames = MapSetProgressionPolicy.completedAfterGame(state.completedGames, getGamesPerSet());
         recordRotationIfSetJustCompleted(previousCompletedGames);
         if (!saveState()) {
             state.completedGames = previousCompletedGames;
             applyRotationState(previousRotation);
             return false;
         }
-        return MapSetProgressionPolicy.isComplete(state.completedGames, GAMES_PER_MAP);
+        return MapSetProgressionPolicy.isComplete(state.completedGames, getGamesPerSet());
     }
 
     public static synchronized boolean ensureSetCompleted(MinecraftServer server) {
         initStorage(server);
-        if (state.completedGames >= GAMES_PER_MAP) return true;
+        if (state.completedGames >= getGamesPerSet()) return true;
         int previous = state.completedGames;
         SetModeRotationPolicy.RotationState previousRotation = rotationState();
-        state.completedGames = GAMES_PER_MAP;
+        state.completedGames = getGamesPerSet();
         recordRotationIfSetJustCompleted(previous);
         if (saveState()) return true;
         state.completedGames = previous;
@@ -164,7 +259,7 @@ public final class MapSetManager {
     }
 
     public static synchronized boolean isSetComplete() {
-        return MapSetProgressionPolicy.isComplete(state.completedGames, GAMES_PER_MAP);
+        return MapSetProgressionPolicy.isComplete(state.completedGames, getGamesPerSet());
     }
 
     public static synchronized UUID getSetId() {
@@ -179,8 +274,9 @@ public final class MapSetManager {
 
     public static synchronized void recordParticipant(MinecraftServer server, UUID playerId, String name) {
         if (server == null || playerId == null
-                || MapSetProgressionPolicy.isComplete(state.completedGames, GAMES_PER_MAP)) return;
+                || MapSetProgressionPolicy.isComplete(state.completedGames, getGamesPerSet())) return;
         initStorage(server);
+        if (isArenaSet()) return; // The Arena set roster is committed only with completed-game performances.
         state.participants.put(playerId.toString(), name == null ? "" : name);
         saveState();
     }
@@ -248,6 +344,9 @@ public final class MapSetManager {
         initStorage(server);
         TacticalTabletMod.LOGGER.warn("Resetting only the active map set because its statistics cannot be migrated safely");
         state.completedGames = 0;
+            state.arenaGames = new ArrayList<>();
+            state.arenaCompletedMatches = new java.util.HashSet<>();
+            state.arenaGameMatchIds = new LinkedHashMap<>();
         state.setId = UUID.randomUUID().toString();
         state.participants.clear();
         state.rewardSummary = null;
@@ -290,7 +389,7 @@ public final class MapSetManager {
 
     public static synchronized void skipRewardingForDebug(MinecraftServer server) {
         initStorage(server);
-        state.completedGames = GAMES_PER_MAP;
+        state.completedGames = getGamesPerSet();
         state.rewardSummary = null;
         state.leaderboardSnapshot = null;
         state.rewardEndsAtMillis = -1L;
@@ -330,7 +429,7 @@ public final class MapSetManager {
 
     public static synchronized SetGameMode getSetMode() {
         if (state.competitiveSet) return SetGameMode.COMPETITIVE;
-        return isChaosSet() ? SetGameMode.CHAOS : SetGameMode.CASUAL;
+        return state.setMode == SetGameMode.ARENA ? SetGameMode.ARENA : isChaosSet() ? SetGameMode.CHAOS : SetGameMode.CASUAL;
     }
 
     public static synchronized int getChaosCooldownRemaining() {
@@ -393,11 +492,11 @@ public final class MapSetManager {
 
         int game = getCurrentGameNumber();
         Component title = Component.literal(state.competitiveSet
-                ? "Соревновательная игра " + game + " из " + GAMES_PER_MAP
+                ? "Соревновательная игра " + game + " из " + getGamesPerSet()
                 : game + "-я игра началась");
         Component subtitle = Component.literal(state.competitiveSet
                 ? "Единый уровень классов: " + CompetitiveClassTierPolicy.tierForGame(game).displayName()
-                : "Игра " + game + " из " + GAMES_PER_MAP);
+                : "Игра " + game + " из " + getGamesPerSet());
 
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
             player.connection.send(new ClientboundSetTitlesAnimationPacket(10, 60, 20));
@@ -431,7 +530,7 @@ public final class MapSetManager {
                     fullPool, updatedHistory, currentMapName(server), RECENT_MAP_COOLDOWN);
         }
         if (debug) {
-            state.completedGames = GAMES_PER_MAP;
+            state.completedGames = getGamesPerSet();
             state.rewardSummary = null;
             state.leaderboardSnapshot = null;
             state.rewardEndsAtMillis = -1L;
@@ -484,7 +583,7 @@ public final class MapSetManager {
 
         broadcast(server, debug
                 ? "[WAR] Отладочное голосование за следующую карту началось. После выбора сервер будет перезапущен."
-                : "[WAR] Сет из " + GAMES_PER_MAP
+                : "[WAR] Сет из " + getGamesPerSet()
                 + " игр завершён. Выберите следующую карту — осталось 30 секунд.");
         syncAll(server, true);
     }
@@ -543,8 +642,7 @@ public final class MapSetManager {
             SetGameMode modeWinner = SetModeVotePolicy.selectWinner(
                     modeVoteCounts(), availableSetModes, RANDOM);
             state.nextSetCompetitive = modeWinner == SetGameMode.COMPETITIVE;
-            state.nextSetMode = modeWinner == SetGameMode.CHAOS
-                    ? SetGameMode.CHAOS : SetGameMode.CASUAL;
+            state.nextSetMode = modeWinner == SetGameMode.COMPETITIVE ? SetGameMode.CASUAL : modeWinner;
         } else {
             state.nextSetMode = SetGameMode.CASUAL;
         }
@@ -747,7 +845,7 @@ public final class MapSetManager {
         MapSetProgressionPolicy.Migration migration = MapSetProgressionPolicy.migrate(
                 candidate.dataVersion,
                 candidate.completedGames,
-                GAMES_PER_MAP
+                gamesPerMode(candidate.competitiveSet ? SetGameMode.COMPETITIVE : candidate.setMode)
         );
         candidate.completedGames = migration.completedGames();
         candidate.dataVersion = migration.dataVersion();
@@ -782,6 +880,9 @@ public final class MapSetManager {
         if (candidate.nextSetMode == null || !candidate.nextSetMode.selectable()) candidate.nextSetMode = SetGameMode.CASUAL;
         if (candidate.competitiveSet) candidate.setMode = SetGameMode.CASUAL;
         if (candidate.nextSetCompetitive) candidate.nextSetMode = SetGameMode.CASUAL;
+        if (candidate.arenaGames == null) candidate.arenaGames = new ArrayList<>();
+        if (candidate.arenaCompletedMatches == null) candidate.arenaCompletedMatches = new java.util.HashSet<>();
+        if (candidate.arenaGameMatchIds == null) candidate.arenaGameMatchIds = new LinkedHashMap<>();
         if (candidate.chaosDeck == null) candidate.chaosDeck = new ArrayList<>();
     }
 
@@ -844,7 +945,7 @@ public final class MapSetManager {
 
     private static void recordRotationIfSetJustCompleted(int previousCompletedGames) {
         if (!SetModeRotationPolicy.shouldRecordCompletion(
-                previousCompletedGames, state.completedGames, GAMES_PER_MAP)) return;
+                previousCompletedGames, state.completedGames, getGamesPerSet())) return;
         applyRotationState(SetModeRotationPolicy.recordCompletedSet(rotationState(), getSetMode()));
     }
 
@@ -876,6 +977,9 @@ public final class MapSetManager {
         boolean nextSetCompetitive;
         boolean clanWarSet;
         boolean nextSetClanWar;
+        List<com.makar.tacticaltablet.game.set.GamePerformance> arenaGames = new ArrayList<>();
+        Set<String> arenaCompletedMatches = new java.util.HashSet<>();
+        Map<Integer, String> arenaGameMatchIds = new LinkedHashMap<>();
         SetGameMode setMode = SetGameMode.CASUAL;
         SetGameMode nextSetMode = SetGameMode.CASUAL;
         List<String> chaosDeck = new ArrayList<>();

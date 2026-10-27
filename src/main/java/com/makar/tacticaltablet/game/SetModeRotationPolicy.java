@@ -34,7 +34,7 @@ public final class SetModeRotationPolicy {
 
     public static Set<SetGameMode> availableModes(RotationState state, int eligiblePlayers) {
         RotationState current = state == null ? new RotationState(0, 0) : state;
-        EnumSet<SetGameMode> available = EnumSet.of(SetGameMode.CASUAL);
+        EnumSet<SetGameMode> available = EnumSet.of(SetGameMode.CASUAL, SetGameMode.ARENA);
         if (current.chaosCooldownRemaining() == 0) available.add(SetGameMode.CHAOS);
         if (eligiblePlayers >= COMPETITIVE_MIN_PLAYERS
                 && current.consecutiveCompetitiveSets() < MAX_CONSECUTIVE_COMPETITIVE) {

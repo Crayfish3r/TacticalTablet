@@ -42,16 +42,33 @@ public final class NpcEncounterConfig {
     }
 
     public static NpcEncounterConfig load(Path path, Consumer<String> diagnostic) {
+        return load(path, diagnostic, new NpcEncounterConfig());
+    }
+
+    public static NpcEncounterConfig arenaDefaults() {
+        var c = new NpcEncounterConfig();
+        c.enabled = true; c.maxActiveNpcs = 24; c.minGroupSize = 2; c.maxGroupSize = 4;
+        c.minSpawnIntervalSeconds = 20; c.maxSpawnIntervalSeconds = 35;
+        c.presets = List.of(
+                new Preset("arena_assault", 8, 2, 4, List.of("tacz:ak47", "tacz:ak47", "tacz:ak47", "tacz:ak47"),
+                        "ATTACK", "FINITE", 120, 24),
+                new Preset("arena_patrol", 2, 2, 3, List.of("tacz:ak47", "tacz:ak47", "tacz:ak47"),
+                        "PATROL", "FINITE", 120, 24));
+        return c;
+    }
+
+    public static NpcEncounterConfig load(Path path, Consumer<String> diagnostic, NpcEncounterConfig defaults) {
         try {
             if (!Files.exists(path)) {
-                var defaults = new NpcEncounterConfig();
                 var saved = new AtomicFileStore().writeUtf8(path, GSON.toJson(defaults));
                 if (saved.status() != com.makar.tacticaltablet.storage.FileSaveResult.Status.SUCCESS)
                     throw new IOException("Cannot commit default NPC config: " + saved.diagnostic());
                 return defaults;
             }
             if (Files.size(path) > 262144) throw new IOException("NPC config exceeds 256 KiB");
-            return validate(GSON.fromJson(Files.readString(path), NpcEncounterConfig.class), diagnostic);
+            var parser = new GsonBuilder().registerTypeAdapter(NpcEncounterConfig.class,
+                    (com.google.gson.InstanceCreator<NpcEncounterConfig>) type -> defaults).create();
+            return validate(parser.fromJson(Files.readString(path), NpcEncounterConfig.class), diagnostic);
         } catch (IOException | RuntimeException exception) {
             diagnostic.accept("NPC config disabled: " + exception.getMessage());
             return new NpcEncounterConfig();

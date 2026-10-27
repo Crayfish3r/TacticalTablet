@@ -153,6 +153,9 @@ public final class TabletPreparationPage {
             case RESTARTING -> "Перезапуск";
             case SET_REWARDING -> "Подведение итогов";
         };
+        if (com.makar.tacticaltablet.tablet.client.ArenaClientState.unlimitedLives()) value += " • "
+                + Component.translatable("screen.tacticaltablet.arena.lives").getString()
+                + " • Очки: " + com.makar.tacticaltablet.tablet.client.ArenaClientState.ownScore();
         if (!value.equals(matchStatus)) { matchStatus = value; dirty = true; }
         selectionStatus = confirmedClass.isEmpty() ? "Класс сервером ещё не подтверждён"
                 : ClassDefinitions.byClassKey(confirmedClass).map(d -> "Получен: " + d.name().getString()).orElse("Класс подтверждён");

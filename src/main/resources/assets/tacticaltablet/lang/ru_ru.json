@@ -246,5 +246,8 @@
   "message.tacticaltablet.cosmetic.ghillie_suit.purchased": "[WAR] Маскхалат куплен за %s монет.",
   "message.tacticaltablet.cosmetic.ghillie_suit.already_owned": "[WAR] Маскхалат уже куплен.",
   "message.tacticaltablet.cosmetic.ghillie_suit.not_enough": "[WAR] Не хватает монет для маскхалата. Нужно %s монет.",
-  "message.tacticaltablet.cosmetic.invalid": "[WAR] Этот товар нельзя купить."
+  "message.tacticaltablet.cosmetic.invalid": "[WAR] Этот товар нельзя купить.",
+  "screen.tacticaltablet.map_voting.mode.arena": "Арена",
+  "screen.tacticaltablet.arena.lives": "Жизни: ∞",
+  "screen.tacticaltablet.arena.timer": "Арена — %s • %s/%s"
 }

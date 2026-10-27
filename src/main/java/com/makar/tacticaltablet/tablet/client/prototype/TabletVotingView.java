@@ -89,7 +89,8 @@ final class TabletVotingView {
             boolean selected = mode == MapVoteClientState.getSelectedMode();
             background(g, Kind.BUTTON, state(page, TabletVotingPage.SET + i, selected),
                     rect.x(), rect.y(), rect.width(), rect.height());
-            String label = switch (mode) { case CASUAL -> "Casual"; case CHAOS -> "Chaos"; default -> "Competitive"; };
+            String label = switch (mode) { case CASUAL -> "Casual"; case CHAOS -> "Chaos";
+                case ARENA -> net.minecraft.network.chat.Component.translatable(mode.translationKey()).getString(); default -> "Competitive"; };
             text(g, label, rect.x() + 9, rect.y() + 7, rect.width() - 18, TEXT, TEXT_SCALE);
             String detail = MapVoteClientState.getModeVoteCount(mode) + " голосов"
                     + (selected ? " • Ваш голос" : !page.setReason(mode).isEmpty() ? " • Недоступен" : "");

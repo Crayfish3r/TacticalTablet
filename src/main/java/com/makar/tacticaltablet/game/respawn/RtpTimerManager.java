@@ -408,6 +408,8 @@ public class RtpTimerManager {
     }
 
     private static boolean isChaosDeploymentReady(ServerPlayer player) {
+        if (MapSetManager.isArenaSet()) return player != null && PlayerTabletState.isKitUsed(player)
+                && com.makar.tacticaltablet.game.arena.ArenaMatchRuntime.combatOpen();
         return player != null && isChaosDeploymentReady(
                 MapSetManager.isChaosSet(),
                 ChaosSetManager.requiresSelection(player),

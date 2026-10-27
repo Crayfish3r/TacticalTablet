@@ -10,6 +10,7 @@ final class TabletPageShell {
     private final TabletPreparationPage preparation;
     private final TabletProfilePage profile = new TabletProfilePage();
     private final TabletVotingPage voting;
+    private final TabletArenaResultsView arenaResults;
     private final int height;
     private TabletPage selected = TabletPage.PREPARATION;
     private TabletPage pressedHardware, pressedDisplayPage;
@@ -21,6 +22,7 @@ final class TabletPageShell {
         preparation = new TabletPreparationPage(display);
         height = (int) TabletTerminalTheme.logicalHeight(display);
         voting = new TabletVotingPage(height);
+        arenaResults = new TabletArenaResultsView(height);
     }
 
     TabletPage selected() { return selected; }
@@ -39,14 +41,18 @@ final class TabletPageShell {
     }
     void tick() {
         synchronizePhase();
-        preparation.tick(); profile.tick(preparation); voting.tick();
+        preparation.tick(); profile.tick(preparation); voting.tick(); arenaResults.tick();
         if (voting.takeRefreshRequest()) preparation.refreshWhenIdle();
     }
 
     private boolean votingView() {
         return phase == MatchPhase.MAP_VOTING || phase == MatchPhase.VOTING || phase == MatchPhase.TEAM_SELECT;
     }
-    private boolean navigationLocked() { return !votingView() && preparation.navigationLocked(); }
+    private boolean arenaResultsView() {
+        return !votingView() && phase != MatchPhase.RUNNING
+                && com.makar.tacticaltablet.tablet.client.ArenaClientState.snapshot().finished();
+    }
+    private boolean navigationLocked() { return !votingView() && !arenaResultsView() && preparation.navigationLocked(); }
     private void synchronizePhase() {
         long revision = TabletClientState.getPhaseRevision();
         if (phaseRevision == revision) return;
@@ -55,7 +61,7 @@ final class TabletPageShell {
         updateInteractivity(); dirty = true;
     }
     private void updateInteractivity() {
-        preparation.interactive(open && selected == TabletPage.PREPARATION && !votingView());
+        preparation.interactive(open && selected == TabletPage.PREPARATION && !votingView() && !arenaResultsView());
         voting.interactive(open && selected == TabletPage.PREPARATION && votingView());
     }
 
@@ -68,7 +74,7 @@ final class TabletPageShell {
     void hover(double x, double y) {
         synchronizePhase();
         var hit = open ? TabletDisplayProjection.pick(x, y) : null;
-        preparation.hover(hit == null ? null : hit.display(), open && selected == TabletPage.PREPARATION && !votingView());
+        preparation.hover(hit == null ? null : hit.display(), open && selected == TabletPage.PREPARATION && !votingView() && !arenaResultsView());
         voting.hover(hit == null ? null : hit.display());
     }
 
@@ -81,6 +87,7 @@ final class TabletPageShell {
             if (!navigationLocked()) pressedHardware = TabletPage.forHardwareKey(hit.hardwareKey());
         } else if (hit.display() != null && selected == TabletPage.PREPARATION) {
             pressedDisplayPage = selected;
+            if (arenaResultsView()) return;
             if (votingView()) voting.press(hit.display());
             else preparation.press(hit.display());
         }
@@ -97,6 +104,7 @@ final class TabletPageShell {
             voting.cancelPress();
             if (hardware == TabletPage.forHardwareKey(hit.hardwareKey()) && !navigationLocked()) select(hardware);
         } else if (displayPage == selected && selected == TabletPage.PREPARATION && hit.hardwareKey() == null) {
+            if (arenaResultsView()) { preparation.cancelPress(); voting.cancelPress(); return; }
             if (votingView()) voting.release(hit.display());
             else preparation.release(hit.display());
         } else { preparation.cancelPress(); voting.cancelPress(); }
@@ -120,27 +128,29 @@ final class TabletPageShell {
         if (open && selected == TabletPage.PREPARATION) {
             var hit = TabletDisplayProjection.pick(x, y);
             if (hit.hardwareKey() != null) return;
-            if (votingView()) voting.scroll(hit.display(), delta);
+            if (arenaResultsView()) arenaResults.scroll(hit.display(), delta);
+            else if (votingView()) voting.scroll(hit.display(), delta);
             else preparation.scroll(hit.display(), delta);
         }
     }
 
     boolean dirty() {
         synchronizePhase();
-        return dirty || selected == TabletPage.PREPARATION && (votingView() ? voting.dirty() : preparation.dirty())
+        return dirty || selected == TabletPage.PREPARATION && (arenaResultsView() ? arenaResults.dirty() : votingView() ? voting.dirty() : preparation.dirty())
                 || selected == TabletPage.PROFILE && profile.dirty();
     }
     void rendered() {
         dirty = false;
         if (selected == TabletPage.PREPARATION) {
-            if (votingView()) voting.rendered(); else preparation.rendered();
+            if (arenaResultsView()) arenaResults.rendered(); else if (votingView()) voting.rendered(); else preparation.rendered();
         }
         if (selected == TabletPage.PROFILE) profile.rendered();
     }
     void render(GuiGraphics graphics) {
         switch (selected) {
             case PREPARATION -> {
-                if (votingView()) TabletVotingView.render(graphics, voting);
+                if (arenaResultsView()) arenaResults.render(graphics);
+                else if (votingView()) TabletVotingView.render(graphics, voting);
                 else TabletPreparationView.render(graphics, preparation);
             }
             case PROFILE -> TabletProfileView.render(graphics, profile, height);

@@ -32,6 +32,9 @@ import java.util.UUID;
 /** All methods run on the server thread; no entity or world work is sent to background tasks. */
 public final class NpcEncounterManager {
     private static NpcEncounterManager current;
+    private static MinecraftServer preparedServer;
+    private static NpcEncounterConfig preparedArena;
+    private static NpcIntegration preparedIntegration;
     private final MinecraftServer server;
     private final NpcIntegration integration;
     private final NpcEncounterConfig config;
@@ -47,6 +50,7 @@ public final class NpcEncounterManager {
 
     public static void serverStarted(MinecraftServer server) {
         requireThread(server);
+        preparedServer = null; preparedArena = null; preparedIntegration = null;
         if (current != null && current.server != server) {
             // No API/entity access to a previous server instance. TacticalNPC recovery closes
             // persisted ownership; callbacks are never restored or transferred to a new server.
@@ -62,16 +66,45 @@ public final class NpcEncounterManager {
     }
 
     public static void started(MinecraftServer server) {
+        if (MapSetManager.isArenaSet()) return; // Registered as a rollback-capable start stage.
+        started(server, false);
+    }
+
+    public static String prepareArena(MinecraftServer server) {
+        requireThread(server);
+        preparedServer = null; preparedArena = null; preparedIntegration = null;
+        if (!net.minecraftforge.fml.ModList.get().isLoaded(NpcIntegration.MOD_ID)) return "Арена: TacticalNPC не установлен.";
+        var diagnostics = new ArrayList<String>();
+        var config = NpcEncounterConfig.load(server.getWorldPath(LevelResource.ROOT).resolve("tacticaltablet_arena_npcs.json"),
+                diagnostics::add, NpcEncounterConfig.arenaDefaults());
+        if (!config.enabled) return "Арена: NPC-профиль отключён или некорректен. " + String.join("; ", diagnostics);
+        if (!"minecraft:overworld".equals(config.dimension)) return "Арена: NPC должны использовать minecraft:overworld активной карты.";
+        var integration = NpcIntegration.connect(server);
+        if (integration == null) return "Арена: требуется совместимый TacticalNPC " + NpcIntegration.API_VERSION + " и TaCZ 1.1.8-hotfix2.";
+        preparedServer = server; preparedArena = config; preparedIntegration = integration;
+        return "";
+    }
+
+    public static void prepareArenaSession(MinecraftServer server) {
+        if (preparedServer != server || preparedArena == null || preparedIntegration == null)
+            throw new IllegalStateException("Arena NPC preflight was not completed");
+        started(server, true);
+        if (current == null || current.stopped || current.server != server
+                || GameStateManager.getLifecycleSnapshot().matchId().filter(id -> id.equals(current.schedule.matchId())).isEmpty())
+            throw new IllegalStateException("Arena NPC policy registration failed");
+    }
+
+    private static void started(MinecraftServer server, boolean arenaStart) {
         requireThread(server);
         if (current != null) {
             TacticalTabletMod.LOGGER.error("NPC activation refused: previous session requires cleanup");
             return;
         }
         var snapshot = GameStateManager.getLifecycleSnapshot();
-        if (snapshot.state() != MatchState.RUNNING || snapshot.matchId().isEmpty()) return;
-        var config = NpcEncounterConfig.load(server.getWorldPath(LevelResource.ROOT).resolve("tacticaltablet_npcs.json"),
+        if (snapshot.state() != (arenaStart ? MatchState.STARTING : MatchState.RUNNING) || snapshot.matchId().isEmpty()) return;
+        var config = arenaStart ? preparedArena : NpcEncounterConfig.load(server.getWorldPath(LevelResource.ROOT).resolve("tacticaltablet_npcs.json"),
                 message -> TacticalTabletMod.LOGGER.warn("{}", message));
-        var integration = NpcIntegration.connect(server);
+        var integration = arenaStart ? preparedIntegration : NpcIntegration.connect(server);
         if (!config.enabled || integration == null || !modeAllowed(config)) return;
         var manager = new NpcEncounterManager(server, integration, config);
         if (server.getLevel(manager.dimension) == null) {
@@ -88,6 +121,7 @@ public final class NpcEncounterManager {
             });
             TacticalTabletMod.LOGGER.info("NPC encounter manager activated matchId={}", matchId);
         } catch (RuntimeException | LinkageError exception) {
+            manager.stopped = true;
             manager.schedule.deactivate();
             TacticalTabletMod.LOGGER.error("NPC policy registration failed matchId={}; encounters disabled", matchId, exception);
         }
@@ -96,11 +130,12 @@ public final class NpcEncounterManager {
     private static boolean modeAllowed(NpcEncounterConfig c) {
         var mode = GameStateManager.getCurrentMode();
         return NpcModePolicy.allowed(c, MapSetManager.isClanWarSet(), MapSetManager.isChaosSet() || MapSetManager.isCompetitiveSet(),
-                mode == null ? null : mode.name());
+                mode == null ? null : mode.name(), MapSetManager.isArenaSet());
     }
 
     private boolean combatRunning() {
         return config.enabled && modeAllowed(config) && GameStateManager.isRunning(server)
+                && (!MapSetManager.isArenaSet() || com.makar.tacticaltablet.game.arena.ArenaMatchRuntime.combatOpen())
                 && schedule.running(GameStateManager.getLifecycleSnapshot(), GameStateManager.getMatchPhase() == MatchPhase.RUNNING);
     }
 
@@ -150,12 +185,17 @@ public final class NpcEncounterManager {
             m.schedule.deactivate();
             TacticalTabletMod.LOGGER.error("NPC encounter API failed; disabling matchId={}", m.schedule.matchId(), exception);
             deactivate();
+            if (MapSetManager.isArenaSet()) {
+                server.getPlayerList().broadcastSystemMessage(net.minecraft.network.chat.Component.literal(
+                        "Арена остановлена без зачёта: TacticalNPC недоступен. " + exception.getMessage()), false);
+                GameStateManager.forceStopMatch(server);
+            }
         }
     }
 
     private void encounter() {
         var phase = ZoneManager.getCurrentPhaseNumber();
-        if (phase.isEmpty() || phase.getAsInt() >= config.stopSpawningAtZonePhase) return;
+        if (!MapSetManager.isArenaSet() && (phase.isEmpty() || phase.getAsInt() >= config.stopSpawningAtZonePhase)) return;
         ServerLevel level = server.getLevel(dimension);
         if (level == null) return;
         List<ServerPlayer> players = server.getPlayerList().getPlayers().stream().filter(this::canAttack).toList();
@@ -190,6 +230,9 @@ public final class NpcEncounterManager {
         } else if (result.invalidWeapon()) {
             rejectedPresets.add(loadout.preset().id());
             TacticalTabletMod.LOGGER.warn("NPC preset {} disabled for this match: {}", loadout.preset().id(), result.diagnostic());
+            if (MapSetManager.isArenaSet())
+                throw new IllegalStateException("Оружейный пресет Арены " + loadout.preset().id()
+                        + " отклонён TacticalNPC: " + result.diagnostic());
         } else TacticalTabletMod.LOGGER.debug("NPC spawn refused matchId={}: {}", schedule.matchId(), result.diagnostic());
     }
 

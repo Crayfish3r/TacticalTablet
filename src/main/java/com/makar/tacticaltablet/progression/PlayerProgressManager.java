@@ -1037,6 +1037,28 @@ public class PlayerProgressManager {
         if (start) attemptMatchPlayedSave(player.server, operationKey);
     }
 
+    /** Completed Arena receipts are replayed from the atomic set record after a restart. */
+    public static synchronized SaveTicket queueArenaCompletion(MinecraftServer server, UUID playerId,
+                                                               String name, UUID matchId, boolean winner) {
+        var progress = getOrLoad(server, playerId, name);
+        var played = PROGRESS_SERVICE.incrementCounterIdempotently(progress, MutableProgressState.Counter.MATCHES_PLAYED,
+                "arena_completed:" + matchId, "arena_completed", Clock.systemUTC());
+        if (played.status() != IdempotentCreditStatus.APPLIED && played.status() != IdempotentCreditStatus.ALREADY_APPLIED)
+            throw new IllegalStateException("Arena completion receipt: " + played.diagnostic());
+        boolean changed = played.status() == IdempotentCreditStatus.APPLIED;
+        if (winner) {
+            var win = PROGRESS_SERVICE.incrementCounterIdempotently(progress, MutableProgressState.Counter.WINS,
+                    "arena_win:" + matchId, "arena_win", Clock.systemUTC());
+            if (win.status() != IdempotentCreditStatus.APPLIED && win.status() != IdempotentCreditStatus.ALREADY_APPLIED)
+                throw new IllegalStateException("Arena win receipt: " + win.diagnostic());
+            changed |= win.status() == IdempotentCreditStatus.APPLIED;
+        }
+        if (!changed) return null;
+        String key = getPlayerKey(progress, playerId);
+        markDirty(key);
+        return enqueueSnapshot(key, progress);
+    }
+
     private static void attemptMatchPlayedSave(MinecraftServer server, MatchPlayedKey operationKey) {
         ServerPlayer player = server.getPlayerList().getPlayer(operationKey.playerId());
         if (player == null) {

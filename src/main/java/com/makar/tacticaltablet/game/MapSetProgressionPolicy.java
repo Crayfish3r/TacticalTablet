@@ -1,7 +1,7 @@
 package com.makar.tacticaltablet.game;
 
 public final class MapSetProgressionPolicy {
-    public static final int CURRENT_DATA_VERSION = 5;
+    public static final int CURRENT_DATA_VERSION = 6;
     static final int LEGACY_FOUR_GAME_DATA_VERSION = 4;
     static final int LEGACY_GAMES_PER_SET = 4;
 

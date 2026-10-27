@@ -141,7 +141,8 @@ final class ModernDamageStaminaOverlay {
         if (AirdropNoticeClientState.isVisible()) {
             occupied.add(HudAnchorManager.topCenter(width, height, 280, 45));
         }
-        if (TabletClientState.isGameRunning() && TabletClientState.getLives() > 0) {
+        if (TabletClientState.isGameRunning() && (TabletClientState.getLives() > 0
+                || com.makar.tacticaltablet.tablet.client.ArenaClientState.unlimitedLives())) {
             occupied.add(new HudAnchorManager.Rect(width / 2 + 88, Math.max(0, height - 26),
                     Math.max(0, width / 2 - 88), 26));
         }

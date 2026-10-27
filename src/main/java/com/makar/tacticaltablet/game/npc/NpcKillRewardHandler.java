@@ -43,6 +43,7 @@ public final class NpcKillRewardHandler {
                 || !NpcEncounterManager.claimDeath(identity.ownerMatchId(), victim.getUUID())) return;
 
         var reward = award(killer);
+        com.makar.tacticaltablet.game.arena.ArenaMatchRuntime.npcKill(killer, identity.ownerMatchId());
         ClassXPManager.sync(killer);
         TacticalKillFeed.publishNpcKill(killer, victim.getUUID(), identity.name(), source, reward);
     }

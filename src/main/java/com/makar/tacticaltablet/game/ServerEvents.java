@@ -148,6 +148,7 @@ public class ServerEvents {
                     }
                     var server = player.server;
                     var playerId = player.getUUID();
+                    if (MapSetManager.isArenaSet()) { finishPlayerJoin(player); return; }
                     PlayerProgressManager.ensureMatchPlayed(player, matchId, () -> {
                         ServerPlayer online = server.getPlayerList().getPlayer(playerId);
                         if (online != null && !online.hasDisconnected()) {
@@ -205,6 +206,26 @@ public class ServerEvents {
 
     private static void finishPlayerJoin(ServerPlayer player) {
         LivesManager.reconcileMatchStateOnJoin(player);
+        if (MapSetManager.isArenaSet() && com.makar.tacticaltablet.game.arena.ArenaMatchRuntime.combatOpen()
+                && MatchAdmissionManager.isCurrentMatchParticipant(player.getUUID())) {
+            com.makar.tacticaltablet.game.arena.ArenaMatchRuntime.register(player);
+            LivesManager.ensureStarted(player);
+            var life = com.makar.tacticaltablet.game.arena.ArenaMatchRuntime.life(player);
+            if (life.awaitingRespawn) {
+                LobbyManager.moveRespawningPlayerToLobby(player);
+            } else if (GameStateManager.isInLobby(player)) {
+                player.addTag("in_lobby"); player.removeTag("war.playing");
+                InventoryManager.giveTabletIfMissing(player);
+            } else if (!player.isSpectator() && !ModerModeManager.isInModerMode(player) && life.rtpUsed) {
+                player.addTag("war.playing"); player.removeTag("in_lobby");
+            } else if (!player.isSpectator() && !ModerModeManager.isInModerMode(player)) {
+                LobbyManager.moveToLobby(player);
+            }
+            ClassXPManager.sync(player);
+            com.makar.tacticaltablet.game.arena.ArenaMatchRuntime.sync(player);
+            syncPrefixes(player.server);
+            return;
+        }
         if (LivesManager.ensureEliminatedIfOutOfLives(player)) {
             TeamMatchManager.applyScoreboardTeams(player.server);
             ClassXPManager.sync(player);
@@ -432,6 +453,12 @@ public class ServerEvents {
             return;
         }
         if (!(event.getEntity() instanceof ServerPlayer player)) return;
+        if (MapSetManager.isArenaSet() && com.makar.tacticaltablet.game.arena.ArenaMatchRuntime.owns(player.getUUID())
+                && !com.makar.tacticaltablet.game.arena.ArenaMatchRuntime.combatOpen()
+                && !event.getSource().is(net.minecraft.world.damagesource.DamageTypes.GENERIC_KILL)) {
+            event.setCanceled(true);
+            return;
+        }
         if (!GameStateManager.isInLobby(player) && !PostRtpProtectionManager.isProtected(player)) return;
 
         event.setCanceled(true);
@@ -561,6 +588,7 @@ public class ServerEvents {
         if (decision == MatchDamageDecision.Reason.ACCEPTED) {
             CombatAttributionLedger.recordAppliedDamage(victim, event.getSource(), (float) actualHealthLost);
             DiscordLeaderboardService.recordMatchDamage(attacker, actualHealthLost);
+            com.makar.tacticaltablet.game.arena.ArenaMatchRuntime.damage(attacker, actualHealthLost);
             SetMatchRuntime.recordEffectivePvpDamage(attacker.getUUID(), attacker.getGameProfile().getName(),
                     victim.getUUID(), attacker.server.getTickCount());
         } else {
@@ -626,7 +654,10 @@ public class ServerEvents {
             ExtractionPointManager.onPlayerDeathOrLogout(player);
             ModerModeManager.clear(player);
 
-            if (runningMatchParticipant) {
+            if (MapSetManager.isArenaSet() && com.makar.tacticaltablet.game.arena.ArenaMatchRuntime.owns(player.getUUID())) {
+                RtpTimerManager.cancel(player);
+                PassiveClassXPManager.clear(player);
+            } else if (runningMatchParticipant) {
                 TeamId disconnectedTeam = TeamMatchManager.getTeam(player);
                 SetMatchRuntime.recordPlayerEliminated(player.getUUID(), player.server.getTickCount());
                 LivesManager.handleDeath(player);
@@ -670,6 +701,8 @@ public class ServerEvents {
     public static void onDeath(LivingDeathEvent event) {
         if (!ServerRules.enabled(event.getEntity().getServer())) return;
         if (!(event.getEntity() instanceof ServerPlayer victim)) return;
+        if (MapSetManager.isArenaSet() && (event.isCanceled() || victim.getHealth() > 0 || !isActiveMatchParticipant(victim)
+                || !com.makar.tacticaltablet.game.arena.ArenaMatchRuntime.claimDeath(victim))) return;
         PostRtpProtectionManager.clear(victim);
         long started = System.nanoTime();
 
@@ -716,7 +749,9 @@ public class ServerEvents {
 
         ServerPlayer killer = ResponsiblePlayerResolver.resolve(source);
         CombatAttributionLedger.Entry fallbackAttribution = null;
-        if (killer == null) {
+        boolean arenaAdminDeath = MapSetManager.isArenaSet() && source.is(net.minecraft.world.damagesource.DamageTypes.GENERIC_KILL);
+        if (arenaAdminDeath) killer = null;
+        if (killer == null && !arenaAdminDeath) {
             fallbackAttribution = CombatAttributionLedger.findFresh(victim).orElse(null);
             killer = CombatAttributionLedger.resolveFreshAttacker(victim);
             if (killer == null) fallbackAttribution = null;
@@ -780,6 +815,7 @@ public class ServerEvents {
         }
 
         PlayerProgressManager.addKill(killer);
+        com.makar.tacticaltablet.game.arena.ArenaMatchRuntime.kill(killer);
         DiscordLeaderboardService.recordMatchKill(killer);
         int coinsBefore = PlayerProgressManager.getCoins(killer);
         PlayerProgressManager.addCoins(killer, MapSetManager.isChaosSet()
@@ -788,6 +824,7 @@ public class ServerEvents {
         for (CombatAssistTracker.AssistCredit assist : SetMatchRuntime.resolveAssists(
                 victim.getUUID(), killer.getUUID(), victim.server.getTickCount())) {
             DiscordLeaderboardService.recordMatchAssist(assist.playerId(), assist.playerName());
+            com.makar.tacticaltablet.game.arena.ArenaMatchRuntime.assist(assist.playerId());
         }
 
         String clazz = PlayerTabletState.getSelectedClass(killer);

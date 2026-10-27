@@ -139,7 +139,7 @@ public final class OnlineWebhookService {
         description.append("**Игра сета:** `")
                 .append(MapSetManager.getCurrentGameNumber())
                 .append('/')
-                .append(MapSetManager.GAMES_PER_MAP)
+                .append(MapSetManager.getGamesPerSet())
                 .append("`\n");
         description.append("**Режим:** `").append(currentSetMode()).append("`\n");
 
@@ -173,7 +173,7 @@ public final class OnlineWebhookService {
         builder.append("**Игра сета:** ")
                 .append(MapSetManager.getCurrentGameNumber())
                 .append('/')
-                .append(MapSetManager.GAMES_PER_MAP)
+                .append(MapSetManager.getGamesPerSet())
                 .append('\n');
         builder.append("**Режим:** ").append(currentSetMode()).append('\n');
 
@@ -222,6 +222,7 @@ public final class OnlineWebhookService {
     }
 
     private static String currentSetMode() {
+        if (MapSetManager.isArenaSet()) return "Арена";
         if (MapSetManager.isCompetitiveSet()) {
             return "Турнир";
         }

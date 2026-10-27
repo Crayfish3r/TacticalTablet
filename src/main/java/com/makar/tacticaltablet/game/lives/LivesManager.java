@@ -28,6 +28,11 @@ import net.minecraft.world.scores.Scoreboard;
 import java.util.UUID;
 
 public class LivesManager {
+    public enum LifeRule { FINITE, UNLIMITED }
+    public static LifeRule lifeRule() {
+        return com.makar.tacticaltablet.game.MapSetManager.isArenaSet() ? LifeRule.UNLIMITED : LifeRule.FINITE;
+    }
+    public static boolean hasUnlimitedLives() { return lifeRule() == LifeRule.UNLIMITED; }
 
     public static final String OBJECTIVE = MatchScoreboard.LIVES_OBJECTIVE;
     public static final int MAX_LIVES = 3;
@@ -115,6 +120,7 @@ public class LivesManager {
 
     public static int getLives(ServerPlayer player) {
         if (player == null) return 0;
+        if (hasUnlimitedLives()) return 0; // No finite-life quantity; consult lifeRule().
 
         Scoreboard scoreboard = player.getScoreboard();
         Objective objective = getOrCreateLivesObjective(player);
@@ -136,7 +142,7 @@ public class LivesManager {
             return;
         }
 
-        scoreboard.getOrCreatePlayerScore(player.getScoreboardName(), objective).setScore(lives);
+        scoreboard.getOrCreatePlayerScore(player.getScoreboardName(), objective).setScore(hasUnlimitedLives() ? 0 : lives);
     }
 
     public static boolean isEliminated(ServerPlayer player) {
@@ -157,7 +163,7 @@ public class LivesManager {
             return true;
         }
 
-        return getLives(player) > 0;
+        return hasUnlimitedLives() || getLives(player) > 0;
     }
 
     public static boolean ensureEliminatedIfOutOfLives(ServerPlayer player) {
@@ -168,7 +174,7 @@ public class LivesManager {
             return true;
         }
 
-        if (hasStarted(player) && getLives(player) <= 0) {
+        if (!hasUnlimitedLives() && hasStarted(player) && getLives(player) <= 0) {
             eliminate(player, 0);
             return true;
         }
@@ -183,7 +189,7 @@ public class LivesManager {
         if (!player.getTags().contains(TAG_LIVES_INIT)) return false;
         if (isEliminated(player)) return false;
 
-        return getLives(player) > 0;
+        return hasUnlimitedLives() || getLives(player) > 0;
     }
 
     public static int getAlivePlayerCount(MinecraftServer server) {
@@ -222,6 +228,11 @@ public class LivesManager {
             ensureStarted(victim);
         }
 
+        if (hasUnlimitedLives()) {
+            victim.removeTag("war.playing"); victim.addTag("in_lobby");
+            RtpTimerManager.cancel(victim); PassiveClassXPManager.clear(victim);
+            return 0;
+        }
         int lives = Math.max(0, getLives(victim) - 1);
         setLives(victim, lives);
 
@@ -246,6 +257,7 @@ public class LivesManager {
 
     public static void eliminateForRespawnDisabled(ServerPlayer player) {
         if (player == null) return;
+        if (hasUnlimitedLives()) return;
 
         int unusedLives = Math.max(0, getLives(player));
         ClassCooldownManager.setCooldownForSelectedClass(player);
