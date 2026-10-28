@@ -80,7 +80,8 @@ public final class NpcEncounterManager {
         if (!config.enabled) return "Арена: NPC-профиль отключён или некорректен. " + String.join("; ", diagnostics);
         if (!"minecraft:overworld".equals(config.dimension)) return "Арена: NPC должны использовать minecraft:overworld активной карты.";
         var integration = NpcIntegration.connect(server);
-        if (integration == null) return "Арена: требуется совместимый TacticalNPC " + NpcIntegration.API_VERSION + " и TaCZ 1.1.8-hotfix2.";
+        if (integration == null) return "Арена: требуется TacticalNPC " + NpcIntegration.API_VERSION
+                + " с NpcDifficulty HARD/DEFAULT и SpawnMemberSpec(..., difficulty), а также TaCZ 1.1.8-hotfix2. Обновите runtime JAR; подробности в логе.";
         preparedServer = server; preparedArena = config; preparedIntegration = integration;
         return "";
     }

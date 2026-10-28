@@ -9,6 +9,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.function.Consumer;
 
 /** World-local JSON, like extraction settings. Invalid input fails closed without rewriting it. */
@@ -35,9 +36,14 @@ public final class NpcEncounterConfig {
             new Preset("defense", 1, 2, 4, List.of("tacz:ak47", "tacz:ak47", "tacz:ak47", "tacz:ak47"), "DEFEND", "FINITE", 120, 24));
 
     public record Preset(String id, int weight, int minSize, int maxSize, List<String> weapons,
-                         String behavior, String ammoPolicy, int reserve, double radius) {
+                         String behavior, String ammoPolicy, int reserve, double radius, String difficulty) {
+        public Preset(String id, int weight, int minSize, int maxSize, List<String> weapons,
+                      String behavior, String ammoPolicy, int reserve, double radius) {
+            this(id, weight, minSize, maxSize, weapons, behavior, ammoPolicy, reserve, radius, "HARD");
+        }
         public Preset {
             weapons = weapons == null ? List.of() : java.util.Collections.unmodifiableList(new java.util.ArrayList<>(weapons));
+            difficulty = difficulty == null ? "HARD" : difficulty.strip().toUpperCase(Locale.ROOT);
         }
     }
 
@@ -51,9 +57,13 @@ public final class NpcEncounterConfig {
         c.minSpawnIntervalSeconds = 20; c.maxSpawnIntervalSeconds = 35;
         c.presets = List.of(
                 new Preset("arena_assault", 8, 2, 4, List.of("tacz:ak47", "tacz:ak47", "tacz:ak47", "tacz:ak47"),
-                        "ATTACK", "FINITE", 120, 24),
+                        "ATTACK", "FINITE", 120, 24, "DEFAULT"),
+                new Preset("arena_hard_assault", 2, 2, 4, List.of("tacz:ak47", "tacz:ak47", "tacz:ak47", "tacz:ak47"),
+                        "ATTACK", "FINITE", 120, 24, "HARD"),
                 new Preset("arena_patrol", 2, 2, 3, List.of("tacz:ak47", "tacz:ak47", "tacz:ak47"),
-                        "PATROL", "FINITE", 120, 24));
+                        "PATROL", "FINITE", 120, 24, "DEFAULT"),
+                new Preset("arena_rpg_pair", 1, 2, 2, List.of("tacz:rpg7", "tacz:rpg7"),
+                        "ATTACK", "FINITE", 3, 24, "DEFAULT"));
         return c;
     }
 
@@ -94,6 +104,11 @@ public final class NpcEncounterConfig {
         }
         var ids = new HashSet<String>();
         c.presets = c.presets.stream().filter(p -> {
+            if (p != null && !List.of("HARD", "DEFAULT").contains(p.difficulty())) {
+                diagnostic.accept("Ignoring NPC preset " + p.id() + ": invalid difficulty '" + p.difficulty()
+                        + "' (expected HARD or DEFAULT)");
+                return false;
+            }
             boolean valid = p != null && p.id() != null && p.id().matches("[a-z0-9_.-]{1,64}")
                     && p.weight() >= 0 && p.weight() <= 1000000
                     && p.minSize() >= 1 && p.maxSize() >= p.minSize() && p.maxSize() <= 16

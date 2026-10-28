@@ -47,10 +47,12 @@ NPC kills не увеличивают PvP kills/KD. Очков за выжива
 
 `<world>/tacticaltablet_arena_npcs.json` — отдельный NpcEncounterConfig. Defaults:
 enabled=true, maxActiveNpcs=24, группы 2–4, интервалы 20–35 секунд,
-`arena_assault` ATTACK с весом 8 и `arena_patrol` PATROL с весом 2,
-существующий `tacz:ak47`, FINITE/120, radius=24. Ограничения общего валидатора,
-loaded chunks, дистанции и безопасный грунт сохраняются. NPC спавнятся всю игру
-независимо от OptionalInt номера фазы зоны. Health/accuracy/API параметры не добавлены.
+`arena_assault` ATTACK/DEFAULT (вес 8), `arena_hard_assault` ATTACK/HARD (вес 2),
+`arena_patrol` PATROL/DEFAULT (вес 2), FINITE/120 с `tacz:ak47`;
+`arena_rpg_pair` — ровно два `tacz:rpg7`, DEFAULT, FINITE/3, вес 1.
+У всех radius=24 — радиус приказа. Ограничения валидатора, loaded chunks,
+дистанции и безопасный грунт сохраняются. NPC спавнятся всю игру независимо
+от номера фазы зоны. Сложность определяет только точность средствами TacticalNPC.
 
 TacticalNPC 0.2.0 с его совместимым TaCZ обязателен для запуска Арены. Отсутствие,
 несовместимость, отключённый/невалидный профиль сообщаются в preflight без зачёта игры.
@@ -165,3 +167,16 @@ fault injection и multiplayer/dedicated проверки этой задачи 
 - `src/main/java/com/makar/tacticaltablet/tablet/preparation/TabletPreparationService.java`.
 - `src/main/resources/assets/tacticaltablet/lang/en_us.json`.
 - `src/main/resources/assets/tacticaltablet/lang/ru_ru.json`.
+
+## Применение NPC-профиля
+
+Готовый профиль: `ready_map_configs/tacticaltablet_arena_npcs.json`. Для существующего
+мира сохраните резервную копию его `tacticaltablet_arena_npcs.json`, затем примените
+подготовленный файл по этому world-local пути. Loader не перезаписывает существующие
+файлы и не добавляет им новое вооружение. Старые пресеты без `difficulty` остаются HARD.
+Обычные встречи используют отдельный `<world>/tacticaltablet_npcs.json`.
+
+Нужен свежий обычный TacticalNPC 0.2.0 с `NpcDifficulty.DEFAULT/HARD` и шестым
+аргументом `SpawnMemberSpec`. Старый JAR с тем же номером отклоняется до старта
+Арены. Обновлять runtime JAR следует согласованно на сервере и клиентах;
+одного обновления compile classpath недостаточно.

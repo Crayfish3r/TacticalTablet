@@ -6,20 +6,24 @@ Minecraft **1.20.1**, Java **17**, Forge **47.4.20**. Проверенный п�
 `dev.zuma.tacticalnpc:tacticalnpcai:0.2.0`, mod ID **tacticalnpcai**.
 Исходный контракт: соседний проект TacticalNPC, `docs/MATCH-NPC-API.md`.
 SHA-256 использованного production JAR:
-`6faa7cb48c012b9959e9386094a560765707e89dfbfb6cc28837525c69c4c806`.
+`720eadd78abdfeaa054a508fdf73200ad7187e088271d7e1b00a7d9c148dd626`.
 
 Для сборки сначала опубликовать обычный production artifact TacticalNPC:
 
 ```powershell
 # В TacticalNPC/forge-addon, без combatTests/profile:
-.\gradlew.bat build publishTacticalNpcPublicationToIntegrationRepository --offline --console=plain
+.\gradlew.bat jar publishTacticalNpcPublicationToIntegrationRepository --offline --console=plain
 # В TacticalTablet:
-.\gradlew.bat clean build '-PtacticalNpcRepository=C:/path/TacticalNPC/forge-addon/build/repository'
+.\gradlew.bat compileJava processResources '-PtacticalNpcRepository=C:/path/fresh-integration-repository' --offline --console=plain
 ```
 
 По умолчанию локальная Maven-публикация ищется в соседнем
 `../[TACZ] Military NPC/forge-addon/build/repository`. На CI передавать путь или URL
 через `tacticalNpcRepository`. Удалённый публичный Maven endpoint пока не опубликован.
+При тех же координатах 0.2.0 старый кэш может содержать прежний API. Для этой
+сборки свежая публикация из соседнего `forge-addon/build/repository` скопирована
+в игнорируемый `build/npc-difficulty-repository`; этот отдельный путь передан
+через `-PtacticalNpcRepository`. Версия зависимости остаётся 0.2.0.
 Compile-only зависимость нужна для компиляции адаптера; классы/JAR TacticalNPC и TaCZ
 не вкладываются в TacticalTablet. После выбора другого artifact с тем же номером
 версии проверять его происхождение и совместимость заново.
@@ -227,3 +231,34 @@ Dedicated fixture включается только `-PnpcProbe=absent|present|r
 Клиентский бой TaCZ, пули в полёте в реальной сети, поведение PATROL на сложных картах,
 производительность на конкретном gun pack и рестарт с физически выгруженными NPC
 нельзя заменить одними unit tests.
+
+## Сложность пресета и РПГ
+
+`Preset.difficulty` принимает `HARD` или `DEFAULT` без учёта регистра. Отсутствующее
+поле и явный null означают HARD; пустая строка и неизвестное значение исключают
+пресет с диагностикой. Старый Java-конструктор Preset сохранён и выбирает HARD.
+Все прочие проверки конфига сохраняются; существующие файлы мира не переписываются.
+Новые обычные defaults сохраняют прежние оружие, веса и баланс с HARD.
+
+Адаптер преобразует строку в `NpcDifficulty` и передаёт шестой аргумент
+`SpawnMemberSpec`. При загрузке адаптера после version gate однократно проверяются
+HARD/DEFAULT и шестипараметрическая сигнатура. Старый 0.2.0 без этого API
+отклоняется с диагностикой: обычные NPC остаются необязательными, Арена не проходит
+preflight. Проверка не создаёт NPC и не выполняется на tick/выстрелах.
+
+Сложность меняет только точность. `defaultAimErrorMultiplier` принадлежит
+серверному конфигу TacticalNPC и не дублируется в TacticalTablet. Для runtime
+нужен такой же свежий основной JAR на сервере и клиентах.
+
+Готовый профиль Арены: `ready_map_configs/tacticaltablet_arena_npcs.json`. Перед
+применением к существующему миру сохраните прежний world-local файл и затем
+замените `<world>/tacticaltablet_arena_npcs.json` подготовленным профилем.
+Обычные встречи используют `<world>/tacticaltablet_npcs.json`. Новые defaults
+создаются только при отсутствии файла.
+
+РПГ-пресет однородный: два `tacz:rpg7`, DEFAULT, FINITE/3 каждому. Штатный патрон —
+`tacz:rpg_rocket`; отдельного ammoId в SpawnMemberSpec нет. Безопасность ракет,
+баллистика, дистанция огня и reload/cooldown остаются в TacticalNPC. `radius=24` —
+радиус приказа, не взрыва. Веса 8/2/2/1 относительны среди подходящих пресетов:
+selector сначала выбирает размер группы, поэтому вес 1 не задаёт фиксированный
+процент всех встреч. Поле stopSpawningAtZonePhase в Арене по-прежнему не действует.
