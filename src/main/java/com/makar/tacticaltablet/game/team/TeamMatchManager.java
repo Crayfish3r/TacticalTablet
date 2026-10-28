@@ -33,6 +33,39 @@ public final class TeamMatchManager {
     private static final Map<UUID, String> originalScoreboardTeams = new HashMap<>();
     private static int secondsLeft = 0;
     private static boolean activeSelection = false;
+    private static UUID arenaMatchId;
+
+    public static UUID arenaMatchId() { return arenaMatchId; }
+    public static boolean usesCombatTeams() {
+        return com.makar.tacticaltablet.game.GameStateManager.getCurrentMode().isTeamMode()
+                || arenaMatchId != null && com.makar.tacticaltablet.game.MapSetManager.isArenaSet()
+                && com.makar.tacticaltablet.game.GameStateManager.getLifecycleSnapshot().matchId().filter(arenaMatchId::equals).isPresent();
+    }
+    public static void startArena(MinecraftServer server, UUID matchId) {
+        reset(server); arenaMatchId = java.util.Objects.requireNonNull(matchId);
+        for (TeamId team : TeamId.standardValues()) teams.put(team, new LinkedHashSet<>());
+    }
+    public static List<UUID> arenaMembers(TeamId team) { return List.copyOf(teams.getOrDefault(team, new LinkedHashSet<>())); }
+    /** Admission is performed by ArenaTeamService, on the same server thread. */
+    public static boolean changeArenaTeam(ServerPlayer player, TeamId target) {
+        if (arenaMatchId == null || target != null && !isStandardTeam(target)) return false;
+        if (getTeam(player) == target) return true;
+        if (target != null && teams.get(target).size() >= 5) return false;
+        removeAssignment(player.getUUID());
+        if (target != null) { teams.get(target).add(player.getUUID()); playerTeams.put(player.getUUID(), target); }
+        rememberName(player);
+        com.makar.tacticaltablet.game.respawn.RtpTimerManager.cancel(player);
+        Scoreboard scoreboard = player.getScoreboard();
+        PlayerTeam previous = scoreboard.getPlayersTeam(player.getScoreboardName());
+        if (isManagedTeam(previous)) scoreboard.removePlayerFromTeam(player.getScoreboardName(), previous);
+        applyScoreboardTeams(player.server);
+        com.makar.tacticaltablet.client.NameTagManager.apply(player);
+        player.refreshTabListName();
+        VoiceChatTeamManager.onPlayerTeamChanged(player);
+        SpectatorCameraManager.onPlayerTeamChanged(player);
+        com.makar.tacticaltablet.game.lobby.LobbyManager.sync(player);
+        return true;
+    }
 
     private TeamMatchManager() {
     }
@@ -479,6 +512,7 @@ public final class TeamMatchManager {
     }
 
     private static void clearAssignments() {
+        arenaMatchId = null;
         teams.clear();
         playerTeams.clear();
         playerNames.clear();

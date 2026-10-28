@@ -105,7 +105,7 @@ public final class NameTagManager {
     private static boolean shouldHideName(ServerPlayer player) {
         if (player == null || player.server == null) return false;
         if (!GameStateManager.isRunning(player.server)) return false;
-        if (GameStateManager.getCurrentMode().isTeamMode()) return false;
+        if (GameStateManager.getCurrentMode().isTeamMode() || com.makar.tacticaltablet.game.team.TeamMatchManager.arenaMatchId() != null && com.makar.tacticaltablet.game.team.TeamMatchManager.getTeam(player) != null) return false;
 
         return player.getTags().contains("war.playing")
                 || player.getTags().contains("in_lobby")

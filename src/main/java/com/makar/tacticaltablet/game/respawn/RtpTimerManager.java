@@ -210,6 +210,20 @@ public class RtpTimerManager {
             }
             requestStates.put(uuid, RtpRequestState.SEARCHING);
 
+            if (MapSetManager.isArenaSet()) {
+                var anchors = TeamMatchManager.getOnlineTeamMembers(server, TeamMatchManager.getTeam(player)).stream()
+                        .filter(p -> com.makar.tacticaltablet.game.team.ArenaTeamService.isAnchor(player, p)).toList();
+                boolean success = anchors.isEmpty() ? SafeTeleport.teleport(player) : SafeTeleport.teleportNearAllies(player, anchors);
+                if (success) finishRtp(player);
+                else {
+                    scheduleRetry(uuid, "arena safe point unavailable");
+                    notifyRateLimited(player, FailureReason.NO_SAFE_POINT, anchors.isEmpty()
+                            ? "Безопасная точка RTP не найдена. Повторяем поиск…"
+                            : "Рядом с командой пока нет безопасной точки. Повторяем поиск…");
+                }
+                continue;
+            }
+
             if (GameStateManager.getCurrentMode().isTeamMode()) {
                 if (processTeamRtp(server, player)) {
                     continue;
@@ -355,6 +369,7 @@ public class RtpTimerManager {
 
     private static RtpEligibilityResult getEligibility(ServerPlayer player) {
         if (player == null) return RtpEligibilityResult.CANCELLED;
+        if (MapSetManager.isArenaSet() && !com.makar.tacticaltablet.game.team.ArenaTeamService.canDeploy(player)) return RtpEligibilityResult.CANCELLED;
         UUID requestMatchId = requestMatchIds.get(player.getUUID());
         UUID currentMatchId = GameStateManager.getLifecycleSnapshot().matchId().orElse(null);
         boolean sameMatch = requestMatchId == null

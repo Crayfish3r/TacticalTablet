@@ -40,17 +40,20 @@ public final class VoiceChatTeamManager {
 
     public static void onPlayerConnected(PlayerConnectedEvent event) {
         VoicechatConnection connection = event.getConnection();
-        ServerPlayer player = resolvePlayer(connection);
-        if (player == null) return;
-
-        player.server.execute(() -> assignPlayerToVoiceGroup(player, connection));
+        MinecraftServer server = matchServer;
+        if (server == null || connection == null || connection.getPlayer() == null) return;
+        var id = connection.getPlayer().getUuid();
+        server.execute(() -> {
+            ServerPlayer player = server.getPlayerList().getPlayer(id);
+            if (player != null) assignPlayerToVoiceGroup(player, connection);
+        });
     }
 
     public static synchronized void startTeamMatch(MinecraftServer server) {
         if (server == null
                 || !GameStateManager.isRunning(server)
                 || GameStateManager.getMatchPhase() != MatchPhase.RUNNING
-                || !GameStateManager.getCurrentMode().isTeamMode()) {
+                || !TeamMatchManager.usesCombatTeams()) {
             endMatch(server);
             return;
         }
@@ -92,8 +95,14 @@ public final class VoiceChatTeamManager {
         return player != null
                 && GameStateManager.isRunning(player.server)
                 && GameStateManager.getMatchPhase() == MatchPhase.RUNNING
-                && GameStateManager.getCurrentMode().isTeamMode()
+                && TeamMatchManager.usesCombatTeams()
                 && TeamMatchManager.getTeam(player) != null
+                && (!com.makar.tacticaltablet.game.MapSetManager.isArenaSet()
+                    || com.makar.tacticaltablet.game.arena.ArenaMatchRuntime.life(player) != null
+                    && com.makar.tacticaltablet.game.arena.ArenaMatchRuntime.life(player).rtpUsed
+                    && !com.makar.tacticaltablet.game.arena.ArenaMatchRuntime.life(player).awaitingRespawn
+                    && !GameStateManager.isInLobby(player)
+                    && !com.makar.tacticaltablet.moderation.ModerModeManager.isInModerMode(player))
                 && player.getTags().contains("war.playing")
                 && !player.getTags().contains("in_lobby")
                 && player.isAlive()

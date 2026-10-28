@@ -51,7 +51,9 @@ public final class PacketProtocol {
             entry(43, CosmeticPurchasePacket.class, NetworkDirection.PLAY_TO_SERVER),
             entry(44, ArenaStatePacket.class, NetworkDirection.PLAY_TO_CLIENT),
             entry(45, TabletClassesRequestPacket.class, NetworkDirection.PLAY_TO_SERVER),
-            entry(46, TabletClassesStatePacket.class, NetworkDirection.PLAY_TO_CLIENT)
+            entry(46, TabletClassesStatePacket.class, NetworkDirection.PLAY_TO_CLIENT),
+            entry(47, ArenaTeamActionPacket.class, NetworkDirection.PLAY_TO_SERVER),
+            entry(48, ArenaTeamStatePacket.class, NetworkDirection.PLAY_TO_CLIENT)
     );
 
     private PacketProtocol() { }

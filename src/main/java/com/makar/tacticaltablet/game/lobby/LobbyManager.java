@@ -69,7 +69,9 @@ public class LobbyManager {
 
         RtpTimerManager.cancel(player);
         var arenaLife = com.makar.tacticaltablet.game.arena.ArenaMatchRuntime.life(player);
-        if (arenaLife != null) { arenaLife.rtpUsed = false; arenaLife.awaitingRespawn = false; }
+        if (arenaLife != null && (ordinaryRespawn || arenaLife.awaitingRespawn)) {
+            arenaLife.rtpUsed = false; arenaLife.awaitingRespawn = false;
+        }
         boolean matchRunningOrStarting = GameStateManager.isRunning(player.server)
                 || GameStateManager.isStartTransitionPlayerSetup();
         boolean preserveTeamMatchState = matchRunningOrStarting

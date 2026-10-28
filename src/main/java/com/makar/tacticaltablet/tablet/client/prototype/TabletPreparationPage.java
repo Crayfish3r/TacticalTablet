@@ -146,7 +146,7 @@ public final class TabletPreparationPage {
         if (newRequest) requestId = ++sequence;
         pendingAction = action; awaiting = true; deadline = now + TIMEOUT_MS; nextPoll = now + POLL_MS;
         PacketHandler.sendToServer(new TabletPacket(action, requestId));
-        if (action == -1) TabletClassesClient.fetch();
+        if (action == -1) { TabletClassesClient.fetch(); TabletArenaTeamsPage.fetch(); }
         if (action >= 0) message(action == 7 ? "Запрос вступления отправлен…" : "Ожидание выдачи набора сервером…", false);
         dirty = true;
     }

@@ -222,7 +222,7 @@ public final class SpectatorCameraManager {
     public static List<ServerPlayer> getAvailableTargets(ServerPlayer spectator) {
         if (spectator == null || spectator.server == null) return List.of();
 
-        if (GameStateManager.getCurrentMode().isTeamMode()) {
+        if (TeamMatchManager.usesCombatTeams()) {
             List<ServerPlayer> teammates = new ArrayList<>();
             TeamId teamId = TeamMatchManager.getTeam(spectator);
             if (teamId != null) {
@@ -295,7 +295,7 @@ public final class SpectatorCameraManager {
     private static List<ServerPlayer> getTargetOrder(ServerPlayer spectator) {
         if (spectator == null || spectator.server == null) return List.of();
 
-        if (GameStateManager.getCurrentMode().isTeamMode()) {
+        if (TeamMatchManager.usesCombatTeams()) {
             TeamId teamId = TeamMatchManager.getTeam(spectator);
             if (teamId != null) {
                 List<ServerPlayer> teammates = new ArrayList<>();
@@ -378,7 +378,7 @@ public final class SpectatorCameraManager {
         if (!isAliveCameraTarget(spectator, target)) return false;
 
         MatchMode mode = GameStateManager.getCurrentMode();
-        if (mode == null || !mode.isTeamMode()) return true;
+        if (!TeamMatchManager.usesCombatTeams()) return true;
         if (TeamMatchManager.areTeammates(spectator, target)) return true;
         return !hasAvailableTeammateCameraTarget(spectator);
     }

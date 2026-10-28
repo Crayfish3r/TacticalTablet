@@ -223,6 +223,8 @@ public class ServerEvents {
             }
             ClassXPManager.sync(player);
             com.makar.tacticaltablet.game.arena.ArenaMatchRuntime.sync(player);
+            TeamMatchManager.rememberPlayer(player); TeamMatchManager.applyScoreboardTeams(player.server);
+            VoiceChatTeamManager.assignPlayerToVoiceGroup(player);
             syncPrefixes(player.server);
             return;
         }
@@ -296,7 +298,7 @@ public class ServerEvents {
         if (!(event.getEntity() instanceof ServerPlayer player)) return;
         if (event.getNewGameMode() != GameType.SPECTATOR) return;
         if (!GameStateManager.isRunning(player.server)) return;
-        if (!GameStateManager.getCurrentMode().isTeamMode()) return;
+        if (!TeamMatchManager.usesCombatTeams()) return;
 
         VoiceChatTeamManager.removePlayerFromVoiceGroup(player);
     }
@@ -523,7 +525,7 @@ public class ServerEvents {
             String sourceText = safeLower(event.getSource().getMsgId())
                     + " " + entityId(event.getSource().getDirectEntity())
                     + " " + entityId(event.getSource().getEntity());
-            boolean friendlyDamage = GameStateManager.getCurrentMode().isTeamMode()
+            boolean friendlyDamage = TeamMatchManager.usesCombatTeams()
                     && TeamMatchManager.areTeammates(attacker, player);
             if (friendlyDamage) {
                 if (isTeamTrapDamage(sourceText)) {
@@ -566,7 +568,7 @@ public class ServerEvents {
         boolean victimParticipant = ActivePvpParticipant.isEligible(victim);
         boolean friendlyFireOrSelfDamage = attacker != null
                 && (attacker.getUUID().equals(victim.getUUID())
-                || (GameStateManager.getCurrentMode().isTeamMode()
+                || (TeamMatchManager.usesCombatTeams()
                 && TeamMatchManager.areTeammates(attacker, victim)));
         double actualHealthLost = MatchDamageAccounting.actualHealthLostFromFinalDamage(
                 victim.getHealth(),
@@ -768,7 +770,7 @@ public class ServerEvents {
         if (LivesManager.isEliminated(victim)) {
             SetMatchRuntime.recordPlayerEliminated(victim.getUUID(), victim.server.getTickCount());
         }
-        if (victimTeam != null && !TeamMatchManager.hasAliveParticipant(victim.server, victimTeam)) {
+        if (!MapSetManager.isArenaSet() && victimTeam != null && !TeamMatchManager.hasAliveParticipant(victim.server, victimTeam)) {
             SetMatchRuntime.recordTeamEliminated(victimTeam, victim.server.getTickCount());
         }
 
@@ -781,7 +783,8 @@ public class ServerEvents {
 
         TacticalKillFeed.publish(victim, killer, source, fallbackAttribution, killReward);
 
-        ContractManager.onPlayerKilled(victim, killer);
+        if (!MapSetManager.isArenaSet() || !TeamMatchManager.areTeammates(killer, victim))
+            ContractManager.onPlayerKilled(victim, killer);
         ExtractionPointManager.onPlayerDeathOrLogout(victim);
         ClassXPManager.sync(victim);
         if (killer != null && !killer.getUUID().equals(victim.getUUID())) {
@@ -795,7 +798,7 @@ public class ServerEvents {
         boolean victimOwnedProjectile = direct instanceof Projectile projectile
                 && projectile.getOwner() != null
                 && projectile.getOwner().getUUID().equals(victim.getUUID());
-        boolean teammates = killer != null && GameStateManager.getCurrentMode().isTeamMode()
+        boolean teammates = killer != null && TeamMatchManager.usesCombatTeams()
                 && TeamMatchManager.areTeammates(killer, victim);
         KillCreditPolicy.Outcome outcome = KillCreditPolicy.classify(
                 killer != null,
@@ -823,6 +826,7 @@ public class ServerEvents {
         int awardedCoins = Math.max(0, PlayerProgressManager.getCoins(killer) - coinsBefore);
         for (CombatAssistTracker.AssistCredit assist : SetMatchRuntime.resolveAssists(
                 victim.getUUID(), killer.getUUID(), victim.server.getTickCount())) {
+            if (TeamMatchManager.usesCombatTeams() && TeamMatchManager.areTeammates(assist.playerId(), victim.getUUID())) continue;
             DiscordLeaderboardService.recordMatchAssist(assist.playerId(), assist.playerName());
             com.makar.tacticaltablet.game.arena.ArenaMatchRuntime.assist(assist.playerId());
         }
@@ -897,6 +901,7 @@ public class ServerEvents {
         MapRotationManager.resetRuntime();
         PunishmentManager.resetRuntime();
         ModerModeManager.resetAll();
+        com.makar.tacticaltablet.game.team.ArenaTeamService.reset();
         OnlineWebhookService.onServerStopped();
         LeaderboardScheduler.reset();
         DiscordLeaderboardService.resetMatch();

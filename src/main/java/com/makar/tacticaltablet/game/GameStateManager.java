@@ -231,6 +231,7 @@ public class GameStateManager {
         MatchAdmissionManager.observeServerTick(server.getTickCount());
         if (++tickCounter < 20) return;
         tickCounter = 0;
+        com.makar.tacticaltablet.game.team.ArenaTeamService.tick(server);
         if (MapSetManager.isArenaSet() && isRunning(server)) {
             ArenaMatchRuntime.tick(server);
             if (ArenaMatchRuntime.finished()) {
@@ -1216,7 +1217,9 @@ public class GameStateManager {
                     ChaosSetManager.beginGame(server, MapSetManager.getCurrentGameNumber());
                 }
                 case CONFIGURE_TEAMS -> {
-                    if (currentMode.isTeamMode()) {
+                    if (MapSetManager.isArenaSet()) {
+                        TeamMatchManager.startArena(server, getLifecycleSnapshot().matchId().orElseThrow());
+                    } else if (currentMode.isTeamMode()) {
                         TeamMatchManager.autoBalance(server, currentMode);
                         TeamMatchManager.applyScoreboardTeams(server);
                     } else {
@@ -1321,7 +1324,7 @@ public class GameStateManager {
 
         @Override
         public void postCommit(MinecraftServer server) throws Exception {
-            if (MapSetManager.isArenaSet()) ArenaMatchRuntime.start(server);
+            if (MapSetManager.isArenaSet()) { ArenaMatchRuntime.start(server); VoiceChatTeamManager.startTeamMatch(server); }
             else {
                 ArenaMatchRuntime.abort(server);
                 recordMatchesPlayedAfterCommit(server);

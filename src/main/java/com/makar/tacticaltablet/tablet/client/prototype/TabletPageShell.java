@@ -12,6 +12,7 @@ final class TabletPageShell {
     private final TabletVotingPage voting;
     private final TabletArenaResultsView arenaResults;
     private final TabletShopPage shop;
+    private final TabletArenaTeamsPage teams;
     private final TabletClassDialog classDialog;
     private final int height;
     private TabletPage selected = TabletPage.PREPARATION;
@@ -24,7 +25,7 @@ final class TabletPageShell {
         height = (int) TabletTerminalTheme.logicalHeight(display);
         classDialog = new TabletClassDialog(height);
         preparation = new TabletPreparationPage(display, classDialog);
-        shop = new TabletShopPage(height, classDialog);
+        shop = new TabletShopPage(height, classDialog); teams = new TabletArenaTeamsPage(height);
         voting = new TabletVotingPage(height);
         arenaResults = new TabletArenaResultsView(height);
     }
@@ -59,7 +60,7 @@ final class TabletPageShell {
         return !votingView() && phase != MatchPhase.RUNNING
                 && com.makar.tacticaltablet.tablet.client.ArenaClientState.snapshot().finished();
     }
-    private boolean navigationLocked() { return !votingView() && !arenaResultsView() && preparation.navigationLocked(); }
+    private boolean navigationLocked() { return classDialog.active() || selected == TabletPage.PREPARATION && preparation.confirmation >= 0; }
     private void synchronizePhase() {
         long revision = TabletClientState.getPhaseRevision();
         if (phaseRevision == revision) return;
@@ -101,6 +102,7 @@ final class TabletPageShell {
         } else if (hit.display() != null) {
             pressedDisplayPage = selected;
             if (classDialog.active()) { classDialog.press(hit.display()); return; }
+            if (selected == TabletPage.CONTRACT_TRACKER && TabletArenaTeamsPage.isArena()) { teams.press(hit.display()); return; }
             if (selected == TabletPage.SHOP) { shop.press(hit.display()); return; }
             if (selected != TabletPage.PREPARATION) return;
             if (arenaResultsView()) return;
@@ -121,6 +123,8 @@ final class TabletPageShell {
             if (hardware == TabletPage.forHardwareKey(hit.hardwareKey()) && !navigationLocked()) select(hardware);
         } else if (displayPage == selected && hit.hardwareKey() == null && classDialog.active()) {
             classDialog.release(hit.display()); updateInteractivity(); dirty = true;
+        } else if (displayPage == selected && selected == TabletPage.CONTRACT_TRACKER && TabletArenaTeamsPage.isArena()) {
+            teams.release(hit.display()); dirty = true;
         } else if (displayPage == selected && selected == TabletPage.SHOP && hit.hardwareKey() == null) {
             shop.release(hit.display()); updateInteractivity(); dirty = true;
         } else if (displayPage == selected && selected == TabletPage.PREPARATION && hit.hardwareKey() == null) {
@@ -144,7 +148,7 @@ final class TabletPageShell {
         pressedHardware = null; pressedDisplayPage = null;
         preparation.cancelPress();
         voting.cancelInput();
-        shop.cancelPress(); classDialog.cancelPress();
+        shop.cancelPress(); classDialog.cancelPress(); teams.cancelPress();
     }
 
     void scroll(double x, double y, double delta) {
@@ -166,7 +170,7 @@ final class TabletPageShell {
 
     boolean dirty() {
         synchronizePhase();
-        return dirty || classDialog.dirty() || selected == TabletPage.PREPARATION && (arenaResultsView() ? arenaResults.dirty() : votingView() ? voting.dirty() : preparation.dirty())
+        return dirty || selected == TabletPage.CONTRACT_TRACKER && teams.dirty() || classDialog.dirty() || selected == TabletPage.PREPARATION && (arenaResultsView() ? arenaResults.dirty() : votingView() ? voting.dirty() : preparation.dirty())
                 || selected == TabletPage.PROFILE && profile.dirty() || selected == TabletPage.SHOP && shop.dirty();
     }
     void rendered() {
@@ -176,7 +180,7 @@ final class TabletPageShell {
         }
         if (selected == TabletPage.PROFILE) profile.rendered();
         if (selected == TabletPage.SHOP) shop.rendered();
-        classDialog.rendered();
+        classDialog.rendered(); teams.rendered();
     }
     void render(GuiGraphics graphics) {
         switch (selected) {
@@ -186,7 +190,7 @@ final class TabletPageShell {
                 else TabletPreparationView.render(graphics, preparation);
             }
             case PROFILE -> TabletProfileView.render(graphics, profile, height);
-            case CONTRACT_TRACKER -> TabletPlaceholderViews.contractTracker(graphics, height);
+            case CONTRACT_TRACKER -> { if (TabletArenaTeamsPage.isArena()) teams.render(graphics); else TabletPlaceholderViews.contractTracker(graphics, height); }
             case SHOP -> TabletShopView.render(graphics, shop);
             case EMPTY_4, EMPTY_5 -> TabletTerminalTheme.background(graphics, TabletTerminalTheme.Kind.SCREEN,
                     TabletTerminalTheme.State.NORMAL, 0, 0, TabletTerminalTheme.LOGICAL_WIDTH, height + 1);

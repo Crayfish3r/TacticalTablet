@@ -101,7 +101,7 @@ public final class CombatAttributionLedger {
     private static boolean recordValidated(ServerPlayer victim, DamageSource source, float damage) {
         if (!canRecordVictim(victim) || source == null) return false;
         ServerPlayer attacker = ResponsiblePlayerResolver.resolve(source);
-        boolean teammates = attacker != null && GameStateManager.getCurrentMode().isTeamMode()
+        boolean teammates = attacker != null && TeamMatchManager.usesCombatTeams()
                 && TeamMatchManager.areTeammates(attacker, victim);
         if (!shouldRecord(victim.getUUID(), attacker == null ? null : attacker.getUUID(),
                 ActivePvpParticipant.isEligible(victim), ActivePvpParticipant.isEligible(attacker),

@@ -93,6 +93,7 @@ public final class TabletPrototypeClient {
         if (event.phase != TickEvent.Phase.END) return;
         Minecraft mc = Minecraft.getInstance();
         releaseIfUp(mc);
+        TabletArenaTeamsPage.observeConnection();
         if (MOTION.active() && (!valid(mc) || !mc.isWindowActive()
                 || !(mc.screen instanceof TabletPrototypeScreen))) reset();
         MOTION.update(now());
@@ -151,7 +152,7 @@ public final class TabletPrototypeClient {
         screenOpening(event.getNewScreen());
     }
     @SubscribeEvent public static void logout(ClientPlayerNetworkEvent.LoggingOut event) {
-        TabletClassesClient.reset();
+        TabletClassesClient.reset(); TabletArenaTeamsPage.reset();
         lastPhase = null; mapOpenSeen = false; mapOpenPending = false;
         reset(); TabletDisplayTarget.release();
     }
