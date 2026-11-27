@@ -55,7 +55,9 @@ public final class TabletPrototypeClient {
     }
 
     static void pressUse() { MOTION.pressUse(System.nanoTime()); }
+    static void releaseUse() { MOTION.releaseUse(); }
     static void close() { MOTION.requestClose(System.nanoTime()); }
+    static boolean isOpen() { return MOTION.state() == TabletAnimationController.State.OPEN; }
 
     private static boolean tablet(ItemStack stack) {
         return stack.is(Utopia.TABLET.get());
@@ -71,6 +73,7 @@ public final class TabletPrototypeClient {
     public static void tick(TickEvent.ClientTickEvent event) {
         if (event.phase != TickEvent.Phase.END) return;
         Minecraft mc = Minecraft.getInstance();
+        TabletMapState.discardStale(mc.level);
         InputConstants.Key key = mc.options.keyUse.getKey();
         long window = mc.getWindow().getWindow();
         if (!mc.isWindowActive()

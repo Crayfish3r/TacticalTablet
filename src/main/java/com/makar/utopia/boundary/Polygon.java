@@ -39,8 +39,7 @@ public record Polygon(List<Point> vertices) {
                 if (i == 0 && j == count - 1) continue;
                 Point d = vertices.get(j);
                 Point e = vertices.get((j + 1) % count);
-                if (crosses(a, b, d, e) || onSegment(a, b, d.x, d.z) || onSegment(a, b, e.x, e.z)
-                        || onSegment(d, e, a.x, a.z) || onSegment(d, e, b.x, b.z)) {
+                if (segmentsIntersect(a, b, d, e)) {
                     throw new IllegalArgumentException("Polygon edges " + i + " and " + j + " intersect");
                 }
             }
@@ -57,6 +56,43 @@ public record Polygon(List<Point> vertices) {
             if ((a.z > z) != (b.z > z) && x < crossingX(a, b, z)) inside = !inside;
         }
         return inside;
+    }
+
+    /** True for touching borders, overlapping interiors or containment. */
+    public boolean intersects(Polygon other) {
+        Point first = other.vertices.get(0);
+        Point own = vertices.get(0);
+        if (contains(first.x, first.z) || other.contains(own.x, own.z)) return true;
+        for (int i = 0; i < vertices.size(); i++) {
+            Point a = vertices.get(i);
+            Point b = vertices.get((i + 1) % vertices.size());
+            for (int j = 0; j < other.vertices.size(); j++) {
+                Point c = other.vertices.get(j);
+                Point d = other.vertices.get((j + 1) % other.vertices.size());
+                if (segmentsIntersect(a, b, c, d)) return true;
+            }
+        }
+        return false;
+    }
+
+    /** Checks the entire rectangle, including concave intrusions between its corners. */
+    public boolean containsRectangle(double minX, double minZ, double maxX, double maxZ) {
+        if (!contains(minX, minZ) || !contains(minX, maxZ) || !contains(maxX, minZ) || !contains(maxX, maxZ)) {
+            return false;
+        }
+        for (int i = 0; i < vertices.size(); i++) {
+            Point a = vertices.get(i);
+            Point b = vertices.get((i + 1) % vertices.size());
+            if (Math.max(a.x, b.x) <= minX || Math.min(a.x, b.x) >= maxX
+                    || Math.max(a.z, b.z) <= minZ || Math.min(a.z, b.z) >= maxZ) continue;
+            if (a.x == b.x) return false;
+            double first = (minX - a.x) / (b.x - a.x);
+            double last = (maxX - a.x) / (b.x - a.x);
+            double from = a.z + Math.max(0, Math.min(first, last)) * (b.z - a.z);
+            double to = a.z + Math.min(1, Math.max(first, last)) * (b.z - a.z);
+            if (Math.max(from, to) > minZ && Math.min(from, to) < maxZ) return false;
+        }
+        return true;
     }
 
     /** Sorted X intersections of a horizontal scanline, paired by the even-odd fill rule. */
@@ -108,6 +144,11 @@ public record Polygon(List<Point> vertices) {
     private static boolean crosses(Point a, Point b, Point c, Point d) {
         return side(a, b, c.x, c.z) * side(a, b, d.x, d.z) < 0
                 && side(c, d, a.x, a.z) * side(c, d, b.x, b.z) < 0;
+    }
+
+    private static boolean segmentsIntersect(Point a, Point b, Point c, Point d) {
+        return crosses(a, b, c, d) || onSegment(a, b, c.x, c.z) || onSegment(a, b, d.x, d.z)
+                || onSegment(c, d, a.x, a.z) || onSegment(c, d, b.x, b.z);
     }
 
     private static boolean onSegment(Point a, Point b, double x, double z) {

@@ -58,7 +58,8 @@ final class TabletDisplayTarget {
         }
     }
 
-    static void draw(Matrix4f matrix, TabletPrototypeModel.DisplaySurface display, MultiBufferSource buffers) {
+    static void draw(TabletPrototypeScreen screen, Matrix4f matrix, TabletPrototypeModel.DisplaySurface display,
+                     MultiBufferSource buffers) {
         if (target == null) return;
         flush(buffers); // Body geometry must finish before the opaque display quad.
         try (var ignored = new TabletRenderState()) {
@@ -67,6 +68,7 @@ final class TabletDisplayTarget {
             RenderSystem.setShaderColor(1, 1, 1, 1);
             RenderSystem.enableDepthTest(); RenderSystem.depthFunc(GL11.GL_LEQUAL); RenderSystem.depthMask(true);
             RenderSystem.disableCull(); RenderSystem.disableBlend();
+            screen.captureDisplay(matrix, display);
             BufferBuilder builder = Tesselator.getInstance().getBuilder();
             builder.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_TEX);
             for (int i = 0; i < 4; i++) {

@@ -20,7 +20,8 @@ import java.util.Map;
 /** A bounded, north-up texture with one texel per world block. Updated only on client ticks. */
 final class TabletTerrain implements AutoCloseable {
     private static final int CHUNK_SIZE = 16;
-    private static final int CHUNK_RADIUS = 8;
+    private static final int CHUNK_RADIUS = 16;
+    private static final int ORIGIN_STEP_CHUNKS = 4;
     static final int SIZE = 2 * CHUNK_RADIUS * CHUNK_SIZE;
     private static final int BACKGROUND_ABGR = 0xff302c29;
     private static final int NEW_TILES_PER_TICK = 4;
@@ -42,15 +43,17 @@ final class TabletTerrain implements AutoCloseable {
     int textureId() { return texture == null ? -1 : texture.getId(); }
     long revision() { return revision; }
 
-    void tick(ClientLevel currentLevel, ChunkPos center) {
+    void tick(ClientLevel currentLevel, double centerX, double centerZ) {
         boolean levelChanged = level != currentLevel;
         if (levelChanged) {
             tiles.clear();
             level = currentLevel;
         }
         ticks++;
-        int nextX = center.x - CHUNK_RADIUS;
-        int nextZ = center.z - CHUNK_RADIUS;
+        int anchorX = anchorChunk(centerX);
+        int anchorZ = anchorChunk(centerZ);
+        int nextX = anchorX - CHUNK_RADIUS;
+        int nextZ = anchorZ - CHUNK_RADIUS;
         boolean rebuild = levelChanged || texture == null || originChunkX != nextX || originChunkZ != nextZ;
         originChunkX = nextX;
         originChunkZ = nextZ;
@@ -65,8 +68,8 @@ final class TabletTerrain implements AutoCloseable {
         Tile oldest = null;
         boolean changed = rebuild;
         for (ChunkPos offset : SAMPLE_ORDER) {
-            int x = center.x + offset.x;
-            int z = center.z + offset.z;
+            int x = anchorX + offset.x;
+            int z = anchorZ + offset.z;
             long key = ChunkPos.asLong(x, z);
             LevelChunk chunk = level.getChunkSource().getChunk(x, z, ChunkStatus.FULL, false);
             Tile cached = tiles.get(key);
@@ -99,8 +102,8 @@ final class TabletTerrain implements AutoCloseable {
         }
         if (rebuild) {
             for (ChunkPos offset : SAMPLE_ORDER) {
-                int x = center.x + offset.x;
-                int z = center.z + offset.z;
+                int x = anchorX + offset.x;
+                int z = anchorZ + offset.z;
                 blit(pixels, x, z, tiles.get(ChunkPos.asLong(x, z)));
             }
         }
@@ -108,6 +111,11 @@ final class TabletTerrain implements AutoCloseable {
             texture.upload();
             revision++;
         }
+    }
+
+    private static int anchorChunk(double coordinate) {
+        int step = CHUNK_SIZE * ORIGIN_STEP_CHUNKS;
+        return (int) Math.floor((coordinate + step / 2.0) / step) * ORIGIN_STEP_CHUNKS;
     }
 
     private boolean inWindow(long key) {
