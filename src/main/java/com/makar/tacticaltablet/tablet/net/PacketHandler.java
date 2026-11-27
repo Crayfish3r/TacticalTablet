@@ -28,7 +28,8 @@ import java.util.function.Supplier;
 
 /** Tactical Tablet protocol registry. */
 public final class PacketHandler {
-    public static final String VERSION = "44";
+    // Existing packet IDs/actions stay stable; v46 appends explicit durable class operations.
+    public static final String VERSION = "47";
 
     public static final int TABLET = 0, TABLET_STATE = 1, VOTE_MODE = 2, JOIN_TEAM = 3, VOTE_MAP = 4,
             MAP_VOTE_STATE = 5, SET_COMPETITIVE = 6, SET_CLAN_WAR = 7, CONTRACT_SELECTION_STATE = 8,
@@ -41,8 +42,8 @@ public final class PacketHandler {
             TABLET_MATCH_SETUP_STATE = 31, CONTRACT_SELECTION_TIMER = 32, SPECTATOR_HUD_STATE = 33,
             MDC_BALANCE_REQUEST = 34, MDC_BALANCE_STATE = 35, MDC_BALANCE_UPDATE = 36,
             CASINO_OPEN_STATE = 37, CASINO_SPIN_REQUEST = 38, CASINO_SPIN_RESULT = 39,
-            CASINO_CLOSE = 40, CASINO_SPECTATOR_OPEN = 41, CASINO_ANIMATION = 42,
-            COSMETIC_PURCHASE = 43;
+        CASINO_CLOSE = 40, CASINO_SPECTATOR_OPEN = 41, CASINO_ANIMATION = 42,
+            COSMETIC_PURCHASE = 43, ARENA_STATE = 44, TABLET_CLASSES_REQUEST = 45, TABLET_CLASSES_STATE = 46;
 
     public static final SimpleChannel INSTANCE = NetworkRegistry.newSimpleChannel(
             new ResourceLocation("tacticaltablet", "main"), () -> VERSION, VERSION::equals, VERSION::equals);
@@ -55,7 +56,7 @@ public final class PacketHandler {
         TABLET(3, 2_000_000_000L), VOTE(6, 1_000_000_000L), CLAN_MUTATION(4, 2_000_000_000L),
         CONTRACT_SELECT(3, 2_000_000_000L), TRACKER(8, 1_000_000_000L),
         SPECTATOR(8, 1_000_000_000L), ADMIN_MAP(3, 2_000_000_000L),
-        ADMIN_MDC(3, 2_000_000_000L), CASINO(6, 2_000_000_000L);
+        ADMIN_MDC(3, 2_000_000_000L), CASINO(6, 2_000_000_000L), TABLET_SNAPSHOT(4, 2_000_000_000L);
         private final C2SRateLimiter.Budget budget;
         C2SAction(int count, long windowNanos) { this.budget = new C2SRateLimiter.Budget(count, windowNanos); }
     }
@@ -111,6 +112,14 @@ public final class PacketHandler {
         register(CASINO_ANIMATION, CasinoAnimationPacket.class, CasinoAnimationPacket::encode, CasinoAnimationPacket::new, CasinoAnimationPacket::handle, NetworkDirection.PLAY_TO_CLIENT);
         register(COSMETIC_PURCHASE, CosmeticPurchasePacket.class, CosmeticPurchasePacket::encode,
                 CosmeticPurchasePacket::new, CosmeticPurchasePacket::handle, NetworkDirection.PLAY_TO_SERVER);
+        register(ARENA_STATE, ArenaStatePacket.class, ArenaStatePacket::encode,
+                ArenaStatePacket::new, ArenaStatePacket::handle, NetworkDirection.PLAY_TO_CLIENT);
+        register(TABLET_CLASSES_REQUEST, TabletClassesRequestPacket.class, TabletClassesRequestPacket::encode,
+                TabletClassesRequestPacket::new, TabletClassesRequestPacket::handle, NetworkDirection.PLAY_TO_SERVER);
+        register(TABLET_CLASSES_STATE, TabletClassesStatePacket.class, TabletClassesStatePacket::encode,
+                TabletClassesStatePacket::new, TabletClassesStatePacket::handle, NetworkDirection.PLAY_TO_CLIENT);
+        register(47, ArenaTeamActionPacket.class, ArenaTeamActionPacket::encode, ArenaTeamActionPacket::new, ArenaTeamActionPacket::handle, NetworkDirection.PLAY_TO_SERVER);
+        register(48, ArenaTeamStatePacket.class, ArenaTeamStatePacket::encode, ArenaTeamStatePacket::new, ArenaTeamStatePacket::handle, NetworkDirection.PLAY_TO_CLIENT);
         verifyUniqueIds();
         registered = true;
     }

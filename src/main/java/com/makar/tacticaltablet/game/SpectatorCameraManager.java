@@ -1,6 +1,5 @@
 package com.makar.tacticaltablet.game;
 
-import com.makar.tacticaltablet.game.clanwar.ClanWarManager;
 import com.makar.tacticaltablet.game.lives.LivesManager;
 import com.makar.tacticaltablet.game.team.TeamId;
 import com.makar.tacticaltablet.game.team.TeamMatchManager;
@@ -223,7 +222,7 @@ public final class SpectatorCameraManager {
     public static List<ServerPlayer> getAvailableTargets(ServerPlayer spectator) {
         if (spectator == null || spectator.server == null) return List.of();
 
-        if (GameStateManager.getCurrentMode().isTeamMode()) {
+        if (TeamMatchManager.usesCombatTeams()) {
             List<ServerPlayer> teammates = new ArrayList<>();
             TeamId teamId = TeamMatchManager.getTeam(spectator);
             if (teamId != null) {
@@ -296,7 +295,7 @@ public final class SpectatorCameraManager {
     private static List<ServerPlayer> getTargetOrder(ServerPlayer spectator) {
         if (spectator == null || spectator.server == null) return List.of();
 
-        if (GameStateManager.getCurrentMode().isTeamMode()) {
+        if (TeamMatchManager.usesCombatTeams()) {
             TeamId teamId = TeamMatchManager.getTeam(spectator);
             if (teamId != null) {
                 List<ServerPlayer> teammates = new ArrayList<>();
@@ -379,7 +378,7 @@ public final class SpectatorCameraManager {
         if (!isAliveCameraTarget(spectator, target)) return false;
 
         MatchMode mode = GameStateManager.getCurrentMode();
-        if (mode == null || !mode.isTeamMode()) return true;
+        if (!TeamMatchManager.usesCombatTeams()) return true;
         if (TeamMatchManager.areTeammates(spectator, target)) return true;
         return !hasAvailableTeammateCameraTarget(spectator);
     }
@@ -404,13 +403,12 @@ public final class SpectatorCameraManager {
                 && isActiveMatch(player.server)
                 && isStrictSpectatorCameraMatch()
                 && (LivesManager.isEliminated(player)
-                    || player.getTags().contains(ClanWarManager.TAG_SPECTATING)
                     || MatchAdmissionManager.isLateSpectator(player))
                 && player.isSpectator();
     }
 
     private static boolean isStrictSpectatorCameraMatch() {
-        return MapSetManager.isCompetitiveSet() || MapSetManager.isClanWarSet();
+        return MapSetManager.isCompetitiveSet();
     }
 
     private static boolean isActiveMatch(MinecraftServer server) {

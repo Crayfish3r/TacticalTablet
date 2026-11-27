@@ -1,9 +1,7 @@
 package com.makar.tacticaltablet.game.respawn;
 
 import com.makar.tacticaltablet.core.TacticalTabletMod;
-import com.makar.tacticaltablet.game.MapSetManager;
 import com.makar.tacticaltablet.game.MatchAdmissionManager;
-import com.makar.tacticaltablet.game.clanwar.ClanWarManager;
 import com.makar.tacticaltablet.game.extraction.ExtractionPointManager;
 import com.makar.tacticaltablet.game.lifecycle.PlayerLifecycleSanitizer;
 import com.makar.tacticaltablet.game.lives.LivesManager;
@@ -37,6 +35,10 @@ public final class DeathTransitionManager {
     private static final Map<UUID, Integer> activeTransitions = new HashMap<>();
 
     private DeathTransitionManager() {
+    }
+
+    public static boolean isTransitionActive(ServerPlayer player) {
+        return player != null && activeTransitions.containsKey(player.getUUID());
     }
 
     public static void recordDeath(ServerPlayer victim, DamageSource source) {
@@ -147,20 +149,6 @@ public final class DeathTransitionManager {
             return;
         }
 
-        if (MapSetManager.isClanWarSet()) {
-            if (ClanWarManager.shouldMoveToLobbyAfterDeath(player)) {
-                ClanWarManager.preparePlayerForRegroup(player);
-                LobbyManager.moveRespawningPlayerToLobby(player);
-                ExtractionPointManager.onPlayerRespawn(player);
-                ClassXPManager.sync(player);
-                return;
-            }
-            if (ClanWarManager.shouldKeepSpectating(player)) {
-                ClanWarManager.keepSpectator(player);
-                ClassXPManager.sync(player);
-                return;
-            }
-        }
 
         TacticalTabletMod.LOGGER.debug(
                 "Completing individual death respawn for victim {} on team {}; no teammates are transitioned",

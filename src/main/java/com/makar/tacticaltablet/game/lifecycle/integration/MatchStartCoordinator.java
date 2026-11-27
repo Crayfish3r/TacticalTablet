@@ -33,7 +33,6 @@ public final class MatchStartCoordinator {
             MatchStartStep.START_ZONE,
             MatchStartStep.PREPARE_SAFE_TELEPORT,
             MatchStartStep.INITIALIZE_PLAYERS,
-            MatchStartStep.START_VOICE_MATCH,
             MatchStartStep.CAPTURE_PARTICIPANTS,
             MatchStartStep.START_EXTRACTION,
             MatchStartStep.SET_LEGACY_RUNNING,

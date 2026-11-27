@@ -62,6 +62,7 @@ public final class ZoneManager {
     private static final int FINAL_REVEAL_START_PHASE_INDEX = PHASES.length - 2;
 
     private static int currentPhaseIndex = -1;
+    private static com.makar.tacticaltablet.game.arena.ArenaZonePolicy arenaPolicy;
     private static int secondsLeft = 0;
     private static int bossBarSecondsLeft = 0;
     private static final ZoneFinalRevealScheduler FINAL_REVEAL_SCHEDULER =
@@ -82,12 +83,22 @@ public final class ZoneManager {
     }
 
     public static void start(MinecraftServer server) {
+        arenaPolicy = null;
         currentPhaseIndex = -1;
         secondsLeft = 0;
         FINAL_REVEAL_SCHEDULER.reset();
         ZoneSettings settings = loadSettings(server);
         activateRtpSettings(settings.rtpSettings);
         activateCamouflagePreset(server, settings.camouflagePreset);
+        if (com.makar.tacticaltablet.game.MapSetManager.isArenaSet()) {
+            arenaPolicy = new com.makar.tacticaltablet.game.arena.ArenaZonePolicy(
+                    GameStateManager.getLifecycleSnapshot().matchId().orElseThrow());
+            arenaPolicy.apply(GameStateManager.getOverworld(server), settings.zoneCenterX, settings.zoneCenterZ);
+            RtpValidation validation = validateActiveRtpSettings(GameStateManager.getOverworld(server));
+            if (!validation.valid()) throw new IllegalStateException("Arena RTP: " + validation.reason());
+            hideBossBar();
+            return;
+        }
         RtpValidation rtpValidation = validateActiveRtpSettings(GameStateManager.getOverworld(server));
         if (!rtpValidation.valid()) {
             throw new IllegalStateException("Invalid RTP configuration: " + rtpValidation.reason());
@@ -106,6 +117,7 @@ public final class ZoneManager {
     }
 
     public static void reset(MinecraftServer server) {
+        arenaPolicy = null;
         currentPhaseIndex = -1;
         secondsLeft = 0;
         bossBarSecondsLeft = 0;
@@ -131,6 +143,7 @@ public final class ZoneManager {
     }
 
     public static void tick(MinecraftServer server) {
+        if (arenaPolicy != null) return;
         if (server == null || currentPhaseIndex < 0) return;
         syncBossBarPlayers(server);
         tickBossBar();
@@ -395,6 +408,12 @@ public final class ZoneManager {
 
     private static void activateRtpSettings(RtpSettings settings) {
         activeRtpSettings = settings == null ? RtpSettings.surfaceDefaults() : settings;
+        if (com.makar.tacticaltablet.game.MapSetManager.isArenaSet()) {
+            var s = activeRtpSettings;
+            activeRtpSettings = new RtpSettings(s.mode(), s.minX(), s.maxX(), s.minZ(), s.maxZ(), s.spawnY(),
+                    s.maxAttempts(), s.localSearchRadius(), s.teamSpreadRadius(), s.requiredSolidBlocksBelow(),
+                    true, s.valid(), s.validationError());
+        }
         if (activeRtpSettings.mode() == RtpPlacementMode.FIXED_Y_BOX && activeRtpSettings.valid()) {
             TacticalTabletMod.LOGGER.info(
                     "[TacticalTablet] Loaded RTP configuration: mode=FIXED_Y_BOX, bounds=[{}..{}, {}..{}], spawnY={}",

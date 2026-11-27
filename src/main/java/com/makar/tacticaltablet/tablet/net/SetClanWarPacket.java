@@ -43,7 +43,8 @@ public final class SetClanWarPacket {
                 MapSetManager.sync(player, false);
                 return;
             }
-            MapSetManager.setNextSetClanWar(player, clanWar);
+            // ID 7 remains a tombstone: old clients may request the retired mode, but cannot enable it.
+            MapSetManager.sync(player, false);
         });
         context.setPacketHandled(true);
     }

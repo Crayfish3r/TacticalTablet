@@ -12,6 +12,7 @@ public final class ActivePvpParticipant {
         if (player == null) {
             return false;
         }
+        if (MapSetManager.isArenaSet() && !com.makar.tacticaltablet.game.arena.ArenaMatchRuntime.accepts(player)) return false;
         return ActivePvpParticipantPolicy.isEligible(
                 MatchAdmissionManager.isCurrentMatchParticipant(player.getUUID()),
                 player.getTags().contains("war.playing"),

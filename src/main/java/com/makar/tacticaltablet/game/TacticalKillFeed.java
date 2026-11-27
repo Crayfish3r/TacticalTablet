@@ -9,6 +9,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.damagesource.DamageSource;
 
 import java.util.Locale;
+import java.util.UUID;
 
 public final class TacticalKillFeed {
     private TacticalKillFeed() {
@@ -42,6 +43,30 @@ public final class TacticalKillFeed {
         String id = source == null || source.getMsgId() == null
                 ? "" : source.getMsgId().toLowerCase(Locale.ROOT);
         return classifyCause(id, attributedFallback);
+    }
+
+    public static void publishNpcKill(ServerPlayer killer, UUID npcId, String npcName, DamageSource source,
+                                      KillReward reward) {
+        if (killer == null || npcId == null || !TacticalTabletServerConfig.isKillFeedEnabled()) return;
+        String weapon = weaponDisplayName(CombatAttributionLedger.extractWeaponId(source));
+        int killerColor = color(TeamMatchManager.getTeam(killer));
+        for (ServerPlayer viewer : killer.server.getPlayerList().getPlayers()) {
+            if (!isMatchViewer(viewer, null)) continue;
+            PacketHandler.sendToPlayer(viewer, npcPacket(killer.getUUID(), killer.getGameProfile().getName(),
+                    killerColor, npcId, npcName, classifyCause(source, false), weapon,
+                    killer.server.getTickCount(), viewer.getUUID(), reward));
+        }
+    }
+
+    static KillFeedPacket npcPacket(UUID killerId, String killerName, int killerColor, UUID npcId,
+                                    String npcName, KillFeedPacket.Cause cause, String weapon,
+                                    long tick, UUID viewerId, KillReward reward) {
+        KillReward safeReward = reward == null ? KillReward.NONE : reward;
+        boolean rewardViewer = killerId.equals(viewerId);
+        return new KillFeedPacket(killerId, killerName, killerColor, npcId,
+                npcName == null || npcName.isBlank() ? "NPC" : npcName, KillFeedPacket.NO_TEAM_COLOR,
+                cause, weapon, tick, rewardViewer ? safeReward.awardedCoins() : 0,
+                rewardViewer ? safeReward.awardedXp() : 0);
     }
 
     static KillFeedPacket.Cause classifyCause(String sourceId, boolean attributedFallback) {

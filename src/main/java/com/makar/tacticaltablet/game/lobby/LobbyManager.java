@@ -4,7 +4,8 @@ import com.makar.tacticaltablet.game.GameStateManager;
 import com.makar.tacticaltablet.casino.CasinoSessionManager;
 import com.makar.tacticaltablet.game.MatchAdmissionManager;
 import com.makar.tacticaltablet.airdrop.AirdropManager;
-import com.makar.tacticaltablet.game.clanwar.ClanWarManager;
+import com.makar.tacticaltablet.game.lifecycle.RetiredClanWarTags;
+import com.makar.tacticaltablet.game.respawn.DeathTransitionManager;
 import com.makar.tacticaltablet.game.contract.ContractManager;
 import com.makar.tacticaltablet.game.lifecycle.PlayerLifecycleSanitizer;
 import com.makar.tacticaltablet.game.lives.LivesManager;
@@ -14,6 +15,8 @@ import com.makar.tacticaltablet.game.chaos.ChaosSetManager;
 import com.makar.tacticaltablet.game.team.TeamMatchManager;
 import com.makar.tacticaltablet.inventory.InventoryManager;
 import com.makar.tacticaltablet.moderation.ModerModeManager;
+import com.makar.tacticaltablet.mixin.border.BorderDelegateAccessor;
+import com.makar.tacticaltablet.mixin.border.WorldBorderAccessor;
 import com.makar.tacticaltablet.progression.ClassXPManager;
 import com.makar.tacticaltablet.tablet.net.PacketHandler;
 import com.makar.tacticaltablet.tablet.net.ChaosStatePacket;
@@ -32,6 +35,7 @@ import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.border.WorldBorder;
 import net.minecraft.world.phys.Vec3;
 
+import java.util.List;
 import java.util.Optional;
 
 public class LobbyManager {
@@ -49,6 +53,7 @@ public class LobbyManager {
 
     private static void moveToLobby(ServerPlayer player, boolean ordinaryRespawn) {
         if (player == null) return;
+        RetiredClanWarTags.clear(player);
         if (MatchAdmissionManager.enforceLateSpectator(player, false)) return;
         boolean releasedLateSpectator = MatchAdmissionManager.releaseLateSpectatorAfterMatch(player);
 
@@ -58,7 +63,6 @@ public class LobbyManager {
             return;
         }
 
-        relaxLobbyBorder(lobby);
         Optional<Vec3> resolvedSpawn = LobbySpawnResolver.resolve(lobby, player);
         if (resolvedSpawn.isEmpty()) {
             disconnectForUnavailableSpawn(player);
@@ -66,6 +70,10 @@ public class LobbyManager {
         }
 
         RtpTimerManager.cancel(player);
+        var arenaLife = com.makar.tacticaltablet.game.arena.ArenaMatchRuntime.life(player);
+        if (arenaLife != null && (ordinaryRespawn || arenaLife.awaitingRespawn)) {
+            arenaLife.rtpUsed = false; arenaLife.awaitingRespawn = false;
+        }
         boolean matchRunningOrStarting = GameStateManager.isRunning(player.server)
                 || GameStateManager.isStartTransitionPlayerSetup();
         boolean preserveTeamMatchState = matchRunningOrStarting
@@ -77,8 +85,13 @@ public class LobbyManager {
         }
         GameType currentGameMode = player.gameMode.getGameModeForPlayer();
         boolean forcedSpectator = LivesManager.isEliminated(player)
-                || ClanWarManager.shouldKeepSpectating(player)
                 || MatchAdmissionManager.isLateSpectator(player);
+        if (RetiredClanWarTags.pendingLobbyCleanup(player)) {
+            // Retire only the clan-war reason; other spectator owners must keep control.
+            forcedSpectator |= CasinoSessionManager.isExcludedFromMatch(player)
+                    || DeathTransitionManager.isTransitionActive(player)
+                    || !LivesManager.canContinueMatch(player);
+        }
         GameType targetGameMode = LobbyGameModePolicy.target(
                 currentGameMode,
                 ModerModeManager.isInModerMode(player),
@@ -90,8 +103,10 @@ public class LobbyManager {
         }
 
         player.removeTag("war.playing");
-        InventoryManager.clearInventory(player);
-        PlayerLifecycleSanitizer.clearPreviousLifeState(player);
+        if (arenaLife == null || !arenaLife.kitUsed || ordinaryRespawn) {
+            InventoryManager.clearInventory(player);
+            PlayerLifecycleSanitizer.clearPreviousLifeState(player);
+        }
 
         boolean matchRunning = matchRunningOrStarting;
         boolean canUseTabletNow = GameStateManager.isTabletAvailableInLobby(player.server)
@@ -105,12 +120,15 @@ public class LobbyManager {
 
         Vec3 spawn = resolvedSpawn.orElseThrow();
         player.teleportTo(lobby, spawn.x, spawn.y, spawn.z, player.getYRot(), player.getXRot());
+        RetiredClanWarTags.finish(player);
         PlayerLifecycleSanitizer.restoreLobbySafety(player);
 
         if (canUseTabletNow) {
-            InventoryManager.giveFreshTablet(player);
+            if (arenaLife == null || !arenaLife.kitUsed) InventoryManager.giveFreshTablet(player);
+            else InventoryManager.giveTabletIfMissing(player);
             AirdropManager.giveCompassToJoiningPlayer(player);
-            if (matchRunning && (!MapSetManager.isChaosSet() || !ChaosSetManager.requiresSelection(player))) {
+            if (matchRunning && (!MapSetManager.isArenaSet() || PlayerTabletState.isKitUsed(player))
+                    && (!MapSetManager.isChaosSet() || !ChaosSetManager.requiresSelection(player))) {
                 RtpTimerManager.start(player);
             } else {
                 sync(player);
@@ -125,7 +143,6 @@ public class LobbyManager {
                 && player.gameMode.getGameModeForPlayer() != GameType.SPECTATOR
                 && !ModerModeManager.isInModerMode(player)
                 && !LivesManager.isEliminated(player)
-                && !ClanWarManager.shouldKeepSpectating(player)
                 && !CasinoSessionManager.isExcludedFromMatch(player);
     }
 
@@ -166,7 +183,6 @@ public class LobbyManager {
         ServerLevel lobby = GameStateManager.getLobbyLevel(server);
         if (lobby != null) {
             clearWeather(lobby);
-            relaxLobbyBorder(lobby);
         }
 
     }
@@ -175,11 +191,21 @@ public class LobbyManager {
         level.setWeatherParameters(20 * 60 * 10, 0, false, false);
     }
 
-    private static void relaxLobbyBorder(ServerLevel lobby) {
+    public static void initializeBorder(MinecraftServer server) {
+        ServerLevel lobby = GameStateManager.getLobbyLevel(server);
+        if (lobby == null) return;
+
         WorldBorder border = lobby.getWorldBorder();
+        WorldBorder overworldBorder = server.overworld().getWorldBorder();
+        // Vanilla mirrors every Overworld update to other dimensions. Detach only the lobby.
+        for (var listener : List.copyOf(((WorldBorderAccessor) overworldBorder).tacticaltablet$getListeners())) {
+            if (listener instanceof BorderDelegateAccessor delegate && delegate.tacticaltablet$getWorldBorder() == border) {
+                overworldBorder.removeListener(listener);
+            }
+        }
         border.setCenter(0.0D, 0.0D);
-        border.setSize(59_999_968.0D);
-        border.setDamageSafeZone(59_999_968.0D);
+        border.setSize(WorldBorder.MAX_SIZE);
+        border.setDamageSafeZone(WorldBorder.MAX_SIZE);
         border.setDamagePerBlock(0.0D);
         border.setWarningBlocks(0);
         border.setWarningTime(0);

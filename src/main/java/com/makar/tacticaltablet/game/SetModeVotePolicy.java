@@ -11,7 +11,7 @@ public final class SetModeVotePolicy {
     private SetModeVotePolicy() { }
 
     public static SetGameMode selectWinner(Map<SetGameMode, Integer> counts, RandomGenerator random) {
-        return selectWinner(counts, Set.of(SetGameMode.CASUAL, SetGameMode.CHAOS, SetGameMode.COMPETITIVE), random);
+        return selectWinner(counts, Set.of(SetGameMode.CASUAL, SetGameMode.CHAOS, SetGameMode.COMPETITIVE, SetGameMode.ARENA), random);
     }
 
     public static SetGameMode selectWinner(Map<SetGameMode, Integer> counts,
@@ -37,6 +37,6 @@ public final class SetModeVotePolicy {
     }
 
     public static boolean ordinaryModesEnabled(boolean competitive, boolean clanWar) {
-        return !competitive && !clanWar;
+        return !competitive; // Second argument is retained for source compatibility with older integrations.
     }
 }

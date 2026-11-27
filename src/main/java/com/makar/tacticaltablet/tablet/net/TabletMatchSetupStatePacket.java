@@ -32,6 +32,7 @@ public record TabletMatchSetupStatePacket(
     static final int MAX_PLAYER_NAME_LENGTH = 32;
 
     public TabletMatchSetupStatePacket {
+        clanWarSet = false; // Keep the existing field position, always disabled.
         matchPhase = matchPhase == null ? MatchPhase.WAITING : matchPhase;
         matchMode = matchMode == null ? MatchMode.SOLO : matchMode;
         voteTimeLeft = Math.max(0, voteTimeLeft);

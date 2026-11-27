@@ -9,6 +9,15 @@ displayName="${mod_name}"
 authors="${mod_authors}"
 description="${mod_description}"
 
+# The isolated adapter checks the exact API version. An unsupported optional build
+# must not stop TacticalTablet from loading.
+[[dependencies.${mod_id}]]
+    modId="tacticalnpcai"
+    mandatory=false
+    versionRange="[0,)"
+    ordering="AFTER"
+    side="BOTH"
+
 [[dependencies.${mod_id}]]
     modId="forge"
     mandatory=true

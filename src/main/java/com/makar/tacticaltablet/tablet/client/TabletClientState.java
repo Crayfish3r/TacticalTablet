@@ -35,6 +35,7 @@ public class TabletClientState {
     private static int matchesPlayed;
     private static int coins;
     private static int careerProgressPercent;
+    private static long profileRevision;
     private static int lives;
     private static int alivePlayers;
     private static int remainingLivesTotal;
@@ -50,6 +51,8 @@ public class TabletClientState {
     private static int trioVotes;
     private static int squadVotes;
     private static int voteOptionsMask = MatchMode.voteMaskFor(0, false);
+    private static long matchSetupRevision, phaseRevision;
+    private static boolean matchSetupReceived;
     private static int teamSelectTimeLeft;
     private static int teamSlotSize = 1;
     private static int selectedTeam = -1;
@@ -174,7 +177,10 @@ public class TabletClientState {
         matchesPlayed = Math.max(0, newMatchesPlayed);
         coins = Math.max(0, newCoins);
         careerProgressPercent = Math.max(0, Math.min(100, newCareerProgressPercent));
+        profileRevision++;
     }
+
+    public static long getProfileRevision() { return profileRevision; }
 
 
     public static void updateLives(int newLives) {
@@ -215,7 +221,7 @@ public class TabletClientState {
     }
 
     public static void updateClanWarSet(boolean clanWar) {
-        clanWarSet = clanWar;
+        clanWarSet = false;
     }
 
     public static boolean isClanWarSet() {
@@ -237,7 +243,11 @@ public class TabletClientState {
             int selectedTeamId,
             Map<String, String> slots
     ) {
-        matchPhase = phase == null ? MatchPhase.WAITING : phase;
+        MatchPhase nextPhase = phase == null ? MatchPhase.WAITING : phase;
+        if (!matchSetupReceived || matchPhase != nextPhase) phaseRevision++;
+        matchPhase = nextPhase;
+        matchSetupReceived = true;
+        matchSetupRevision++;
         matchMode = mode == null ? MatchMode.SOLO : mode;
         selectedVote = vote;
         voteTimeLeft = Math.max(0, votingSeconds);
@@ -254,6 +264,17 @@ public class TabletClientState {
 
     public static MatchPhase getMatchPhase() {
         return matchPhase;
+    }
+
+    public static long getMatchSetupRevision() { return matchSetupRevision; }
+    public static long getPhaseRevision() { return phaseRevision; }
+    public static boolean hasMatchSetup() { return matchSetupReceived; }
+
+    public static void clearMatchSetup() {
+        updateMatchSetup(MatchPhase.WAITING, MatchMode.SOLO, null, 0, 0, 0, 0, 0, 0,
+                0, 1, -1, Map.of());
+        matchSetupReceived = false;
+        phaseRevision++;
     }
 
     public static MatchMode getMatchMode() {

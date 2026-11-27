@@ -18,8 +18,9 @@ import java.util.List;
 public final class EmbeddedResourceDiagnostics {
     private static final String ENABLE_PROPERTY = "tacticaltablet.verifyEmbeddedResources";
     private static final List<Probe> PROBES = List.of(
-            probe("tacticaltablet", "textures/gui/tablet.png"),
-            probe("tacticaltablet", "textures/gui/buttons/class_button.png"),
+            probe("tacticaltablet", "tablet/tt01.json"),
+            probe("tacticaltablet", "textures/item/tablet_tt01.png"),
+            probe("tacticaltablet", "models/item/tactical_tablet.json"),
             override("minecraft", "textures/gui/container/inventory.png"),
             override("minecraft", "textures/gui/recipe_button.png"),
             override("minecraft", "lang/ru_ru.json"),

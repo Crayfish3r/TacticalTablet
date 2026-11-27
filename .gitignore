@@ -20,6 +20,8 @@ build
 # other
 eclipse
 run
+run-tablet-prototype*/
+dev-runs/
 backups/
 *.zip
 config/tacticaltablet_discord.json

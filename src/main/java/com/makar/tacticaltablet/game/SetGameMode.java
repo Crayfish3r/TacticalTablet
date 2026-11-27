@@ -4,7 +4,8 @@ public enum SetGameMode {
     CASUAL("Казуал", "screen.tacticaltablet.map_voting.mode.casual", true),
     CHAOS("Хаос", "screen.tacticaltablet.map_voting.mode.chaos", true),
     RACE("Гонка [скоро…]", "screen.tacticaltablet.map_voting.mode.race", false),
-    COMPETITIVE("Соревновательный", "screen.tacticaltablet.map_voting.mode.competitive", true);
+    COMPETITIVE("Соревновательный", "screen.tacticaltablet.map_voting.mode.competitive", true),
+    ARENA("Арена", "screen.tacticaltablet.map_voting.mode.arena", true);
 
     private final String displayName;
     private final String translationKey;

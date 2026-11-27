@@ -1,12 +1,9 @@
 package com.makar.tacticaltablet.game.lives;
 
-import com.makar.tacticaltablet.clan.ClanManager;
 import com.makar.tacticaltablet.game.GameStateManager;
 import com.makar.tacticaltablet.game.MatchScoreboard;
-import com.makar.tacticaltablet.game.MapSetManager;
 import com.makar.tacticaltablet.game.MatchAdmissionManager;
 import com.makar.tacticaltablet.game.SpectatorCameraManager;
-import com.makar.tacticaltablet.game.clanwar.ClanWarManager;
 import com.makar.tacticaltablet.game.lobby.LobbyManager;
 import com.makar.tacticaltablet.game.lifecycle.PlayerLifecycleSanitizer;
 import com.makar.tacticaltablet.game.respawn.RespawnControlManager;
@@ -31,6 +28,11 @@ import net.minecraft.world.scores.Scoreboard;
 import java.util.UUID;
 
 public class LivesManager {
+    public enum LifeRule { FINITE, UNLIMITED }
+    public static LifeRule lifeRule() {
+        return com.makar.tacticaltablet.game.MapSetManager.isArenaSet() ? LifeRule.UNLIMITED : LifeRule.FINITE;
+    }
+    public static boolean hasUnlimitedLives() { return lifeRule() == LifeRule.UNLIMITED; }
 
     public static final String OBJECTIVE = MatchScoreboard.LIVES_OBJECTIVE;
     public static final int MAX_LIVES = 3;
@@ -118,6 +120,7 @@ public class LivesManager {
 
     public static int getLives(ServerPlayer player) {
         if (player == null) return 0;
+        if (hasUnlimitedLives()) return 0; // No finite-life quantity; consult lifeRule().
 
         Scoreboard scoreboard = player.getScoreboard();
         Objective objective = getOrCreateLivesObjective(player);
@@ -139,7 +142,7 @@ public class LivesManager {
             return;
         }
 
-        scoreboard.getOrCreatePlayerScore(player.getScoreboardName(), objective).setScore(lives);
+        scoreboard.getOrCreatePlayerScore(player.getScoreboardName(), objective).setScore(hasUnlimitedLives() ? 0 : lives);
     }
 
     public static boolean isEliminated(ServerPlayer player) {
@@ -160,7 +163,7 @@ public class LivesManager {
             return true;
         }
 
-        return getLives(player) > 0;
+        return hasUnlimitedLives() || getLives(player) > 0;
     }
 
     public static boolean ensureEliminatedIfOutOfLives(ServerPlayer player) {
@@ -171,7 +174,7 @@ public class LivesManager {
             return true;
         }
 
-        if (hasStarted(player) && getLives(player) <= 0) {
+        if (!hasUnlimitedLives() && hasStarted(player) && getLives(player) <= 0) {
             eliminate(player, 0);
             return true;
         }
@@ -186,7 +189,7 @@ public class LivesManager {
         if (!player.getTags().contains(TAG_LIVES_INIT)) return false;
         if (isEliminated(player)) return false;
 
-        return getLives(player) > 0;
+        return hasUnlimitedLives() || getLives(player) > 0;
     }
 
     public static int getAlivePlayerCount(MinecraftServer server) {
@@ -220,14 +223,16 @@ public class LivesManager {
     public static int handleDeath(ServerPlayer victim) {
         if (victim == null) return 0;
 
-        if (MapSetManager.isClanWarSet()) {
-            return handleClanWarDeath(victim);
-        }
 
         if (!victim.getTags().contains(TAG_LIVES_INIT)) {
             ensureStarted(victim);
         }
 
+        if (hasUnlimitedLives()) {
+            victim.removeTag("war.playing"); victim.addTag("in_lobby");
+            RtpTimerManager.cancel(victim); PassiveClassXPManager.clear(victim);
+            return 0;
+        }
         int lives = Math.max(0, getLives(victim) - 1);
         setLives(victim, lives);
 
@@ -247,66 +252,12 @@ public class LivesManager {
         return lives;
     }
 
-    private static int handleClanWarDeath(ServerPlayer victim) {
-        if (victim == null) return 0;
 
-        if (!victim.getTags().contains(TAG_LIVES_INIT)) {
-            ensureStarted(victim);
-        }
 
-        String clanId = ClanManager.getClanIdForPlayer(victim);
-        ClassCooldownManager.setCooldownForSelectedClass(victim);
-
-        victim.removeTag("war.playing");
-        victim.removeTag("in_lobby");
-        victim.addTag(ClanWarManager.TAG_SPECTATING);
-        RtpTimerManager.cancel(victim);
-        PassiveClassXPManager.clear(victim);
-        VoiceChatTeamManager.removePlayerFromVoiceGroup(victim);
-
-        if (clanId.isBlank()) {
-            eliminate(victim, 0);
-            return 0;
-        }
-
-        if (!ClanWarManager.isClanWiped(victim.server, clanId)) {
-            victim.sendSystemMessage(Component.literal("[WAR] Ты погиб. Ожидай исхода боя клана."));
-            return ClanWarManager.getClanLives(clanId);
-        }
-
-        int remaining = ClanWarManager.consumeClanLife(victim.server, clanId);
-        if (remaining <= 0 || RespawnControlManager.areRespawnsDisabled()) {
-            ClanWarManager.eliminateClan(victim.server, clanId);
-            eliminateClan(victim.server, clanId);
-            return 0;
-        }
-
-        regroupClan(victim.server, clanId);
-        return remaining;
-    }
-
-    private static void regroupClan(MinecraftServer server, String clanId) {
-        ClanWarManager.markClanForRegroup(server, clanId);
-        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-            if (!clanId.equals(ClanManager.getClanIdForPlayer(player))) continue;
-            if (player.isDeadOrDying()) continue;
-            ClanWarManager.preparePlayerForRegroup(player);
-            LobbyManager.moveRespawningPlayerToLobby(player);
-            ClassXPManager.sync(player);
-        }
-    }
-
-    private static void eliminateClan(MinecraftServer server, String clanId) {
-        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-            if (!clanId.equals(ClanManager.getClanIdForPlayer(player))) continue;
-            player.removeTag(ClanWarManager.TAG_SPECTATING);
-            player.removeTag(ClanWarManager.TAG_REGROUP_PENDING);
-            eliminate(player, 0);
-        }
-    }
 
     public static void eliminateForRespawnDisabled(ServerPlayer player) {
         if (player == null) return;
+        if (hasUnlimitedLives()) return;
 
         int unusedLives = Math.max(0, getLives(player));
         ClassCooldownManager.setCooldownForSelectedClass(player);

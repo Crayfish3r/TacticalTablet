@@ -17,6 +17,19 @@ java {
 }
 
 repositories {
+    // Stage-1 production publication; override for CI/another checkout. Never vendor JARs.
+    maven {
+        url = uri(providers.gradleProperty('tacticalNpcRepository')
+                .orElse('../[TACZ] Military NPC/forge-addon/build/repository').get())
+        content { includeGroup 'dev.zuma.tacticalnpc' }
+    }
+    if (providers.gradleProperty('npcSmoke').isPresent()) {
+        flatDir {
+            dirs providers.gradleProperty('tacticalNpcSmokeLibraries')
+                    .orElse('../[TACZ] Military NPC/forge-addon/libs').get()
+            content { includeGroup 'local' }
+        }
+    }
     mavenCentral()
     maven {
         name = 'Curios'
@@ -42,6 +55,11 @@ repositories {
 
 def gameRunDirectory = providers.gradleProperty('gameRunDirectory').orElse('run')
 
+// Dedicated probes are opt-in test sources and are never part of the production JAR.
+if (providers.gradleProperty('npcProbe').isPresent()) {
+    sourceSets.main.java.srcDir 'src/npcSmoke/java'
+}
+
 minecraft {
     // Standard mappings for 1.20.1
     mappings channel: mapping_channel, version: mapping_version
@@ -62,6 +80,14 @@ minecraft {
             workingDirectory project.file(gameRunDirectory.get())
             property 'forge.logging.markers', 'REGISTRIES'
             property 'forge.logging.console.level', 'debug'
+            if (providers.gradleProperty('npcProbe').isPresent()) {
+                property 'tacticaltablet.npcProbe', providers.gradleProperty('npcProbe').get()
+                args '--nogui'
+            }
+            if (providers.gradleProperty('npcSmoke').isPresent()) {
+                property 'mixin.env.remapRefMap', 'true'
+                property 'mixin.env.refMapRemappingFile', "${projectDir}/build/createSrgToMcp/output.srg"
+            }
             mods {
                 "${mod_id}" {
                     source sourceSets.main
@@ -75,10 +101,16 @@ mixin {
     add sourceSets.main, "${mod_id}.refmap.json"
     config "${mod_id}.mixins.json"
     config "${mod_id}.curios.mixins.json"
+    config "${mod_id}.border.mixins.json"
 }
 
 dependencies {
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
+    compileOnly fg.deobf('dev.zuma.tacticalnpc:tacticalnpcai:0.2.0')
+    if (providers.gradleProperty('npcSmoke').isPresent()) {
+        runtimeOnly fg.deobf('dev.zuma.tacticalnpc:tacticalnpcai:0.2.0')
+        runtimeOnly fg.deobf('local:tacz:1.20.1-1.1.8-hotfix2')
+    }
     annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
     compileOnly fg.deobf("top.theillusivec4.curios:curios-forge:${curios_version}")
     compileOnly fg.deobf("maven.modrinth:modern-damage-control:${moderndamage_version}")
@@ -93,7 +125,9 @@ dependencies {
         // Project-id coordinates keep the smoke runtime independent of the exact compile-only API module.
         runtimeOnly fg.deobf("maven.modrinth:P7GACeRj:${smokeVersionId}")
         runtimeOnly fg.deobf("maven.modrinth:cloth-config:${cloth_config_version}")
-        runtimeOnly fg.deobf('maven.modrinth:timeless-and-classics-zero:1.1.7')
+        if (!providers.gradleProperty('npcSmoke').isPresent()) {
+            runtimeOnly fg.deobf('maven.modrinth:timeless-and-classics-zero:1.1.7')
+        }
     }
     implementation "de.maxhenkel.voicechat:voicechat-api:${voicechat_api_version}"
     runtimeOnly fg.deobf("maven.modrinth:simple-voice-chat:forge-${voicechat_version}")
@@ -106,6 +140,24 @@ tasks.withType(JavaCompile).configureEach {
 }
 
 tasks.named('test', Test).configure {
+    useJUnitPlatform()
+}
+
+// Runnable even when unrelated tests in the working tree do not compile. The same
+// regression sources also participate in the ordinary test/clean build tasks.
+sourceSets {
+    npcTest {
+        java.srcDir 'src/test/java'
+        java.include 'com/makar/tacticaltablet/game/npc/**'
+        compileClasspath += sourceSets.main.output
+        runtimeClasspath += sourceSets.main.output
+    }
+}
+configurations.npcTestImplementation.extendsFrom(configurations.testImplementation)
+configurations.npcTestRuntimeOnly.extendsFrom(configurations.testRuntimeOnly)
+tasks.register('npcTest', Test) {
+    testClassesDirs = sourceSets.npcTest.output.classesDirs
+    classpath = sourceSets.npcTest.runtimeClasspath
     useJUnitPlatform()
 }
 
@@ -188,6 +240,8 @@ tasks.register('verifyProcessedModsToml') {
 }
 
 tasks.named('jar', Jar).configure {
+    exclude 'com/makar/tacticaltablet/game/npc/NpcEncounterSmoke*'
+    exclude 'com/makar/tacticaltablet/game/npc/NpcKillRewardSmoke*'
     manifest {
         attributes([
             "Specification-Title"     : mod_id,
@@ -289,6 +343,7 @@ tasks.register('verifyEmbeddedClientResourceSources') {
 
         File resources = layout.projectDirectory.dir('src/main/resources').asFile
         def forbidden = fileTree(resources) {
+            include '**/*.bbmodel'
             include '**/*.zip'
             include '**/pack.png'
             include '**/README_RU.txt'
@@ -304,6 +359,22 @@ tasks.register('verifyEmbeddedClientResourceSources') {
         }
     }
 }
+
+// No Node dependency during a normal mod build. The converter records its source
+// digest; edits to the authoring model must be regenerated before packaging.
+tasks.register('verifyTabletPrototypeSource') {
+    def source = layout.projectDirectory.file('model-sources/tablet/TacticalTablet_TT01.bbmodel')
+    def generated = layout.projectDirectory.file('src/main/resources/assets/tacticaltablet/tablet/tt01.json')
+    inputs.file(source)
+    inputs.file(generated)
+    doLast {
+        def model = new groovy.json.JsonSlurper().parse(generated.asFile, 'UTF-8')
+        if (model.sourceSha256 != sha256(source.asFile.bytes)) {
+            throw new GradleException('TT01 source changed: run node tools/tablet/prepare-tablet.mjs')
+        }
+    }
+}
+tasks.named('check').configure { dependsOn 'verifyTabletPrototypeSource' }
 
 tasks.register('verifyJarEmbeddedClientResources') {
     dependsOn 'reobfJar'
@@ -336,6 +407,15 @@ tasks.register('verifyJarEmbeddedClientResources') {
             }
 
             [
+                    'com/makar/tacticaltablet/tablet/client/TabletScreen.class',
+                    'com/makar/tacticaltablet/tablet/client/MapVotingScreen.class',
+                    'com/makar/tacticaltablet/tablet/client/TeamSelectScreen.class',
+                    'com/makar/tacticaltablet/tablet/client/VotingScreen.class',
+                    'assets/tacticaltablet/textures/gui/tablet.png',
+                    'assets/tacticaltablet/textures/gui/tablet_epic.png',
+                    'assets/tacticaltablet/textures/gui/tablet_legend.png',
+                    'assets/tacticaltablet/textures/gui/vote_panel.png',
+                    'assets/tacticaltablet/textures/gui/confirm_panel.png',
                     'resourcepacks/tacticaltablet_overrides/assets/minecraft/font/default.json',
                     'resourcepacks/tacticaltablet_overrides/assets/deluxewarfare/font/jetbrains_mono_medium.ttf',
                     'META-INF/licenses/JetBrains-Mono-Apache-2.0.txt'
@@ -348,6 +428,9 @@ tasks.register('verifyJarEmbeddedClientResources') {
             def forbidden = archive.entries().findAll { entry ->
                 String path = entry.name
                 path.endsWith('.zip')
+                        || path.endsWith('.bbmodel')
+                        || path.startsWith('legacy/')
+                        || path.startsWith('assets/tacticaltablet/textures/gui/buttons/')
                         || path == 'pack.png'
                         || path == 'README_RU.txt'
                         || path == 'EDITING_GUIDE_RU.md'

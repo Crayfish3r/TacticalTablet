@@ -8,7 +8,6 @@ import com.makar.tacticaltablet.game.MatchAdmissionManager;
 import com.makar.tacticaltablet.game.MapSetManager;
 import com.makar.tacticaltablet.game.chaos.ChaosSelectionAdmission;
 import com.makar.tacticaltablet.game.chaos.ChaosSetManager;
-import com.makar.tacticaltablet.game.clanwar.ClanWarManager;
 import com.makar.tacticaltablet.game.lives.LivesManager;
 import com.makar.tacticaltablet.game.lobby.LobbyManager;
 import com.makar.tacticaltablet.game.respawn.RtpTimerManager;
@@ -42,17 +41,25 @@ public class TabletPacket {
     private static final Map<Integer, String> KITS = ClassDefinitions.actionIdToClassKey();
 
     private final int actionId;
+    private final long requestId;
 
     public TabletPacket(int actionId) {
+        this(actionId, 0);
+    }
+
+    public TabletPacket(int actionId, long requestId) {
         this.actionId = actionId;
+        this.requestId = requestId;
     }
 
     public TabletPacket(FriendlyByteBuf buf) {
         this.actionId = buf.readInt();
+        this.requestId = buf.readableBytes() > 0 ? buf.readVarLong() : 0;
     }
 
     public void encode(FriendlyByteBuf buf) {
         buf.writeInt(actionId);
+        if (requestId != 0) buf.writeVarLong(requestId);
     }
 
     public static void reset(ServerPlayer player) {
@@ -67,7 +74,17 @@ public class TabletPacket {
         ctx.get().enqueueWork(() -> {
             ServerPlayer player = ctx.get().getSender();
             if (player == null) return;
+            Runnable existingAction = existingAction(player);
+            if (requestId > 0) {
+                com.makar.tacticaltablet.tablet.preparation.TabletPreparationService.handle(
+                        player, actionId, requestId, existingAction);
+            } else if (requestId == 0) existingAction.run();
+        });
+        ctx.get().setPacketHandled(true);
+    }
 
+    private Runnable existingAction(ServerPlayer player) {
+        return () -> {
             if (actionId < MIN_ACTION_ID || actionId > MAX_ACTION_ID) {
                 return;
             }
@@ -116,9 +133,7 @@ public class TabletPacket {
             }
 
             handleKit(player, kit);
-        });
-
-        ctx.get().setPacketHandled(true);
+        };
     }
 
     public static int unlockBaseActionId(int classActionId) {
@@ -226,18 +241,15 @@ public class TabletPacket {
             return;
         }
 
-        if (MapSetManager.isClanWarSet()
-                && !ClanManager.getClanIdForPlayer(player).isBlank()
-                && !ClanManager.isClanOwner(player)) {
-            player.sendSystemMessage(Component.literal("[WAR] В войне кланов RTP вручную запускает только глава клана."));
-            LobbyManager.sync(player);
-            return;
-        }
 
         RtpTimerManager.forceRtp(player);
     }
 
     private void handleKit(ServerPlayer player, String kit) {
+        if (MapSetManager.isArenaSet() && !com.makar.tacticaltablet.game.arena.ArenaMatchRuntime.combatOpen()) {
+            LobbyManager.sync(player);
+            return;
+        }
         if (MatchAdmissionManager.enforceLateSpectator(player, false)) {
             LobbyManager.sync(player);
             return;
@@ -253,13 +265,6 @@ public class TabletPacket {
         }
         if (MapSetManager.isCompetitiveSet() && PlayerProgressManager.isShopClass(kit)) {
             player.sendSystemMessage(Component.literal("[WAR] Магазинные классы недоступны в соревновательном режиме."));
-            LobbyManager.sync(player);
-            return;
-        }
-        if (MapSetManager.isClanWarSet()
-                && !ClanWarManager.hasClan(player)
-                && PlayerProgressManager.isShopClass(kit)) {
-            player.sendSystemMessage(Component.literal("[WAR] В войне кланов одиночкам недоступны классы из магазина."));
             LobbyManager.sync(player);
             return;
         }

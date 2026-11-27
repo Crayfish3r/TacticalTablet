@@ -7,6 +7,7 @@ import com.makar.tacticaltablet.command.CoinCommand;
 import com.makar.tacticaltablet.command.CorpseTestCommand;
 import com.makar.tacticaltablet.command.DebugXPCommand;
 import com.makar.tacticaltablet.command.ExtractionPointCommand;
+import com.makar.tacticaltablet.command.GameAdminCommand;
 import com.makar.tacticaltablet.command.GiveClassCommand;
 import com.makar.tacticaltablet.command.IntegrationCheckCommand;
 import com.makar.tacticaltablet.command.LobbyCommand;
@@ -108,6 +109,7 @@ public class TacticalTabletMod {
         CoinCommand.register(event.getDispatcher());
         TestModeCommand.register(event.getDispatcher());
         MapRotationCommand.register(event.getDispatcher());
+        GameAdminCommand.register(event.getDispatcher());
         RespawnControlCommand.register(event.getDispatcher());
         RtpCommand.register(event.getDispatcher());
         KillsDiscordCommand.register(event.getDispatcher());

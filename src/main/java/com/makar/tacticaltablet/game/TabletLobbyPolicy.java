@@ -12,7 +12,6 @@ final class TabletLobbyPolicy {
     ) {
         return running
                 || startTransitionPlayerSetup
-                || (clanWarSet && phase == MatchPhase.WAITING)
                 || phase == MatchPhase.VOTING
                 || phase == MatchPhase.TEAM_SELECT
                 || phase == MatchPhase.MAP_VOTING

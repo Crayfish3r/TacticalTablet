@@ -1,0 +1,83 @@
+{
+  "enabled": true,
+  "maxActiveNpcs": 24,
+  "minGroupSize": 2,
+  "maxGroupSize": 4,
+  "minSpawnIntervalSeconds": 20,
+  "maxSpawnIntervalSeconds": 35,
+  "minDistanceFromPlayers": 40,
+  "maxDistanceFromPlayers": 100,
+  "minDistanceBetweenGroups": 32,
+  "maxSpawnAttempts": 8,
+  "stopSpawningAtZonePhase": 5,
+  "dimension": "minecraft:overworld",
+  "allowClanWar": false,
+  "allowSpecialModes": false,
+  "presets": [
+    {
+      "id": "arena_assault",
+      "weight": 8,
+      "minSize": 2,
+      "maxSize": 4,
+      "weapons": [
+        "tacz:ak47",
+        "tacz:ak47",
+        "tacz:ak47",
+        "tacz:ak47"
+      ],
+      "behavior": "ATTACK",
+      "ammoPolicy": "FINITE",
+      "reserve": 120,
+      "radius": 24,
+      "difficulty": "DEFAULT"
+    },
+    {
+      "id": "arena_hard_assault",
+      "weight": 2,
+      "minSize": 2,
+      "maxSize": 4,
+      "weapons": [
+        "tacz:ak47",
+        "tacz:ak47",
+        "tacz:ak47",
+        "tacz:ak47"
+      ],
+      "behavior": "ATTACK",
+      "ammoPolicy": "FINITE",
+      "reserve": 120,
+      "radius": 24,
+      "difficulty": "HARD"
+    },
+    {
+      "id": "arena_patrol",
+      "weight": 2,
+      "minSize": 2,
+      "maxSize": 3,
+      "weapons": [
+        "tacz:ak47",
+        "tacz:ak47",
+        "tacz:ak47"
+      ],
+      "behavior": "PATROL",
+      "ammoPolicy": "FINITE",
+      "reserve": 120,
+      "radius": 24,
+      "difficulty": "DEFAULT"
+    },
+    {
+      "id": "arena_rpg_pair",
+      "weight": 1,
+      "minSize": 2,
+      "maxSize": 2,
+      "weapons": [
+        "tacz:rpg7",
+        "tacz:rpg7"
+      ],
+      "behavior": "ATTACK",
+      "ammoPolicy": "FINITE",
+      "reserve": 3,
+      "radius": 24,
+      "difficulty": "DEFAULT"
+    }
+  ]
+}

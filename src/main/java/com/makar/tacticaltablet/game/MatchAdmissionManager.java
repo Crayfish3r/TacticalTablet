@@ -1,7 +1,7 @@
 package com.makar.tacticaltablet.game;
 
 import com.makar.tacticaltablet.core.TacticalTabletMod;
-import com.makar.tacticaltablet.game.clanwar.ClanWarManager;
+import com.makar.tacticaltablet.game.lifecycle.RetiredClanWarTags;
 import com.makar.tacticaltablet.game.lifecycle.MatchLifecycleSnapshot;
 import com.makar.tacticaltablet.game.lifecycle.MatchState;
 import com.makar.tacticaltablet.game.lives.LivesManager;
@@ -159,8 +159,8 @@ public final class MatchAdmissionManager {
         InventoryManager.clearInventory(player);
         player.removeTag("war.playing");
         player.removeTag("in_lobby");
-        player.removeTag(ClanWarManager.TAG_SPECTATING);
-        player.removeTag(ClanWarManager.TAG_REGROUP_PENDING);
+        RetiredClanWarTags.clear(player);
+        RetiredClanWarTags.finish(player); // Late admission remains the authoritative spectator reason.
         LivesManager.moveEliminatedToSpectator(player);
 
         String matchKey = GameStateManager.getLifecycleSnapshot()

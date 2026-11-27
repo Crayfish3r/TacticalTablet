@@ -48,7 +48,8 @@ public final class LivesHudOverlay {
         if (!TabletClientState.isGameRunning()) return;
 
         int lives = TabletClientState.getLives();
-        if (lives <= 0) return;
+        boolean unlimited = com.makar.tacticaltablet.tablet.client.ArenaClientState.unlimitedLives();
+        if (lives <= 0 && !unlimited) return;
 
         GuiGraphics graphics = event.getGuiGraphics();
         int screenWidth = event.getWindow().getGuiScaledWidth();
@@ -56,11 +57,11 @@ public final class LivesHudOverlay {
 
         int hotbarRight = screenWidth / 2 + HOTBAR_WIDTH / 2;
         int y = screenHeight - HOTBAR_HEIGHT + (HOTBAR_HEIGHT - HEART_SIZE) / 2;
-        String livesText = "X" + lives;
+        String livesText = unlimited ? net.minecraft.network.chat.Component.translatable("screen.tacticaltablet.arena.lives").getString() : "X" + lives;
 
         int alivePlayers = TabletClientState.getAlivePlayers();
         int remainingLivesTotal = TabletClientState.getRemainingLivesTotal();
-        String playersText = alivePlayers > 0 ? "X" + alivePlayers + " (" + remainingLivesTotal + ")" : "";
+        String playersText = alivePlayers > 0 ? "X" + alivePlayers + (unlimited ? "" : " (" + remainingLivesTotal + ")") : "";
         int livesWidth = HEART_SIZE + 3 + minecraft.font.width(livesText);
         int playersWidth = playersText.isEmpty() ? 0 : PLAYERS_SIZE + 3 + minecraft.font.width(playersText);
         int totalWidth = livesWidth + (playersWidth > 0 ? COUNTER_GAP + playersWidth : 0);

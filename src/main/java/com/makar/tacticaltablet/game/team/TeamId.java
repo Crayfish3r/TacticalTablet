@@ -44,9 +44,6 @@ public enum TeamId {
         return STANDARD_VALUES.clone();
     }
 
-    public static TeamId[] clanWarValues() {
-        return values();
-    }
 
     public static TeamId byTextColor(int color) {
         for (TeamId teamId : values()) {

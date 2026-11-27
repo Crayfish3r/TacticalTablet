@@ -7,7 +7,7 @@ public final class CompetitiveClassTierPolicy {
     }
 
     public static boolean isActive(boolean competitiveSet, boolean clanWarSet) {
-        return competitiveSet && !clanWarSet;
+        return competitiveSet;
     }
 
     public static ClassTier tierForGame(int gameNumber) {

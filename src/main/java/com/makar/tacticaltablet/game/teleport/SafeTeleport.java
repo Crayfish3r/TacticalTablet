@@ -338,6 +338,96 @@ public class SafeTeleport {
         return true;
     }
 
+    private static final int ALLY_MIN_DISTANCE = 6, ALLY_MAX_DISTANCE = 16, ALLY_MAX_HEIGHT_DIFFERENCE = 6;
+    private static final int ALLY_ATTEMPTS = 32, ALLY_CHUNK_LOADS = 4;
+    /** One shared position/chunk budget across shuffled live anchors. Never falls back to distant RTP. */
+    public static boolean teleportNearAllies(ServerPlayer player, List<ServerPlayer> anchors) {
+        if (player == null || anchors.isEmpty()) return false;
+        ServerLevel level = GameStateManager.getOverworld(player.server);
+        if (level == null || !isRtpConfigurationUsable(level)) return false;
+        var shuffled = new ArrayList<>(anchors); java.util.Collections.shuffle(shuffled);
+        var random = RandomSource.create();
+        int attempts = Math.min(ALLY_ATTEMPTS, activeRtpSettings.maxAttempts());
+        chunkLoadBudget = ALLY_CHUNK_LOADS;
+        try {
+            int budget = attempts;
+            for (ServerPlayer anchor : shuffled) {
+                BlockPos best = null;
+                double bestScore = -1;
+                int share = Math.min(budget, Math.max(1, attempts / shuffled.size()));
+                budget -= share;
+                for (int remaining = share; remaining > 0; ) {
+                    if (!com.makar.tacticaltablet.game.team.ArenaTeamService.isAnchor(player, anchor)) break;
+                    remaining--;
+                    double angle = random.nextDouble() * TWO_PI;
+                    double radius = ALLY_MIN_DISTANCE + random.nextDouble() * (ALLY_MAX_DISTANCE - ALLY_MIN_DISTANCE);
+                    int x = (int) Math.floor(anchor.getX() + Math.cos(angle) * radius);
+                    int z = (int) Math.floor(anchor.getZ() + Math.sin(angle) * radius);
+                    if (!ensureChunkAvailable(level, x >> 4, z >> 4)) continue;
+
+                    boolean fixedY = activeRtpSettings.mode() == RtpPlacementMode.FIXED_Y_BOX;
+                    BlockPos pos = fixedY ? new BlockPos(x, activeRtpSettings.spawnY(), z)
+                            : level.getHeightmapPos(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, new BlockPos(x, 0, z));
+                    if (!fixedY && Math.abs(pos.getY() - anchor.getY()) > ALLY_MAX_HEIGHT_DIFFERENCE) {
+                        pos = null;
+                        // Search the same loaded column, nearest heights first, within the shared attempt budget.
+                        int anchorY = anchor.getBlockY();
+                        for (int index = 0; index <= ALLY_MAX_HEIGHT_DIFFERENCE * 2 && remaining > 0; index++) {
+                            int offset = (index + 1) / 2 * (index % 2 == 0 ? -1 : 1);
+                            BlockPos candidate = new BlockPos(x, anchorY + offset, z);
+                            if (!isNearAlly(candidate, anchor)) continue;
+                            remaining--;
+                            if (isSafeAllySpawn(level, player, candidate)) {
+                                pos = candidate;
+                                break;
+                            }
+                        }
+                    } else if (!isNearAlly(pos, anchor) || !isSafeAllySpawn(level, player, pos)) {
+                        pos = null;
+                    }
+                    if (pos == null) continue;
+
+                    double score = Double.MAX_VALUE;
+                    for (ServerPlayer enemy : level.players()) {
+                        if (enemy == player || !enemy.isAlive() || !enemy.getTags().contains("war.playing")
+                                || com.makar.tacticaltablet.game.team.TeamMatchManager.areTeammates(player, enemy)) continue;
+                        double ex = enemy.getX() - pos.getX() - .5;
+                        double ez = enemy.getZ() - pos.getZ() - .5;
+                        score = Math.min(score, ex * ex + ez * ez);
+                    }
+                    if (score > bestScore) {
+                        best = pos;
+                        bestScore = score;
+                    }
+                }
+                if (best != null && com.makar.tacticaltablet.game.team.ArenaTeamService.isAnchor(player, anchor)
+                        && isNearAlly(best, anchor) && isSafeAllySpawn(level, player, best)) {
+                    player.teleportTo(level, best.getX() + .5, best.getY(), best.getZ() + .5, random.nextFloat() * 360, 0);
+                    rememberSpawn(best);
+                    return true;
+                }
+            }
+            return false;
+        } finally { chunkLoadBudget = 0; }
+    }
+
+    private static boolean isNearAlly(BlockPos position, ServerPlayer anchor) {
+        double dx = position.getX() + .5 - anchor.getX();
+        double dz = position.getZ() + .5 - anchor.getZ();
+        double horizontalSquared = dx * dx + dz * dz;
+        return horizontalSquared >= ALLY_MIN_DISTANCE * ALLY_MIN_DISTANCE
+                && horizontalSquared <= ALLY_MAX_DISTANCE * ALLY_MAX_DISTANCE
+                && Math.abs(position.getY() - anchor.getY()) <= ALLY_MAX_HEIGHT_DIFFERENCE;
+    }
+
+    private static boolean isSafeAllySpawn(ServerLevel level, ServerPlayer player, BlockPos position) {
+        if (!isSafeSpawn(level, position) || !level.getWorldBorder().isWithinBounds(position)) return false;
+        var box = player.getBoundingBox().move(position.getX() + .5 - player.getX(),
+                position.getY() - player.getY(), position.getZ() + .5 - player.getZ());
+        return level.noCollision(player, box)
+                && level.players().stream().noneMatch(p -> p != player && p.isAlive() && p.getBoundingBox().intersects(box));
+    }
+
     private static List<BlockPos> findTeamCluster(ServerLevel overworld, BlockPos anchor, int count) {
         List<BlockPos> positions = new ArrayList<>();
 

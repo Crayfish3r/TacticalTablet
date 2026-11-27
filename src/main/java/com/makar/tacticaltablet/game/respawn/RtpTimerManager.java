@@ -1,14 +1,12 @@
 package com.makar.tacticaltablet.game.respawn;
 
 import com.makar.tacticaltablet.airdrop.AirdropManager;
-import com.makar.tacticaltablet.clan.ClanManager;
 import com.makar.tacticaltablet.core.TacticalTabletMod;
 import com.makar.tacticaltablet.game.GameStateManager;
 import com.makar.tacticaltablet.game.MatchAdmissionManager;
 import com.makar.tacticaltablet.game.MapSetManager;
 import com.makar.tacticaltablet.game.chaos.ChaosSetManager;
 import com.makar.tacticaltablet.game.set.SetMatchRuntime;
-import com.makar.tacticaltablet.game.clanwar.ClanWarManager;
 import com.makar.tacticaltablet.game.lives.LivesManager;
 import com.makar.tacticaltablet.game.lifecycle.PlayerLifecycleSanitizer;
 import com.makar.tacticaltablet.game.lobby.LobbyManager;
@@ -212,6 +210,20 @@ public class RtpTimerManager {
             }
             requestStates.put(uuid, RtpRequestState.SEARCHING);
 
+            if (MapSetManager.isArenaSet()) {
+                var anchors = TeamMatchManager.getOnlineTeamMembers(server, TeamMatchManager.getTeam(player)).stream()
+                        .filter(p -> com.makar.tacticaltablet.game.team.ArenaTeamService.isAnchor(player, p)).toList();
+                boolean success = anchors.isEmpty() ? SafeTeleport.teleport(player) : SafeTeleport.teleportNearAllies(player, anchors);
+                if (success) finishRtp(player);
+                else {
+                    scheduleRetry(uuid, "arena safe point unavailable");
+                    notifyRateLimited(player, FailureReason.NO_SAFE_POINT, anchors.isEmpty()
+                            ? "Безопасная точка RTP не найдена. Повторяем поиск…"
+                            : "Рядом с командой пока нет безопасной точки. Повторяем поиск…");
+                }
+                continue;
+            }
+
             if (GameStateManager.getCurrentMode().isTeamMode()) {
                 if (processTeamRtp(server, player)) {
                     continue;
@@ -357,21 +369,17 @@ public class RtpTimerManager {
 
     private static RtpEligibilityResult getEligibility(ServerPlayer player) {
         if (player == null) return RtpEligibilityResult.CANCELLED;
+        if (MapSetManager.isArenaSet() && !com.makar.tacticaltablet.game.team.ArenaTeamService.canDeploy(player)) return RtpEligibilityResult.CANCELLED;
         UUID requestMatchId = requestMatchIds.get(player.getUUID());
         UUID currentMatchId = GameStateManager.getLifecycleSnapshot().matchId().orElse(null);
         boolean sameMatch = requestMatchId == null
                 ? LivesManager.isBoundToCurrentMatch(player)
                 : requestMatchId.equals(currentMatchId);
-        boolean clanEligible = true;
-        if (MapSetManager.isClanWarSet()) {
-            String clanId = ClanManager.getClanIdForPlayer(player);
-            clanEligible = clanId.isBlank() || !ClanWarManager.isClanEliminated(clanId);
-        }
         return classifyEligibility(
                 true,
                 GameStateManager.isRunning(player.server),
                 sameMatch,
-                LivesManager.canContinueMatch(player) && clanEligible && !player.isSpectator()
+                LivesManager.canContinueMatch(player) && !player.isSpectator()
                         && isChaosDeploymentReady(player),
                 PlayerTabletState.isRtpUsed(player),
                 GameStateManager.isInLobby(player),
@@ -415,6 +423,8 @@ public class RtpTimerManager {
     }
 
     private static boolean isChaosDeploymentReady(ServerPlayer player) {
+        if (MapSetManager.isArenaSet()) return player != null && PlayerTabletState.isKitUsed(player)
+                && com.makar.tacticaltablet.game.arena.ArenaMatchRuntime.combatOpen();
         return player != null && isChaosDeploymentReady(
                 MapSetManager.isChaosSet(),
                 ChaosSetManager.requiresSelection(player),

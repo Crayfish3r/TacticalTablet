@@ -11,12 +11,43 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MapSetManagerStateMigrationTest {
 
     private static final Gson GSON = new GsonBuilder().create();
+
+    @Test
+    void persistedAdminModeOverridesVotesAndOldSavesRetainTheirDefaults() {
+        var state = GSON.fromJson("{\"nextSetCompetitive\":true}", MapSetManager.SetState.class);
+        MapSetManager.normalizeState(state);
+        assertNull(state.npcEncountersOverride);
+        assertEquals(SetGameMode.COMPETITIVE, MapSetManager.selectedNextSetMode(state));
+        state.adminNextSetMode = SetGameMode.ARENA;
+        state.npcEncountersOverride = false;
+
+        var restored = GSON.fromJson(GSON.toJson(state), MapSetManager.SetState.class);
+        MapSetManager.normalizeState(restored);
+        assertEquals(SetGameMode.ARENA, MapSetManager.selectedNextSetMode(restored));
+        assertEquals(Boolean.FALSE, restored.npcEncountersOverride);
+        restored.adminNextSetMode = SetGameMode.RACE;
+        MapSetManager.normalizeState(restored);
+        assertEquals(SetGameMode.COMPETITIVE, MapSetManager.selectedNextSetMode(restored));
+    }
+
+    @Test
+    void existingGamesAndParticipantsProtectTheSetFromModeChanges() {
+        var state = new MapSetManager.SetState();
+        assertTrue(MapSetManager.isUnstartedSet(state));
+        state.participants.put(UUID.randomUUID().toString(), "Test");
+        assertFalse(MapSetManager.isUnstartedSet(state));
+        state.participants.clear();
+        state.completedGames = 1;
+        assertFalse(MapSetManager.isUnstartedSet(state));
+    }
 
     @Test
     void legacyRewardedSetKeepsIdentityParticipantsAndRewardState() {

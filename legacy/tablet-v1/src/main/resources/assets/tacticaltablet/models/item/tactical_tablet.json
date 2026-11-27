@@ -1,0 +1,20 @@
+{
+  "parent": "item/generated",
+  "textures": {
+    "layer0": "tacticaltablet:item/tactical_tablet"
+  },
+  "overrides": [
+    {
+      "predicate": {
+        "custom_model_data": 1
+      },
+      "model": "tacticaltablet:item/tactical_tablet_epic"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 2
+      },
+      "model": "tacticaltablet:item/tactical_tablet_legend"
+    }
+  ]
+}

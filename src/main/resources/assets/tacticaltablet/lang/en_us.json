@@ -251,5 +251,8 @@
   "message.tacticaltablet.cosmetic.ghillie_suit.purchased": "[WAR] Ghillie suit purchased for %s coins.",
   "message.tacticaltablet.cosmetic.ghillie_suit.already_owned": "[WAR] Ghillie suit is already purchased.",
   "message.tacticaltablet.cosmetic.ghillie_suit.not_enough": "[WAR] Not enough coins for the ghillie suit. You need %s coins.",
-  "message.tacticaltablet.cosmetic.invalid": "[WAR] This product cannot be purchased."
+  "message.tacticaltablet.cosmetic.invalid": "[WAR] This product cannot be purchased.",
+  "screen.tacticaltablet.map_voting.mode.arena": "Arena",
+  "screen.tacticaltablet.arena.lives": "Lives: ∞",
+  "screen.tacticaltablet.arena.timer": "Arena — %s • %s/%s"
 }

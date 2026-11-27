@@ -15,6 +15,18 @@ public class TacticalTabletItem extends Item {
         super(props);
     }
 
+    /** Forge calls this only on the physical client; no client class is initialized on a server. */
+    @Override
+    public void initializeClient(java.util.function.Consumer<net.minecraftforge.client.extensions.common.IClientItemExtensions> consumer) {
+        consumer.accept(new net.minecraftforge.client.extensions.common.IClientItemExtensions() {
+            private net.minecraft.client.renderer.BlockEntityWithoutLevelRenderer renderer;
+            @Override public net.minecraft.client.renderer.BlockEntityWithoutLevelRenderer getCustomRenderer() {
+                if (renderer == null) renderer = new com.makar.tacticaltablet.tablet.client.prototype.TabletPrototypeRenderer();
+                return renderer;
+            }
+        });
+    }
+
     @Override
     public InteractionResultHolder<ItemStack> use(Level level, net.minecraft.world.entity.player.Player player, InteractionHand hand) {
 

@@ -17,6 +17,11 @@ public final class SetResultService {
 
     public static SetLeaderboardSnapshot createSnapshot(
             UUID setId, Map<UUID, String> participants, Collection<GamePerformance> performances) {
+        return createSnapshot(setId, participants, performances, MapSetManager.GAMES_PER_MAP);
+    }
+
+    public static SetLeaderboardSnapshot createSnapshot(
+            UUID setId, Map<UUID, String> participants, Collection<GamePerformance> performances, int gamesPerSet) {
         Map<UUID, String> normalizedParticipants = new LinkedHashMap<>();
         if (participants != null) {
             participants.forEach((id, name) -> {
@@ -38,7 +43,7 @@ public final class SetResultService {
         for (Map.Entry<UUID, String> participant : safeParticipants.entrySet()) {
             Map<Integer, GamePerformance> played = gamesByPlayer.getOrDefault(participant.getKey(), Map.of());
             List<GamePerformance> setGames = new ArrayList<>();
-            for (int game = 1; game <= MapSetManager.GAMES_PER_MAP; game++) {
+            for (int game = 1; game <= gamesPerSet; game++) {
                 setGames.add(played.getOrDefault(game,
                         GamePerformance.missed(game, participant.getKey(), participant.getValue())));
             }

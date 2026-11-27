@@ -40,17 +40,21 @@ public final class VoiceChatTeamManager {
 
     public static void onPlayerConnected(PlayerConnectedEvent event) {
         VoicechatConnection connection = event.getConnection();
-        ServerPlayer player = resolvePlayer(connection);
-        if (player == null) return;
-
-        player.server.execute(() -> assignPlayerToVoiceGroup(player, connection));
+        MinecraftServer server = matchServer;
+        if (server == null || connection == null || connection.getPlayer() == null) return;
+        var id = connection.getPlayer().getUuid();
+        server.execute(() -> {
+            if (matchServer != server) return;
+            ServerPlayer player = server.getPlayerList().getPlayer(id);
+            if (player != null && !player.hasDisconnected()) assignPlayerToVoiceGroup(player);
+        });
     }
 
     public static synchronized void startTeamMatch(MinecraftServer server) {
         if (server == null
                 || !GameStateManager.isRunning(server)
                 || GameStateManager.getMatchPhase() != MatchPhase.RUNNING
-                || !GameStateManager.getCurrentMode().isTeamMode()) {
+                || !TeamMatchManager.usesCombatTeams()) {
             endMatch(server);
             return;
         }
@@ -92,8 +96,14 @@ public final class VoiceChatTeamManager {
         return player != null
                 && GameStateManager.isRunning(player.server)
                 && GameStateManager.getMatchPhase() == MatchPhase.RUNNING
-                && GameStateManager.getCurrentMode().isTeamMode()
+                && TeamMatchManager.usesCombatTeams()
                 && TeamMatchManager.getTeam(player) != null
+                && (!com.makar.tacticaltablet.game.MapSetManager.isArenaSet()
+                    || com.makar.tacticaltablet.game.arena.ArenaMatchRuntime.life(player) != null
+                    && com.makar.tacticaltablet.game.arena.ArenaMatchRuntime.life(player).rtpUsed
+                    && !com.makar.tacticaltablet.game.arena.ArenaMatchRuntime.life(player).awaitingRespawn
+                    && !GameStateManager.isInLobby(player)
+                    && !com.makar.tacticaltablet.moderation.ModerModeManager.isInModerMode(player))
                 && player.getTags().contains("war.playing")
                 && !player.getTags().contains("in_lobby")
                 && player.isAlive()
@@ -163,15 +173,4 @@ public final class VoiceChatTeamManager {
         }
     }
 
-    private static ServerPlayer resolvePlayer(VoicechatConnection connection) {
-        if (connection == null || connection.getPlayer() == null) return null;
-
-        Object nativePlayer = connection.getPlayer().getPlayer();
-        if (nativePlayer instanceof ServerPlayer player) {
-            return player;
-        }
-
-        MinecraftServer server = matchServer;
-        return server == null ? null : server.getPlayerList().getPlayer(connection.getPlayer().getUuid());
-    }
 }
