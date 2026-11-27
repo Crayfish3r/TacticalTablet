@@ -159,6 +159,26 @@ public class GameStateManager {
         return matchPhase;
     }
 
+    static boolean canChangeUnstartedSetMode() {
+        return !cleanupPending && getLifecycleSnapshot().state() == MatchState.IDLE
+                && switch (matchPhase) {
+                    case WAITING, VOTING, TEAM_SELECT, STARTING -> true;
+                    default -> false;
+                };
+    }
+
+    static void refreshSetupAfterSetModeChange(MinecraftServer server) {
+        startCountdown = -1;
+        competitivePreStartSeconds = -1;
+        competitivePreStartValidated = false;
+        currentMode = MatchMode.SOLO;
+        matchPhase = MatchPhase.WAITING;
+        VoteManager.reset();
+        TeamMatchManager.reset(server);
+        ChaosSetManager.clear();
+        ClassXPManager.syncAll(server);
+    }
+
     static MatchState lifecycleStateForLegacyState(int gameState, MatchPhase phase) {
         return LegacyMatchStateMapper.fromLegacyState(RUNNING, gameState, phase);
     }
@@ -231,7 +251,6 @@ public class GameStateManager {
         MatchAdmissionManager.observeServerTick(server.getTickCount());
         if (++tickCounter < 20) return;
         tickCounter = 0;
-        com.makar.tacticaltablet.game.team.ArenaTeamService.tick(server);
         if (MapSetManager.isArenaSet() && isRunning(server)) {
             ArenaMatchRuntime.tick(server);
             if (ArenaMatchRuntime.finished()) {
@@ -1244,7 +1263,7 @@ public class GameStateManager {
                 case START_ZONE -> ZoneManager.start(server);
                 case PREPARE_SAFE_TELEPORT -> SafeTeleport.preparePool(server);
                 case INITIALIZE_PLAYERS -> initializePlayers(server);
-                case START_VOICE_MATCH -> VoiceChatTeamManager.startTeamMatch(server);
+                case START_VOICE_MATCH -> { } // Retained step ID. Voice starts after RUNNING in postCommit.
                 case CAPTURE_PARTICIPANTS -> {
                     captureCurrentMatchParticipants(server);
                     matchStartingParticipants = playingPlayers(server);
@@ -1324,11 +1343,17 @@ public class GameStateManager {
 
         @Override
         public void postCommit(MinecraftServer server) throws Exception {
-            if (MapSetManager.isArenaSet()) { ArenaMatchRuntime.start(server); VoiceChatTeamManager.startTeamMatch(server); }
-            else {
-                ArenaMatchRuntime.abort(server);
-                recordMatchesPlayedAfterCommit(server);
+            boolean arena = MapSetManager.isArenaSet();
+            if (arena) ArenaMatchRuntime.start(server);
+            else ArenaMatchRuntime.abort(server);
+            if (TeamMatchManager.usesCombatTeams()) {
+                try {
+                    VoiceChatTeamManager.startTeamMatch(server);
+                } catch (RuntimeException | LinkageError exception) {
+                    TacticalTabletMod.LOGGER.warn("Unable to initialize match voice groups", exception);
+                }
             }
+            if (!arena) recordMatchesPlayedAfterCommit(server);
             broadcast(server, "[WAR] Match started. Choose a class and use RTP.");
         }
 

@@ -99,7 +99,7 @@ public final class MapSetManager {
                     "Tactical Tablet detected a completed map rotation. Resetting map set: {} -> {}, competitive={}",
                     state.mapName,
                     currentMap,
-                    state.nextSetCompetitive
+                    selectedNextSetMode(state) == SetGameMode.COMPETITIVE
             );
             state.mapName = currentMap;
             state.lastRotation = lastRotation;
@@ -114,15 +114,16 @@ public final class MapSetManager {
             state.rewardEndsAtMillis = 0L;
             state.rewardPhaseStatus = RewardPhaseStatus.PENDING;
             state.setReportDispatched = false;
-            state.competitiveSet = state.nextSetCompetitive;
-            state.setMode = state.competitiveSet
-                    ? SetGameMode.CASUAL : state.nextSetMode;
+            SetGameMode nextMode = selectedNextSetMode(state);
+            state.competitiveSet = nextMode == SetGameMode.COMPETITIVE;
+            state.setMode = state.competitiveSet ? SetGameMode.CASUAL : nextMode;
             state.chaosDeck.clear();
             state.nextSetCompetitive = false;
             state.nextSetClanWar = false;
             state.nextSetMode = SetGameMode.CASUAL;
-            if (!saveState() && isArenaSet())
-                throw new IllegalStateException("Arena mode activation could not be persisted; previous set save preserved");
+            state.adminNextSetMode = null;
+            if (!saveState())
+                throw new IllegalStateException("Map set activation could not be persisted; previous set save preserved");
         } else if (state.lastRotation.isBlank() && !lastRotation.isBlank()) {
             state.lastRotation = lastRotation;
             saveState();
@@ -432,6 +433,63 @@ public final class MapSetManager {
         return state.setMode == SetGameMode.ARENA ? SetGameMode.ARENA : isChaosSet() ? SetGameMode.CHAOS : SetGameMode.CASUAL;
     }
 
+    public static synchronized SetGameMode getAdminNextSetMode() {
+        return state.adminNextSetMode;
+    }
+
+    public static synchronized ModeChange setAdminMode(MinecraftServer server, SetGameMode mode, boolean next) {
+        if (mode == null || !mode.selectable()) return ModeChange.FAILED;
+        initStorage(server);
+        if (next || !isUnstartedSet(state) || !GameStateManager.canChangeUnstartedSetMode()) {
+            SetGameMode previous = state.adminNextSetMode;
+            state.adminNextSetMode = mode;
+            if (!saveState()) {
+                state.adminNextSetMode = previous;
+                return ModeChange.FAILED;
+            }
+            syncAll(server, false);
+            return ModeChange.NEXT;
+        }
+        if (getSetMode() == mode) return ModeChange.CURRENT;
+        boolean previousCompetitive = state.competitiveSet;
+        SetGameMode previousMode = state.setMode;
+        List<String> previousDeck = state.chaosDeck;
+        state.competitiveSet = mode == SetGameMode.COMPETITIVE;
+        state.setMode = state.competitiveSet ? SetGameMode.CASUAL : mode;
+        state.chaosDeck = new ArrayList<>();
+        if (!saveState()) {
+            state.competitiveSet = previousCompetitive;
+            state.setMode = previousMode;
+            state.chaosDeck = previousDeck;
+            return ModeChange.FAILED;
+        }
+        GameStateManager.refreshSetupAfterSetModeChange(server);
+        return ModeChange.CURRENT;
+    }
+
+    static boolean isUnstartedSet(SetState candidate) {
+        return candidate.completedGames == 0 && candidate.participants.isEmpty()
+                && candidate.arenaCompletedMatches.isEmpty() && candidate.rewardPhaseStatus == RewardPhaseStatus.PENDING;
+    }
+
+    static SetGameMode selectedNextSetMode(SetState candidate) {
+        if (candidate.adminNextSetMode != null) return candidate.adminNextSetMode;
+        return candidate.nextSetCompetitive ? SetGameMode.COMPETITIVE : candidate.nextSetMode;
+    }
+
+    public static synchronized Boolean getNpcEncountersOverride() {
+        return state.npcEncountersOverride;
+    }
+
+    public static synchronized boolean setNpcEncountersOverride(MinecraftServer server, boolean enabled) {
+        initStorage(server);
+        Boolean previous = state.npcEncountersOverride;
+        state.npcEncountersOverride = enabled;
+        if (saveState()) return true;
+        state.npcEncountersOverride = previous;
+        return false;
+    }
+
     public static synchronized int getChaosCooldownRemaining() {
         return state.chaosCooldownRemaining;
     }
@@ -480,7 +538,7 @@ public final class MapSetManager {
     }
 
     public static synchronized boolean isNextSetCompetitive() {
-        return state.nextSetCompetitive;
+        return selectedNextSetMode(state) == SetGameMode.COMPETITIVE;
     }
 
     public static synchronized boolean isNextSetClanWar() {
@@ -600,7 +658,7 @@ public final class MapSetManager {
 
     public static synchronized void voteSetMode(ServerPlayer player, SetGameMode mode) {
         if (player == null || !voting || !GameStateManager.isInLobby(player)) return;
-        if (!SetModeVotePolicy.ordinaryModesEnabled(state.nextSetCompetitive, false)) return;
+        if (!canVoteForSetMode()) return;
         if (!SetModeRotationPolicy.isAvailable(availableSetModes, mode)) {
             sync(player, false);
             return;
@@ -610,13 +668,18 @@ public final class MapSetManager {
     }
 
     public static synchronized void setNextSetCompetitive(ServerPlayer player, boolean competitive) {
-        if (player == null || !player.hasPermissions(2) || !voting) return;
+        if (player == null || !player.hasPermissions(2) || !voting || state.adminNextSetMode != null) return;
+        boolean previous = state.nextSetCompetitive;
         state.nextSetCompetitive = competitive;
+        if (!saveState()) {
+            state.nextSetCompetitive = previous;
+            player.sendSystemMessage(Component.literal("[WAR] Не удалось сохранить режим следующего сета."));
+            return;
+        }
         if (competitive) {
             state.nextSetClanWar = false;
             modeVotes.clear();
         }
-        saveState();
         broadcast(player.server, "[WAR] Следующий сет: "
                 + (competitive ? "соревновательный" : "обычный casual") + ".");
         syncAll(player.server, false);
@@ -638,12 +701,12 @@ public final class MapSetManager {
         selectedMap = winner;
         boolean previousNextSetCompetitive = state.nextSetCompetitive;
         SetGameMode previousNextSetMode = state.nextSetMode;
-        if (SetModeVotePolicy.ordinaryModesEnabled(state.nextSetCompetitive, false)) {
+        if (canVoteForSetMode()) {
             SetGameMode modeWinner = SetModeVotePolicy.selectWinner(
                     modeVoteCounts(), availableSetModes, RANDOM);
             state.nextSetCompetitive = modeWinner == SetGameMode.COMPETITIVE;
             state.nextSetMode = modeWinner == SetGameMode.COMPETITIVE ? SetGameMode.CASUAL : modeWinner;
-        } else {
+        } else if (state.adminNextSetMode == null) {
             state.nextSetMode = SetGameMode.CASUAL;
         }
         if (!saveState()) {
@@ -717,19 +780,23 @@ public final class MapSetManager {
                 voting,
                 openScreen,
                 player.hasPermissions(2),
-                state.nextSetCompetitive,
+                isNextSetCompetitive(),
                 false,
-                SetModeVotePolicy.ordinaryModesEnabled(state.nextSetCompetitive, false),
+                canVoteForSetMode(),
                 SetModeRotationPolicy.availabilityMask(availableSetModes),
                 state.chaosCooldownRemaining,
                 state.consecutiveCompetitiveSets,
-                modeVotes.get(player.getUUID()),
+                state.adminNextSetMode == null ? modeVotes.get(player.getUUID()) : state.adminNextSetMode,
                 modeVoteCounts(),
                 voteSecondsLeft,
                 votes.getOrDefault(player.getUUID(), ""),
                 votingMaps,
                 counts
         );
+    }
+
+    private static boolean canVoteForSetMode() {
+        return state.adminNextSetMode == null && SetModeVotePolicy.ordinaryModesEnabled(state.nextSetCompetitive, false);
     }
 
     private static void syncAll(MinecraftServer server, boolean openScreen) {
@@ -878,6 +945,7 @@ public final class MapSetManager {
         candidate.nextSetClanWar = false;
         if (candidate.setMode == null || !candidate.setMode.selectable()) candidate.setMode = SetGameMode.CASUAL;
         if (candidate.nextSetMode == null || !candidate.nextSetMode.selectable()) candidate.nextSetMode = SetGameMode.CASUAL;
+        if (candidate.adminNextSetMode != null && !candidate.adminNextSetMode.selectable()) candidate.adminNextSetMode = null;
         if (candidate.competitiveSet) candidate.setMode = SetGameMode.CASUAL;
         if (candidate.nextSetCompetitive) candidate.nextSetMode = SetGameMode.CASUAL;
         if (candidate.arenaGames == null) candidate.arenaGames = new ArrayList<>();
@@ -965,6 +1033,8 @@ public final class MapSetManager {
         FAILED
     }
 
+    public enum ModeChange { CURRENT, NEXT, FAILED }
+
     static final class SetState {
         int dataVersion = DATA_VERSION;
         String mapName = "";
@@ -982,6 +1052,8 @@ public final class MapSetManager {
         Map<Integer, String> arenaGameMatchIds = new LinkedHashMap<>();
         SetGameMode setMode = SetGameMode.CASUAL;
         SetGameMode nextSetMode = SetGameMode.CASUAL;
+        SetGameMode adminNextSetMode;
+        Boolean npcEncountersOverride;
         List<String> chaosDeck = new ArrayList<>();
         String setId = UUID.randomUUID().toString();
         Map<String, String> participants = new LinkedHashMap<>();

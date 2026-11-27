@@ -44,8 +44,9 @@ public final class VoiceChatTeamManager {
         if (server == null || connection == null || connection.getPlayer() == null) return;
         var id = connection.getPlayer().getUuid();
         server.execute(() -> {
+            if (matchServer != server) return;
             ServerPlayer player = server.getPlayerList().getPlayer(id);
-            if (player != null) assignPlayerToVoiceGroup(player, connection);
+            if (player != null && !player.hasDisconnected()) assignPlayerToVoiceGroup(player);
         });
     }
 
@@ -172,15 +173,4 @@ public final class VoiceChatTeamManager {
         }
     }
 
-    private static ServerPlayer resolvePlayer(VoicechatConnection connection) {
-        if (connection == null || connection.getPlayer() == null) return null;
-
-        Object nativePlayer = connection.getPlayer().getPlayer();
-        if (nativePlayer instanceof ServerPlayer player) {
-            return player;
-        }
-
-        MinecraftServer server = matchServer;
-        return server == null ? null : server.getPlayerList().getPlayer(connection.getPlayer().getUuid());
-    }
 }

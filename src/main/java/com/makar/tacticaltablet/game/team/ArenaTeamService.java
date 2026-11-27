@@ -6,25 +6,27 @@ import com.makar.tacticaltablet.game.respawn.DeathTransitionManager;
 import com.makar.tacticaltablet.inventory.InventoryManager;
 import com.makar.tacticaltablet.moderation.ModerModeManager;
 import com.makar.tacticaltablet.tablet.net.*;
-import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.network.ServerGamePacketListenerImpl;
 import java.util.*;
 
-/** Server-thread roster admission and bounded, change-driven subscriptions; the roster itself lives in TeamMatchManager. */
+/** Server-thread roster admission and request/response snapshots. */
 public final class ArenaTeamService {
     public static final UUID NONE = new UUID(0, 0);
     public enum Action { FETCH, JOIN, LEAVE }
     public enum Result { OK, FULL, FORBIDDEN, STALE, INVALID }
-    private static final Map<UUID, Viewer> viewers = new HashMap<>();
+    private static final Map<ServerGamePacketListenerImpl, Requests> connections = new HashMap<>();
     private static long revision;
-    private static final class Viewer {
-        UUID session; Object connection; long request; Result result = Result.OK; String fingerprint = "";
-        Viewer(UUID session, ServerPlayer player) { this.session = session; connection = player.connection; }
+    private static final class Requests {
+        final UUID session;
+        long lastRequest;
+
+        Requests(UUID session) { this.session = session; }
     }
     private ArenaTeamService() { }
     public static String denial(ServerPlayer p) {
-        if (!MapSetManager.isArenaSet() || TeamMatchManager.arenaMatchId() == null || !ArenaMatchRuntime.combatOpen()
-                || !TeamMatchManager.arenaMatchId().equals(ArenaMatchRuntime.matchId())) return "Состав сейчас изменить нельзя: бой не открыт.";
+        if (TeamMatchManager.currentArenaRoster() == null || !ArenaMatchRuntime.combatOpen())
+            return "Состав сейчас изменить нельзя: бой не открыт.";
         if (!ArenaMatchRuntime.accepts(p) || !MatchAdmissionManager.isCurrentMatchParticipant(p.getUUID())
                 || !p.isAlive() || p.isDeadOrDying() || p.isSpectator() || ModerModeManager.isInModerMode(p)
                 || MatchAdmissionManager.isLateSpectator(p) || DeathTransitionManager.isTransitionActive(p)) return "Состав доступен только участникам между жизнями.";
@@ -51,49 +53,54 @@ public final class ArenaTeamService {
                 && !DeathTransitionManager.isTransitionActive(p) && GameStateManager.isInLobby(p);
     }
     public static void handle(ServerPlayer p, UUID session, long request, UUID match, Action action, int team) {
-        if (p == null || request <= 0) return;
-        boolean allowed = PacketHandler.allowC2S(p, action == Action.FETCH ? PacketHandler.C2SAction.TABLET_SNAPSHOT : PacketHandler.C2SAction.TABLET);
-        Viewer v = viewers.get(p.getUUID());
-        if (v != null && v.connection == p.connection && !v.session.equals(session)) return;
-        if (v == null || v.connection != p.connection || !v.session.equals(session)) {
-            v = new Viewer(session, p); viewers.put(p.getUUID(), v);
+        if (p == null || request <= 0 || p.hasDisconnected() || p.connection == null
+                || p.server.getPlayerList().getPlayer(p.getUUID()) != p) return;
+        var requests = connections.get(p.connection);
+        if (requests == null) {
+            if (action != Action.FETCH) return;
+            requests = new Requests(session);
+            connections.put(p.connection, requests);
         }
-        if (request <= v.request) { send(p, v, true); return; }
-        v.request = request; v.result = Result.OK;
-        if (!allowed) { v.result = Result.FORBIDDEN; send(p, v, true); return; }
+        if (!requests.session.equals(session) || request <= requests.lastRequest) return;
+        // Consume the ID even when throttled so replay cannot execute a previously dropped mutation.
+        requests.lastRequest = request;
+        if (!PacketHandler.allowC2S(p, action == Action.FETCH
+                ? PacketHandler.C2SAction.TABLET_SNAPSHOT : PacketHandler.C2SAction.TABLET)) return;
+
+        Result result = Result.OK;
         if (action != Action.FETCH) {
-            if (!Objects.equals(match, TeamMatchManager.arenaMatchId())) v.result = Result.STALE;
-            else if (!denial(p).isEmpty()) v.result = Result.FORBIDDEN;
-            else if (action == Action.JOIN && (team < 0 || team >= TeamId.standardValues().length)) v.result = Result.INVALID;
-            else if (!TeamMatchManager.changeArenaTeam(p, action == Action.LEAVE ? null : TeamId.standardValues()[team])) v.result = Result.FULL;
+            if (!Objects.equals(match, TeamMatchManager.currentArenaRoster())) result = Result.STALE;
+            else if (!denial(p).isEmpty()) result = Result.FORBIDDEN;
+            else if (action == Action.JOIN && (team < 0 || team >= TeamId.standardValues().length)) result = Result.INVALID;
+            else if (!TeamMatchManager.changeArenaTeam(p, action == Action.LEAVE ? null : TeamId.standardValues()[team])) result = Result.FULL;
         }
-        send(p, v, true); tick(p.server);
+        send(p, session, request, result);
     }
-    public static void tick(MinecraftServer server) {
-        for (var entry : new ArrayList<>(viewers.entrySet())) {
-            ServerPlayer p = server.getPlayerList().getPlayer(entry.getKey());
-            if (p == null || p.hasDisconnected() || p.connection != entry.getValue().connection) viewers.remove(entry.getKey());
-            else send(p, entry.getValue(), false);
+
+    private static void send(ServerPlayer p, UUID session, long request, Result result) {
+        boolean arena = MapSetManager.isArenaSet();
+        UUID match = arena ? TeamMatchManager.currentArenaRoster() : null;
+        if (match == null) {
+            String reason = arena ? "Состав появится с началом игры Арены." : "";
+            PacketHandler.sendToPlayer(p, new ArenaTeamStatePacket(session, request, NONE, ++revision,
+                    arena, -1, reason, result, List.of()));
+            return;
         }
-    }
-    private static void send(ServerPlayer p, Viewer v, boolean force) {
+
         List<ArenaTeamStatePacket.Member> members = new ArrayList<>();
         for (TeamId team : TeamId.standardValues()) for (UUID id : TeamMatchManager.arenaMembers(team)) {
             ServerPlayer member = p.server.getPlayerList().getPlayer(id);
-            String name = member == null ? TeamMatchManager.teamNameSnapshot(p.server).get(team).get(TeamMatchManager.arenaMembers(team).indexOf(id)) : member.getGameProfile().getName();
+            String name = TeamMatchManager.displayName(p.server, id);
             var life = member == null ? null : ArenaMatchRuntime.life(member);
             String status = member == null ? "не в сети" : life != null && life.rtpUsed && !life.awaitingRespawn
                     && member.getTags().contains("war.playing") && !GameStateManager.isInLobby(member) ? "на карте" : "в лобби/возрождается";
             members.add(new ArenaTeamStatePacket.Member(team.ordinal(), id, name, status));
         }
-        boolean arena = MapSetManager.isArenaSet();
-        UUID match = Optional.ofNullable(TeamMatchManager.arenaMatchId()).orElse(NONE);
-        int own = TeamMatchManager.getTeam(p) == null ? -1 : TeamMatchManager.getTeam(p).ordinal();
-        String reason = denial(p);
-        String fingerprint = arena + "|" + match + "|" + own + "|" + reason + "|" + members;
-        if (!force && fingerprint.equals(v.fingerprint)) return;
-        v.fingerprint = fingerprint;
-        PacketHandler.sendToPlayer(p, new ArenaTeamStatePacket(v.session, v.request, match, ++revision, arena, own, reason, v.result, members));
+        TeamId own = TeamMatchManager.getTeam(p);
+        PacketHandler.sendToPlayer(p, new ArenaTeamStatePacket(session, request, match, ++revision,
+                true, own == null ? -1 : own.ordinal(), denial(p), result, members));
     }
-    public static void reset() { viewers.clear(); }
+
+    public static void disconnect(ServerPlayer player) { connections.remove(player.connection); }
+    public static void reset() { connections.clear(); }
 }

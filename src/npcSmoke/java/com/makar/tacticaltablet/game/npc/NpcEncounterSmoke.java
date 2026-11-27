@@ -4,6 +4,8 @@ import com.google.gson.GsonBuilder;
 import com.makar.tacticaltablet.admin.TestModeManager;
 import com.makar.tacticaltablet.core.TacticalTabletMod;
 import com.makar.tacticaltablet.game.GameStateManager;
+import com.makar.tacticaltablet.game.MapSetManager;
+import com.makar.tacticaltablet.game.SetGameMode;
 import com.makar.tacticaltablet.game.lifecycle.MatchState;
 import com.makar.tacticaltablet.game.lives.LivesManager;
 import com.mojang.authlib.GameProfile;
@@ -53,6 +55,7 @@ public final class NpcEncounterSmoke {
                 api = NpcIntegration.connect(server);
                 if ("absent".equals(System.getProperty("tacticaltablet.npcProbe"))) {
                     check(api == null, "TacticalNPC unexpectedly present");
+                    verifyLobbyBorderAndAdminCommands(server);
                     GameStateManager.forceStopMatch(server);
                     TacticalTabletMod.LOGGER.info("TT_NPC_PROBE_ABSENT_PASS"); stage = 99; server.halt(false); return;
                 }
@@ -152,6 +155,10 @@ public final class NpcEncounterSmoke {
                 check(!api.activeIds(match).isEmpty(), "NPCs should still exist before delayed cleanup");
                 check(blocked(player, npc), "ENDING did not immediately revoke NPC damage");
                 NpcKillRewardSmoke.verifyEnding(player, npc);
+                check(server.getCommands().performPrefixedCommand(server.createCommandSourceStack(), "ttgame npc off") == 1,
+                        "NPC disable command failed");
+                check(api.activeIds(match).isEmpty(), "NPC disable command retained current-match NPCs");
+                check(api.activeIds(unrelated).contains(unrelatedNpc), "NPC disable command removed another match's NPC");
                 GameStateManager.forceStopMatch(server);
                 check(api.activeIds(match).isEmpty(), "TT cleanup retained current-match NPCs");
                 check(api.activeIds(unrelated).contains(unrelatedNpc), "TT cleanup removed another match's NPC");
@@ -174,6 +181,7 @@ public final class NpcEncounterSmoke {
                         + "\",\"team\":\"" + orphanTeam + "\",\"chunkX\":" + orphanEntity.chunkPosition().x
                         + ",\"chunkZ\":" + orphanEntity.chunkPosition().z + "}");
                 var disabled = new NpcEncounterConfig();
+                disabled.enabled = true;
                 disabled.minSpawnIntervalSeconds = disabled.maxSpawnIntervalSeconds = 1;
                 write(server, "tacticaltablet_npcs.json", new GsonBuilder().create().toJson(disabled));
                 GameStateManager.startGame(server);
@@ -183,11 +191,11 @@ public final class NpcEncounterSmoke {
                 player.removeTag("in_lobby"); player.addTag("war.playing");
                 stage = 3;
             } else if (stage == 3 && ticks >= 220) {
-                check(api.activeIds(disabledMatch).isEmpty(), "enabled=false spawned NPCs");
+                check(api.activeIds(disabledMatch).isEmpty(), "Admin override did not suspend an enabled profile");
                 GameStateManager.forceStopMatch(server);
                 check(api.activeIds(orphanMatch).contains(orphanNpc), "Disabled-match cleanup removed unrelated recovery NPC");
                 server.getPlayerList().remove(player);
-                TacticalTabletMod.LOGGER.info("TT_NPC_PROBE_PRESENT_PASS actual TT STARTED/RUNNING, lobby gate, group2, capacity, border/no-space, invalid weapon atomicity, NPC death/player counts, outsider/elimination/spectator dynamic native damage gates, immediate ENDING, force stop, scoped/repeated cleanup, enabled=false, saved orphan");
+                TacticalTabletMod.LOGGER.info("TT_NPC_PROBE_PRESENT_PASS actual TT STARTED/RUNNING, lobby gate, group2, capacity, border/no-space, invalid weapon atomicity, NPC death/player counts, outsider/elimination/spectator dynamic native damage gates, immediate ENDING, force stop, scoped/repeated cleanup, admin NPC off, saved orphan");
                 stage = 99; server.halt(false);
             } else if (stage == 5 && ticks >= 70) {
                 check(api.activeIds(orphanMatch).isEmpty(), "Old session still has active NPCs after disk restart");
@@ -206,6 +214,43 @@ public final class NpcEncounterSmoke {
                 stage = 99; server.halt(false);
             }
         } catch (Throwable error) { fail(server, error); }
+    }
+
+    private static void verifyLobbyBorderAndAdminCommands(MinecraftServer server) {
+        var lobby = GameStateManager.getLobbyLevel(server).getWorldBorder();
+        var overworld = server.overworld().getWorldBorder();
+        var original = overworld.createSettings();
+        BlockPos remote = new BlockPos(-24_000, 70, 32_000);
+        try {
+            overworld.setCenter(50_000, -50_000);
+            overworld.setSize(32);
+            overworld.lerpSizeBetween(32, 16, 3000);
+            overworld.setWarningBlocks(11);
+            check(!overworld.isWithinBounds(remote), "Fixture position unexpectedly within match border");
+            check(lobby.isWithinBounds(remote) && lobby.isWithinBounds(BlockPos.ZERO)
+                            && lobby.getLerpRemainingTime() == 0 && lobby.getWarningBlocks() == 0,
+                    "Match border was mirrored into lobby");
+        } finally {
+            overworld.applySettings(original);
+        }
+
+        var commands = server.getCommands();
+        var op = server.createCommandSourceStack();
+        check(!commands.getDispatcher().getRoot().getChild("ttgame").canUse(op.withPermission(0)),
+                "Non-OP has access to game settings");
+        for (SetGameMode mode : List.of(SetGameMode.COMPETITIVE, SetGameMode.CHAOS, SetGameMode.CASUAL, SetGameMode.ARENA)) {
+            String arg = mode.name().toLowerCase(java.util.Locale.ROOT);
+            check(commands.performPrefixedCommand(op, "ttgame mode " + arg) == 1 && MapSetManager.getSetMode() == mode,
+                    "Could not change an unstarted set to " + arg);
+        }
+        check(commands.performPrefixedCommand(op, "ttgame mode next chaos") == 1
+                && MapSetManager.getAdminNextSetMode() == SetGameMode.CHAOS && MapSetManager.isArenaSet(),
+                "Next set selection changed current Arena set");
+        check(commands.performPrefixedCommand(op, "ttgame npc on") == 1, "NPC enable command failed");
+        check(!NpcEncounterManager.prepareArena(server).isEmpty(), "NPC-enabled Arena accepted missing TacticalNPC");
+        check(commands.performPrefixedCommand(op, "ttgame npc off") == 1, "NPC disable command failed");
+        check(NpcEncounterManager.prepareArena(server).isEmpty(), "NPC-disabled Arena rejected missing TacticalNPC");
+        NpcEncounterManager.prepareArenaSession(server);
     }
 
     private static void write(MinecraftServer server, String file, String value) throws Exception {

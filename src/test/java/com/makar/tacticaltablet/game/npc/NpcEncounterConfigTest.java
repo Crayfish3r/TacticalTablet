@@ -13,6 +13,66 @@ import static org.junit.jupiter.api.Assertions.*;
 class NpcEncounterConfigTest {
     @TempDir Path directory;
 
+    @Test void adminCanEnableAValidProfileWithoutRewritingItsSettings() throws Exception {
+        var ordinary = directory.resolve("tacticaltablet_npcs.json");
+        String disabled = "{\"enabled\":false}";
+        Files.writeString(ordinary, disabled);
+        assertTrue(NpcEncounterConfig.load(ordinary, message -> fail(message), new NpcEncounterConfig(), true).enabled);
+        assertFalse(NpcEncounterConfig.load(ordinary, message -> fail(message)).enabled);
+        assertEquals(disabled, Files.readString(ordinary));
+        var arena = directory.resolve("tacticaltablet_arena_npcs.json");
+        Files.writeString(arena, disabled);
+        assertTrue(NpcEncounterConfig.loadArena(arena, message -> fail(message), path -> fail(path.toString()), true).enabled);
+        assertEquals(disabled, Files.readString(arena));
+        Files.writeString(ordinary, "{\"enabled\":false,\"maxActiveNpcs\":0}");
+        assertFalse(NpcEncounterConfig.load(ordinary, message -> {}, new NpcEncounterConfig(), true).enabled);
+    }
+
+    @Test void arenaMigratesOnlyTheExactLegacyProfileAndKeepsOneBackup() throws Exception {
+        String legacy = """
+                {
+                  "maxActiveNpcs": 24, "enabled": true, "maxGroupSize": 4, "minGroupSize": 2,
+                  "minSpawnIntervalSeconds": 20, "maxSpawnIntervalSeconds": 35,
+                  "minDistanceFromPlayers": 40, "maxDistanceFromPlayers": 100, "minDistanceBetweenGroups": 32,
+                  "maxSpawnAttempts": 8, "stopSpawningAtZonePhase": 5, "dimension": "minecraft:overworld",
+                  "allowClanWar": false, "allowSpecialModes": false,
+                  "presets": [
+                    {
+                      "id": "arena_assault", "weight": 8, "minSize": 2, "maxSize": 4,
+                      "weapons": ["tacz:ak47", "tacz:ak47", "tacz:ak47", "tacz:ak47"],
+                      "behavior": "ATTACK", "ammoPolicy": "FINITE", "reserve": 120, "radius": 24
+                    },
+                    {
+                      "id": "arena_patrol", "weight": 2, "minSize": 2, "maxSize": 3,
+                      "weapons": ["tacz:ak47", "tacz:ak47", "tacz:ak47"],
+                      "behavior": "PATROL", "ammoPolicy": "FINITE", "reserve": 120, "radius": 24
+                    }
+                  ]
+                }
+                """;
+        var path = directory.resolve("tacticaltablet_arena_npcs.json");
+        String customized = legacy.replace("\"enabled\": true", "\"enabled\": true, \"customField\": true");
+        Files.writeString(path, customized);
+        var backups = new ArrayList<Path>();
+        var custom = NpcEncounterConfig.loadArena(path, message -> fail(message), backups::add);
+        assertEquals(List.of("HARD", "HARD"), custom.presets.stream().map(NpcEncounterConfig.Preset::difficulty).toList());
+        assertEquals(customized, Files.readString(path));
+        assertTrue(backups.isEmpty());
+
+        Files.writeString(path, legacy);
+        byte[] original = Files.readAllBytes(path);
+        var updated = NpcEncounterConfig.loadArena(path, message -> fail(message), backups::add);
+        assertEquals(List.of("arena_assault", "arena_hard_assault", "arena_patrol", "arena_rpg_pair"),
+                updated.presets.stream().map(NpcEncounterConfig.Preset::id).toList());
+        assertEquals(1, backups.size());
+        assertArrayEquals(original, Files.readAllBytes(backups.get(0)));
+
+        byte[] committed = Files.readAllBytes(path);
+        NpcEncounterConfig.loadArena(path, message -> fail(message), backups::add);
+        assertArrayEquals(committed, Files.readAllBytes(path));
+        assertEquals(1, backups.size());
+    }
+
     @Test void defaultsAreOptInAndMatchRequestedLimits() {
         var c = NpcEncounterConfig.validate(new NpcEncounterConfig(), fail -> fail(fail));
         assertFalse(c.enabled); assertFalse(c.allowClanWar); assertFalse(c.allowSpecialModes);

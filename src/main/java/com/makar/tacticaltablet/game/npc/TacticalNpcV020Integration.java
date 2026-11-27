@@ -5,6 +5,7 @@ import dev.zuma.tacticalnpc.api.SpawnGroupRequest;
 import dev.zuma.tacticalnpc.api.SpawnMemberSpec;
 import dev.zuma.tacticalnpc.api.SpawnResult;
 import dev.zuma.tacticalnpc.api.TacticalNpcMatchApi;
+import dev.zuma.tacticalnpc.compat.GunSupport;
 import dev.zuma.tacticalnpc.core.OrderState;
 import dev.zuma.tacticalnpc.core.NpcDifficulty;
 import dev.zuma.tacticalnpc.entity.TacticalNpcEntity;
@@ -51,6 +52,16 @@ final class TacticalNpcV020Integration implements NpcIntegration {
             @Override public boolean isActive() { return policy.active(); }
             @Override public boolean canAttack(ServerPlayer player) { return policy.canAttack(player); }
         });
+    }
+
+    @Override public String weaponRejection(String weapon) {
+        try {
+            GunSupport.create(new ResourceLocation(weapon));
+            return "";
+        } catch (RuntimeException | LinkageError exception) {
+            String reason = exception.getMessage();
+            return reason == null || reason.isBlank() ? exception.getClass().getSimpleName() : reason;
+        }
     }
 
     @Override public Result spawn(ServerLevel level, UUID matchId, UUID groupId, Vec3 origin,

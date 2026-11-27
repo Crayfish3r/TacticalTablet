@@ -93,7 +93,6 @@ public final class TabletPrototypeClient {
         if (event.phase != TickEvent.Phase.END) return;
         Minecraft mc = Minecraft.getInstance();
         releaseIfUp(mc);
-        TabletArenaTeamsPage.observeConnection();
         if (MOTION.active() && (!valid(mc) || !mc.isWindowActive()
                 || !(mc.screen instanceof TabletPrototypeScreen))) reset();
         MOTION.update(now());

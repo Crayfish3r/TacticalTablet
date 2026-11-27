@@ -15,6 +15,8 @@ import com.makar.tacticaltablet.game.chaos.ChaosSetManager;
 import com.makar.tacticaltablet.game.team.TeamMatchManager;
 import com.makar.tacticaltablet.inventory.InventoryManager;
 import com.makar.tacticaltablet.moderation.ModerModeManager;
+import com.makar.tacticaltablet.mixin.border.BorderDelegateAccessor;
+import com.makar.tacticaltablet.mixin.border.WorldBorderAccessor;
 import com.makar.tacticaltablet.progression.ClassXPManager;
 import com.makar.tacticaltablet.tablet.net.PacketHandler;
 import com.makar.tacticaltablet.tablet.net.ChaosStatePacket;
@@ -33,6 +35,7 @@ import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.border.WorldBorder;
 import net.minecraft.world.phys.Vec3;
 
+import java.util.List;
 import java.util.Optional;
 
 public class LobbyManager {
@@ -60,7 +63,6 @@ public class LobbyManager {
             return;
         }
 
-        relaxLobbyBorder(lobby);
         Optional<Vec3> resolvedSpawn = LobbySpawnResolver.resolve(lobby, player);
         if (resolvedSpawn.isEmpty()) {
             disconnectForUnavailableSpawn(player);
@@ -181,7 +183,6 @@ public class LobbyManager {
         ServerLevel lobby = GameStateManager.getLobbyLevel(server);
         if (lobby != null) {
             clearWeather(lobby);
-            relaxLobbyBorder(lobby);
         }
 
     }
@@ -190,11 +191,21 @@ public class LobbyManager {
         level.setWeatherParameters(20 * 60 * 10, 0, false, false);
     }
 
-    private static void relaxLobbyBorder(ServerLevel lobby) {
+    public static void initializeBorder(MinecraftServer server) {
+        ServerLevel lobby = GameStateManager.getLobbyLevel(server);
+        if (lobby == null) return;
+
         WorldBorder border = lobby.getWorldBorder();
+        WorldBorder overworldBorder = server.overworld().getWorldBorder();
+        // Vanilla mirrors every Overworld update to other dimensions. Detach only the lobby.
+        for (var listener : List.copyOf(((WorldBorderAccessor) overworldBorder).tacticaltablet$getListeners())) {
+            if (listener instanceof BorderDelegateAccessor delegate && delegate.tacticaltablet$getWorldBorder() == border) {
+                overworldBorder.removeListener(listener);
+            }
+        }
         border.setCenter(0.0D, 0.0D);
-        border.setSize(59_999_968.0D);
-        border.setDamageSafeZone(59_999_968.0D);
+        border.setSize(WorldBorder.MAX_SIZE);
+        border.setDamageSafeZone(WorldBorder.MAX_SIZE);
         border.setDamagePerBlock(0.0D);
         border.setWarningBlocks(0);
         border.setWarningTime(0);

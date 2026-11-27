@@ -45,10 +45,23 @@ public final class TeamMatchManager {
         reset(server); arenaMatchId = java.util.Objects.requireNonNull(matchId);
         for (TeamId team : TeamId.standardValues()) teams.put(team, new LinkedHashSet<>());
     }
-    public static List<UUID> arenaMembers(TeamId team) { return List.copyOf(teams.getOrDefault(team, new LinkedHashSet<>())); }
+    static UUID currentArenaRoster() {
+        if (arenaMatchId == null || !com.makar.tacticaltablet.game.MapSetManager.isArenaSet()) return null;
+        var lifecycle = com.makar.tacticaltablet.game.GameStateManager.getLifecycleSnapshot();
+        return lifecycle.state() == com.makar.tacticaltablet.game.lifecycle.MatchState.RUNNING
+                && lifecycle.matchId().filter(arenaMatchId::equals).isPresent()
+                && arenaMatchId.equals(com.makar.tacticaltablet.game.arena.ArenaMatchRuntime.matchId())
+                ? arenaMatchId : null;
+    }
+
+    public static List<UUID> arenaMembers(TeamId team) {
+        if (currentArenaRoster() == null || !isStandardTeam(team)) return List.of();
+        var members = teams.get(team);
+        return members == null ? List.of() : List.copyOf(members);
+    }
     /** Admission is performed by ArenaTeamService, on the same server thread. */
     public static boolean changeArenaTeam(ServerPlayer player, TeamId target) {
-        if (arenaMatchId == null || target != null && !isStandardTeam(target)) return false;
+        if (currentArenaRoster() == null || target != null && !isStandardTeam(target)) return false;
         if (getTeam(player) == target) return true;
         if (target != null && teams.get(target).size() >= 5) return false;
         removeAssignment(player.getUUID());
@@ -568,7 +581,7 @@ public final class TeamMatchManager {
         playerNames.put(player.getUUID(), player.getGameProfile().getName());
     }
 
-    private static String displayName(MinecraftServer server, UUID uuid) {
+    static String displayName(MinecraftServer server, UUID uuid) {
         if (server != null) {
             ServerPlayer online = server.getPlayerList().getPlayer(uuid);
             if (online != null) {

@@ -47,8 +47,15 @@ final class TabletPageShell {
         voting.acceptMapSnapshot(requestId);
         voting.tick();
     }
+    void acceptArenaTeams(com.makar.tacticaltablet.tablet.net.ArenaTeamStatePacket snapshot) {
+        updateInteractivity();
+        teams.update(snapshot);
+    }
+
     void tick() {
         synchronizePhase();
+        updateInteractivity();
+        teams.tick();
         preparation.tick(); profile.tick(preparation); voting.tick(); arenaResults.tick(); shop.update();
         if (voting.takeRefreshRequest()) preparation.refreshWhenIdle();
     }
@@ -72,6 +79,11 @@ final class TabletPageShell {
         preparation.interactive(open && !classDialog.active() && selected == TabletPage.PREPARATION && !votingView() && !arenaResultsView());
         voting.interactive(open && !classDialog.active() && selected == TabletPage.PREPARATION && votingView());
         shop.interactive(open && !classDialog.active() && selected == TabletPage.SHOP);
+        teams.interactive(teamPageInteractive());
+    }
+
+    private boolean teamPageInteractive() {
+        return open && TabletPrototypeClient.isOpen() && selected == TabletPage.CONTRACT_TRACKER && !classDialog.active();
     }
 
     void interactive(boolean value) {
@@ -83,6 +95,7 @@ final class TabletPageShell {
     void hover(double x, double y) {
         synchronizePhase();
         var hit = open ? TabletDisplayProjection.pick(x, y) : null;
+        teams.hover(teamPageInteractive() && hit != null && hit.hardwareKey() == null ? hit.display() : null);
         if (classDialog.active()) {
             classDialog.hover(hit == null ? null : hit.display());
             preparation.hover(null, false); voting.hover(null); shop.hover(null); return;
@@ -102,7 +115,7 @@ final class TabletPageShell {
         } else if (hit.display() != null) {
             pressedDisplayPage = selected;
             if (classDialog.active()) { classDialog.press(hit.display()); return; }
-            if (selected == TabletPage.CONTRACT_TRACKER && TabletArenaTeamsPage.isArena()) { teams.press(hit.display()); return; }
+            if (teamPageInteractive()) { teams.press(hit.display()); return; }
             if (selected == TabletPage.SHOP) { shop.press(hit.display()); return; }
             if (selected != TabletPage.PREPARATION) return;
             if (arenaResultsView()) return;
@@ -113,6 +126,7 @@ final class TabletPageShell {
 
     void release(double x, double y) {
         synchronizePhase(); voting.tick();
+        updateInteractivity();
         TabletPage hardware = pressedHardware, displayPage = pressedDisplayPage;
         pressedHardware = null; pressedDisplayPage = null;
         if (!open) { cancelPress(); return; }
@@ -123,7 +137,7 @@ final class TabletPageShell {
             if (hardware == TabletPage.forHardwareKey(hit.hardwareKey()) && !navigationLocked()) select(hardware);
         } else if (displayPage == selected && hit.hardwareKey() == null && classDialog.active()) {
             classDialog.release(hit.display()); updateInteractivity(); dirty = true;
-        } else if (displayPage == selected && selected == TabletPage.CONTRACT_TRACKER && TabletArenaTeamsPage.isArena()) {
+        } else if (displayPage == selected && teamPageInteractive() && hit.hardwareKey() == null) {
             teams.release(hit.display()); dirty = true;
         } else if (displayPage == selected && selected == TabletPage.SHOP && hit.hardwareKey() == null) {
             shop.release(hit.display()); updateInteractivity(); dirty = true;
@@ -190,7 +204,12 @@ final class TabletPageShell {
                 else TabletPreparationView.render(graphics, preparation);
             }
             case PROFILE -> TabletProfileView.render(graphics, profile, height);
-            case CONTRACT_TRACKER -> { if (TabletArenaTeamsPage.isArena()) teams.render(graphics); else TabletPlaceholderViews.contractTracker(graphics, height); }
+            case CONTRACT_TRACKER -> {
+                if (teams.showsTracker()) {
+                    TabletPlaceholderViews.contractTracker(graphics, height);
+                    teams.renderTrackerFeedback(graphics);
+                } else teams.render(graphics);
+            }
             case SHOP -> TabletShopView.render(graphics, shop);
             case EMPTY_4, EMPTY_5 -> TabletTerminalTheme.background(graphics, TabletTerminalTheme.Kind.SCREEN,
                     TabletTerminalTheme.State.NORMAL, 0, 0, TabletTerminalTheme.LOGICAL_WIDTH, height + 1);

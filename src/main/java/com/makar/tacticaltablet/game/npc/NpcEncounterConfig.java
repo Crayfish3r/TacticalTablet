@@ -2,19 +2,63 @@ package com.makar.tacticaltablet.game.npc;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonParser;
+import com.google.gson.stream.JsonReader;
+import com.google.gson.stream.JsonToken;
 import com.makar.tacticaltablet.storage.AtomicFileStore;
+import com.makar.tacticaltablet.storage.FileSaveResult;
 
 import java.io.IOException;
+import java.io.StringReader;
+import java.math.BigDecimal;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.UUID;
 import java.util.function.Consumer;
 
 /** World-local JSON, like extraction settings. Invalid input fails closed without rewriting it. */
 public final class NpcEncounterConfig {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
+    private static final int MAX_CONFIG_BYTES = 256 * 1024;
+    // Complete output of arenaDefaults() before 9676a9d. Keep independent of current defaults.
+    private static final JsonElement LEGACY_ARENA = JsonParser.parseString("""
+            {
+              "enabled": true,
+              "maxActiveNpcs": 24,
+              "minGroupSize": 2,
+              "maxGroupSize": 4,
+              "minSpawnIntervalSeconds": 20,
+              "maxSpawnIntervalSeconds": 35,
+              "minDistanceFromPlayers": 40.0,
+              "maxDistanceFromPlayers": 100.0,
+              "minDistanceBetweenGroups": 32.0,
+              "maxSpawnAttempts": 8,
+              "stopSpawningAtZonePhase": 5,
+              "dimension": "minecraft:overworld",
+              "allowClanWar": false,
+              "allowSpecialModes": false,
+              "presets": [
+                {
+                  "id": "arena_assault", "weight": 8, "minSize": 2, "maxSize": 4,
+                  "weapons": ["tacz:ak47", "tacz:ak47", "tacz:ak47", "tacz:ak47"],
+                  "behavior": "ATTACK", "ammoPolicy": "FINITE", "reserve": 120, "radius": 24.0
+                },
+                {
+                  "id": "arena_patrol", "weight": 2, "minSize": 2, "maxSize": 3,
+                  "weapons": ["tacz:ak47", "tacz:ak47", "tacz:ak47"],
+                  "behavior": "PATROL", "ammoPolicy": "FINITE", "reserve": 120, "radius": 24.0
+                }
+              ]
+            }
+            """);
     public boolean enabled = false;
     public int maxActiveNpcs = 12;
     public int minGroupSize = 1;
@@ -67,18 +111,140 @@ public final class NpcEncounterConfig {
         return c;
     }
 
+    public static NpcEncounterConfig loadArena(Path path, Consumer<String> diagnostic,
+                                               Consumer<Path> migrated) throws IOException {
+        return loadArena(path, diagnostic, migrated, false);
+    }
+
+    static NpcEncounterConfig loadArena(Path path, Consumer<String> diagnostic,
+                                       Consumer<Path> migrated, boolean forceEnabled) throws IOException {
+        try {
+            if (Files.notExists(path, LinkOption.NOFOLLOW_LINKS)) {
+                var defaults = validateArena(arenaDefaults(), diagnostic);
+                writeArena(path, defaults, null);
+                return defaults;
+            }
+
+            byte[] original = readBounded(path);
+            String json = StandardCharsets.UTF_8.newDecoder().decode(ByteBuffer.wrap(original)).toString();
+            JsonElement source;
+            try (var reader = new JsonReader(new StringReader(json))) {
+                source = GSON.getAdapter(JsonElement.class).read(reader);
+                if (!source.isJsonObject() || reader.peek() != JsonToken.END_DOCUMENT) {
+                    throw new IOException("Expected a single JSON object");
+                }
+            }
+            if (LEGACY_ARENA.equals(source)) {
+                try (var reader = new JsonReader(new StringReader(json))) {
+                    if (matchesLegacy(reader, LEGACY_ARENA)) {
+                        var defaults = validateArena(arenaDefaults(), diagnostic);
+                        Path backup = path.resolveSibling(path.getFileName() + ".pre-difficulty-" + UUID.randomUUID() + ".bak");
+                        requireSaved(new AtomicFileStore().writeBytes(backup, original), "Cannot save migration backup");
+                        if (!Arrays.equals(original, readBounded(backup))) throw new IOException("Invalid migration backup: " + backup);
+                        writeArena(path, defaults, original);
+                        migrated.accept(backup);
+                        return defaults;
+                    }
+                }
+            }
+
+            var parser = new GsonBuilder().registerTypeAdapter(NpcEncounterConfig.class,
+                    (com.google.gson.InstanceCreator<NpcEncounterConfig>) type -> arenaDefaults()).create();
+            NpcEncounterConfig config = parser.fromJson(source, NpcEncounterConfig.class);
+            if (forceEnabled && config != null) config.enabled = true;
+            return validateArena(config, diagnostic);
+        } catch (RuntimeException exception) {
+            throw new IOException("Invalid Arena NPC profile: " + exception.getMessage(), exception);
+        }
+    }
+
+    /** A JSON tree can collapse duplicate keys or round numbers when comparing primitives. */
+    private static boolean matchesLegacy(JsonReader reader, JsonElement expected) throws IOException {
+        if (expected.isJsonObject()) {
+            if (reader.peek() != JsonToken.BEGIN_OBJECT) return false;
+            var fields = expected.getAsJsonObject();
+            var remaining = new HashSet<>(fields.keySet());
+            reader.beginObject();
+            while (reader.hasNext()) {
+                String name = reader.nextName();
+                if (!remaining.remove(name) || !matchesLegacy(reader, fields.get(name))) return false;
+            }
+            reader.endObject();
+            return remaining.isEmpty();
+        }
+        if (expected.isJsonArray()) {
+            if (reader.peek() != JsonToken.BEGIN_ARRAY) return false;
+            reader.beginArray();
+            for (JsonElement member : expected.getAsJsonArray()) {
+                if (!reader.hasNext() || !matchesLegacy(reader, member)) return false;
+            }
+            if (reader.hasNext()) return false;
+            reader.endArray();
+            return true;
+        }
+        var value = expected.getAsJsonPrimitive();
+        if (value.isNumber()) {
+            return reader.peek() == JsonToken.NUMBER
+                    && value.getAsBigDecimal().compareTo(new BigDecimal(reader.nextString())) == 0;
+        }
+        if (value.isBoolean()) return reader.peek() == JsonToken.BOOLEAN && reader.nextBoolean() == value.getAsBoolean();
+        return reader.peek() == JsonToken.STRING && reader.nextString().equals(value.getAsString());
+    }
+
+    private static NpcEncounterConfig validateArena(NpcEncounterConfig config, Consumer<String> diagnostic) throws IOException {
+        var validated = validate(config, diagnostic);
+        if (!validated.enabled) throw new IOException("NPC profile is disabled or invalid");
+        if (!"minecraft:overworld".equals(validated.dimension)) {
+            throw new IOException("Arena NPC dimension must be minecraft:overworld, found " + validated.dimension);
+        }
+        return validated;
+    }
+
+    private static byte[] readBounded(Path path) throws IOException {
+        try (var input = Files.newInputStream(path)) {
+            byte[] bytes = input.readNBytes(MAX_CONFIG_BYTES + 1);
+            if (bytes.length > MAX_CONFIG_BYTES) throw new IOException("NPC config exceeds 256 KiB: " + path);
+            return bytes;
+        }
+    }
+
+    private static void writeArena(Path path, NpcEncounterConfig config, byte[] original) throws IOException {
+        var store = new AtomicFileStore((temporary, target, options) -> {
+            boolean unchanged = original == null ? Files.notExists(target, LinkOption.NOFOLLOW_LINKS)
+                    : Arrays.equals(original, readBounded(target));
+            if (!unchanged) throw new IOException("Source profile changed before commit: " + target);
+            Files.move(temporary, target, options);
+        });
+        requireSaved(store.writeUtf8(path, GSON.toJson(config)), "Cannot commit Arena NPC profile");
+    }
+
+    private static void requireSaved(FileSaveResult result, String operation) throws IOException {
+        if (result.status() == FileSaveResult.Status.SUCCESS) return;
+        var cause = result.exception().orElse(null);
+        throw new IOException(operation + ": " + result.diagnostic()
+                + (cause == null ? "" : " (" + cause.getMessage() + ")"), cause);
+    }
+
     public static NpcEncounterConfig load(Path path, Consumer<String> diagnostic, NpcEncounterConfig defaults) {
+        return load(path, diagnostic, defaults, false);
+    }
+
+    static NpcEncounterConfig load(Path path, Consumer<String> diagnostic, NpcEncounterConfig defaults,
+                                   boolean forceEnabled) {
         try {
             if (!Files.exists(path)) {
                 var saved = new AtomicFileStore().writeUtf8(path, GSON.toJson(defaults));
                 if (saved.status() != com.makar.tacticaltablet.storage.FileSaveResult.Status.SUCCESS)
                     throw new IOException("Cannot commit default NPC config: " + saved.diagnostic());
+                if (forceEnabled) defaults.enabled = true;
                 return defaults;
             }
-            if (Files.size(path) > 262144) throw new IOException("NPC config exceeds 256 KiB");
+            if (Files.size(path) > MAX_CONFIG_BYTES) throw new IOException("NPC config exceeds 256 KiB");
             var parser = new GsonBuilder().registerTypeAdapter(NpcEncounterConfig.class,
                     (com.google.gson.InstanceCreator<NpcEncounterConfig>) type -> defaults).create();
-            return validate(parser.fromJson(Files.readString(path), NpcEncounterConfig.class), diagnostic);
+            NpcEncounterConfig config = parser.fromJson(Files.readString(path), NpcEncounterConfig.class);
+            if (forceEnabled && config != null) config.enabled = true;
+            return validate(config, diagnostic);
         } catch (IOException | RuntimeException exception) {
             diagnostic.accept("NPC config disabled: " + exception.getMessage());
             return new NpcEncounterConfig();

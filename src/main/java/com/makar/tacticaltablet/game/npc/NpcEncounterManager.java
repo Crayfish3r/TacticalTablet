@@ -73,20 +73,44 @@ public final class NpcEncounterManager {
     public static String prepareArena(MinecraftServer server) {
         requireThread(server);
         preparedServer = null; preparedArena = null; preparedIntegration = null;
+        if (Boolean.FALSE.equals(MapSetManager.getNpcEncountersOverride())) return "";
         if (!net.minecraftforge.fml.ModList.get().isLoaded(NpcIntegration.MOD_ID)) return "Арена: TacticalNPC не установлен.";
+        var path = server.getWorldPath(LevelResource.ROOT).resolve("tacticaltablet_arena_npcs.json").toAbsolutePath();
         var diagnostics = new ArrayList<String>();
-        var config = NpcEncounterConfig.load(server.getWorldPath(LevelResource.ROOT).resolve("tacticaltablet_arena_npcs.json"),
-                diagnostics::add, NpcEncounterConfig.arenaDefaults());
-        if (!config.enabled) return "Арена: NPC-профиль отключён или некорректен. " + String.join("; ", diagnostics);
-        if (!"minecraft:overworld".equals(config.dimension)) return "Арена: NPC должны использовать minecraft:overworld активной карты.";
+        NpcEncounterConfig config;
+        try {
+            config = NpcEncounterConfig.loadArena(path, message -> {
+                diagnostics.add(message);
+                TacticalTabletMod.LOGGER.warn("Arena NPC profile {}: {}", path, message);
+            }, backup -> TacticalTabletMod.LOGGER.info("Migrated Arena NPC profile {} (backup: {})", path, backup),
+                    Boolean.TRUE.equals(MapSetManager.getNpcEncountersOverride()));
+        } catch (java.io.IOException exception) {
+            return "Арена: " + path + " — " + exception.getMessage()
+                    + (diagnostics.isEmpty() ? "" : ". " + String.join("; ", diagnostics));
+        }
         var integration = NpcIntegration.connect(server);
         if (integration == null) return "Арена: требуется TacticalNPC " + NpcIntegration.API_VERSION
                 + " с NpcDifficulty HARD/DEFAULT и SpawnMemberSpec(..., difficulty), а также TaCZ 1.1.8-hotfix2. Обновите runtime JAR; подробности в логе.";
+        var checkedWeapons = new HashSet<String>();
+        int maxGroup = Math.min(config.maxGroupSize, config.maxActiveNpcs);
+        for (var preset : config.presets) {
+            int reachableSlots = Math.min(maxGroup, preset.maxSize());
+            if (preset.weight() <= 0 || reachableSlots < Math.max(config.minGroupSize, preset.minSize())) continue;
+            for (String weapon : preset.weapons().subList(0, reachableSlots)) {
+                if (!checkedWeapons.add(weapon)) continue;
+                String reason = integration.weaponRejection(weapon);
+                if (!reason.isEmpty()) {
+                    return "Арена: " + path + " — пресет " + preset.id() + ", оружие " + weapon + ": " + reason;
+                }
+            }
+        }
         preparedServer = server; preparedArena = config; preparedIntegration = integration;
         return "";
     }
 
     public static void prepareArenaSession(MinecraftServer server) {
+        requireThread(server);
+        if (Boolean.FALSE.equals(MapSetManager.getNpcEncountersOverride())) return;
         if (preparedServer != server || preparedArena == null || preparedIntegration == null)
             throw new IllegalStateException("Arena NPC preflight was not completed");
         started(server, true);
@@ -97,6 +121,8 @@ public final class NpcEncounterManager {
 
     private static void started(MinecraftServer server, boolean arenaStart) {
         requireThread(server);
+        Boolean override = MapSetManager.getNpcEncountersOverride();
+        if (Boolean.FALSE.equals(override)) return;
         if (current != null) {
             TacticalTabletMod.LOGGER.error("NPC activation refused: previous session requires cleanup");
             return;
@@ -104,7 +130,7 @@ public final class NpcEncounterManager {
         var snapshot = GameStateManager.getLifecycleSnapshot();
         if (snapshot.state() != (arenaStart ? MatchState.STARTING : MatchState.RUNNING) || snapshot.matchId().isEmpty()) return;
         var config = arenaStart ? preparedArena : NpcEncounterConfig.load(server.getWorldPath(LevelResource.ROOT).resolve("tacticaltablet_npcs.json"),
-                message -> TacticalTabletMod.LOGGER.warn("{}", message));
+                message -> TacticalTabletMod.LOGGER.warn("{}", message), new NpcEncounterConfig(), Boolean.TRUE.equals(override));
         var integration = arenaStart ? preparedIntegration : NpcIntegration.connect(server);
         if (!config.enabled || integration == null || !modeAllowed(config)) return;
         var manager = new NpcEncounterManager(server, integration, config);
@@ -135,7 +161,8 @@ public final class NpcEncounterManager {
     }
 
     private boolean combatRunning() {
-        return config.enabled && modeAllowed(config) && GameStateManager.isRunning(server)
+        return config.enabled && !Boolean.FALSE.equals(MapSetManager.getNpcEncountersOverride())
+                && modeAllowed(config) && GameStateManager.isRunning(server)
                 && (!MapSetManager.isArenaSet() || com.makar.tacticaltablet.game.arena.ArenaMatchRuntime.combatOpen())
                 && schedule.running(GameStateManager.getLifecycleSnapshot(), GameStateManager.getMatchPhase() == MatchPhase.RUNNING);
     }

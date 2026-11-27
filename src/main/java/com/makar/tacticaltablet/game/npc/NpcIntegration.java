@@ -29,6 +29,8 @@ public interface NpcIntegration {
     }
 
     void register(UUID matchId, Policy policy);
+    /** Empty when the current gun resources support this weapon. Called on the server thread. */
+    String weaponRejection(String weapon);
     Result spawn(ServerLevel level, UUID matchId, UUID groupId, Vec3 origin, NpcLoadoutSelector.Selection selection);
     List<UUID> activeIds(UUID matchId);
     void deactivate(UUID matchId);

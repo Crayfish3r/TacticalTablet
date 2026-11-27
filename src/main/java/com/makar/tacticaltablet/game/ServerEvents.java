@@ -636,6 +636,9 @@ public class ServerEvents {
 
     @SubscribeEvent
     public static void onLogout(PlayerEvent.PlayerLoggedOutEvent event) {
+        if (event.getEntity() instanceof ServerPlayer player) {
+            com.makar.tacticaltablet.game.team.ArenaTeamService.disconnect(player);
+        }
         if (event.getEntity() instanceof ServerPlayer local && !ServerRules.enabled(local.server)) {
             PacketHandler.clearC2SRateLimits(local);
             PlayerProgressManager.saveAndUnloadPlayer(local);
@@ -733,7 +736,7 @@ public class ServerEvents {
         SpectatorCameraManager.onPlayerDeath(victim);
 
         if (GameStateManager.isRunning(victim.server)
-                && GameStateManager.getCurrentMode().isTeamMode()) {
+                && TeamMatchManager.usesCombatTeams()) {
             VoiceChatTeamManager.removePlayerFromVoiceGroup(victim);
         }
 
@@ -870,6 +873,7 @@ public class ServerEvents {
         MatchGameRules.apply(event.getServer());
         GameStateManager.resetRuntime(event.getServer());
         GameStateManager.validateRuntimeRequirements(event.getServer());
+        LobbyManager.initializeBorder(event.getServer());
         LobbyBootstrapManager.bootstrap(event.getServer());
         LobbyBootstrapManager.repairMissingFragileBlocks(event.getServer());
         MapRotationManager.onServerStarted(event.getServer());

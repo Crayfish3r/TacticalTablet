@@ -93,7 +93,8 @@ final class TabletVotingView {
                 case ARENA -> net.minecraft.network.chat.Component.translatable(mode.translationKey()).getString(); default -> "Competitive"; };
             text(g, label, rect.x() + 9, rect.y() + 7, rect.width() - 18, TEXT, TEXT_SCALE);
             String detail = MapVoteClientState.getModeVoteCount(mode) + " голосов"
-                    + (selected ? " • Ваш голос" : !page.setReason(mode).isEmpty() ? " • Недоступен" : "");
+                    + (selected ? (MapVoteClientState.areOrdinaryModesEnabled() ? " • Ваш голос" : " • Установлен сервером")
+                    : !page.setReason(mode).isEmpty() ? " • Недоступен" : "");
             text(g, detail, rect.x() + 9, rect.y() + 26, rect.width() - 18,
                     selected ? OLIVE : page.setReason(mode).isEmpty() ? SECONDARY : DISABLED, DETAIL_SCALE);
         }
