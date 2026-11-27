@@ -1,0 +1,7 @@
+{
+  "parent": "builtin/entity",
+  "gui_light": "front",
+  "textures": {
+    "particle": "utopia:item/tablet_tt01"
+  }
+}

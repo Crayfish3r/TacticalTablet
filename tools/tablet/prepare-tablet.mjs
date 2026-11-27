@@ -6,9 +6,8 @@ import {createHash} from 'node:crypto';
 
 export const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 export const sourcePath = resolve(root, 'model-sources/tablet/TacticalTablet_TT01.bbmodel');
-export const modelPath = resolve(root, 'src/main/resources/assets/tacticaltablet/tablet/tt01.json');
-export const texturePath = resolve(root, 'src/main/resources/assets/tacticaltablet/textures/item/tablet_tt01.png');
-const manifestPath = resolve(root, 'src/test/resources/deluxewarfare-runtime-assets.tsv');
+export const modelPath = resolve(root, 'src/main/resources/assets/utopia/tablet/tt01.json');
+export const texturePath = resolve(root, 'src/main/resources/assets/utopia/textures/item/tablet_tt01.png');
 const fail = message => { throw new Error(message); };
 const vector = v => {
   if (!Array.isArray(v) || v.length !== 3 || v.some(n => !Number.isFinite(Number(n)))) fail('Expected numeric vector');
@@ -82,7 +81,6 @@ export function compile(source) {
   if (m.outliner.length !== 1 || m.outliner[0].name !== 'tablet_root') fail('Expected single tablet_root');
   const rootGroup = m.outliner[0], rootOrigin = vector(rootGroup.origin);
   const groups = [], cubes = [], visited = new Set();
-  const controls = {keys: {}, indicators: {}};
   let displaySurface;
   function walk(group, parents = []) {
     if (group.export === false || group.visibility === false) fail('Hidden groups are unsupported in TT01');
@@ -95,6 +93,8 @@ export function compile(source) {
       visited.add(child);
       if (cube.type !== 'cube' || cube.box_uv || cube.rescale || cube.inflate
           || (cube.stretch && cube.stretch.some(n => n !== 1)) || cube.export === false || cube.visibility === false) fail(`Unsupported cube ${cube.name}`);
+      // The authoring file stays intact. Utopia has no page indicator geometry.
+      if (/^key_index_[0-5]$/.test(cube.name)) continue;
       const pivot = vector(cube.origin ?? [0,0,0]), angles = vector(cube.rotation ?? [0,0,0]);
       const f = vector(cube.from), t = vector(cube.to);
       if (t.some((n, i) => n < f[i])) fail('Inverted cube geometry');
@@ -128,23 +128,10 @@ export function compile(source) {
         });
       }
       cubes.push({id: child, name: cube.name, group: group.uuid, origin: pivot, rotation: angles, from: f, to: t, vertices});
-      // Keep named parts separate at runtime; their mesh already has the full pivot/parent transform.
-      const parts = /^hardware_key_[0-5]$/.test(cube.name) ? controls.keys
-        : /^key_index_[0-5]$/.test(cube.name) ? controls.indicators : null;
-      if (parts) {
-        if (parts[cube.name] || vertices.length !== 24) fail(`Missing/duplicate complete control cube ${cube.name}`);
-        parts[cube.name] = child;
-      }
     }
   }
   walk(rootGroup);
   if (!displaySurface) fail('Missing display_surface/screen_glass north face');
-  const keyCount = Object.keys(controls.keys).length;
-  // Original 4.x three-key sources remain readable; the current 5.0 model requires all six.
-  if (!(keyCount === 6 || version.startsWith('4.') && keyCount === 3)
-      || Object.keys(controls.indicators).length !== keyCount
-      || Array.from({length:keyCount}, (_, i) => i).some(i => !controls.keys[`hardware_key_${i}`] || !controls.indicators[`key_index_${i}`]))
-    fail('Expected complete hardware_key_0..5 and key_index_0..5');
   if (visited.size !== elements.size || !groups.some(g => g.name === 'display_surface')) fail('Incomplete hierarchy/display');
   const animations = {};
   for (const a of m.animations) {
@@ -169,8 +156,8 @@ export function compile(source) {
   }
   if (animations.draw?.length !== 0.65 || animations.holster?.length !== 0.45) fail('Expected draw=0.65 and holster=0.45 seconds');
   const data = {format: 1, sourceSha256: createHash('sha256').update(source).digest('hex'),
-    texture: 'tacticaltablet:textures/item/tablet_tt01.png', width, height,
-    rootRotation: vector(rootGroup.rotation), groups, cubes, displaySurface, controls, animations};
+    texture: 'utopia:textures/item/tablet_tt01.png', width, height,
+    rootRotation: vector(rootGroup.rotation), groups, cubes, displaySurface, animations};
   return {json: JSON.stringify(data) + '\n', texture};
 }
 
@@ -181,22 +168,12 @@ function atomicWrite(path, contents) {
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const result = compile(readFileSync(sourcePath, 'utf8'));
-  const assetEntries = [
-    ['tacticaltablet/tablet/tt01.json', Buffer.from(result.json)],
-    ['tacticaltablet/textures/item/tablet_tt01.png', result.texture]
-  ].map(([name, bytes]) => [name, bytes.length, createHash('sha256').update(bytes).digest('hex'),
-    ...(name.endsWith('.png') ? [bytes.readUInt32BE(16), bytes.readUInt32BE(20), [4,6].includes(bytes[25])] : [])].join('\t'));
-  const manifestLines = readFileSync(manifestPath, 'utf8').trimEnd().split(/\r?\n/);
   if (process.argv.includes('--check')) {
     if (readFileSync(modelPath, 'utf8') !== result.json || !readFileSync(texturePath).equals(result.texture)) fail('Generated TT01 resources are stale');
-    if (assetEntries.some(entry => !manifestLines.includes(entry))) fail('TT01 asset manifest is stale');
     console.log('TT01 resources match the source');
   } else {
     atomicWrite(modelPath, result.json);
     atomicWrite(texturePath, result.texture);
-    const names = assetEntries.map(line => line.split('\t')[0]);
-    const header = manifestLines.shift();
-    atomicWrite(manifestPath, [header, ...manifestLines.filter(line => !names.includes(line.split('\t')[0])).concat(assetEntries).sort()].join('\n') + '\n');
     console.log('Prepared TT01 geometry, root animations and embedded PNG');
   }
 }

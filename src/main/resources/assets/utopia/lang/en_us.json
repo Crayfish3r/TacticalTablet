@@ -1,0 +1,8 @@
+{
+  "item.utopia.tablet": "Utopia Tablet",
+  "tablet.utopia.map": "Map",
+  "tablet.utopia.coordinates": "X %s / Y %s / Z %s",
+  "tablet.utopia.hill": "Холм",
+  "tablet.utopia.north": "N ↑",
+  "disconnect.utopia.no_safe_return": "Utopia could not find a safe return point inside Lesetsk. Contact the server administrator."
+}

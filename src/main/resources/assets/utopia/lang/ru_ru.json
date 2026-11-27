@@ -1,0 +1,8 @@
+{
+  "item.utopia.tablet": "Планшет Utopia",
+  "tablet.utopia.map": "Карта",
+  "tablet.utopia.coordinates": "X %s / Y %s / Z %s",
+  "tablet.utopia.hill": "Холм",
+  "tablet.utopia.north": "С ↑",
+  "disconnect.utopia.no_safe_return": "В Лесецке не найдена безопасная точка возврата. Обратитесь к администратору сервера."
+}

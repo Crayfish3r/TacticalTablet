@@ -1,0 +1,22 @@
+THIRD-PARTY NOTICES
+===================
+
+Curios GUI reference assets
+---------------------------
+Copyright (C) 2018-2020 C4
+
+The Curios-derived GUI assets are distributed under the GNU Lesser General
+Public License, version 3 or (at your option) any later version. A copy of
+the license is included as LICENSES/Curios-LGPL-3.0-or-later.txt.
+Project: https://github.com/TheIllusiveC4/Curios
+
+Minecraft reference assets
+--------------------------
+Several vanilla GUI elements are adapted for compatibility with Minecraft
+1.20.1. Minecraft is a trademark of Mojang Studios. This pack is not an
+official Mojang product and is not approved by or associated with Mojang or
+Microsoft.
+
+TacticalTablet assets
+---------------------
+Provided by the TacticalTablet project.

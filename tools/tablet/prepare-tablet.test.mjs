@@ -10,7 +10,7 @@ test('committed geometry and PNG reproduce the source byte for byte', () => {
   assert.equal(result.json, readFileSync(modelPath, 'utf8'));
   assert.deepEqual(result.texture, readFileSync(texturePath));
   const model = JSON.parse(result.json);
-  assert.equal(model.cubes.length, 156);
+  assert.equal(model.cubes.length, 150);
   assert.equal(model.groups.length, 8);
   assert.equal(model.animations.draw.length, 0.65);
   assert.equal(model.animations.holster.length, 0.45);
